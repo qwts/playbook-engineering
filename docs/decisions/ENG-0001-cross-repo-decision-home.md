@@ -56,3 +56,14 @@ Per-repo decisions do not move. Photos keeps its `ADR-NNNN` series in its wiki.
   scratchpad, and now carries records other repos depend on.
 - Deviating from wiki-first means two conventions across the account, which is
   itself a small consistency cost accepted for findability.
+
+## Amendment — 2026-07-19: account tier
+
+The account is on **GitHub Pro**, not Free (see
+[GitHub account reference](../reference/github-account.md)). This does not
+change the decision, but sharpens the org analysis above: Pro already provides
+protected branches and rulesets on **personal private** repos, so private-repo
+branch protection is *not* among the things forming an organization would buy.
+The forcing function for an org remains adding collaborators, which has not
+happened. Recorded because the original reasoning weighed the org option
+without stating the maintained tier it was being compared against.

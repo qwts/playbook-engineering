@@ -46,4 +46,5 @@ reasoning trail survives.
 
 ## Related
 
+- [GitHub account reference](../reference/github-account.md) — account tier (Pro) and what decisions assume about it
 - [`qwts/photos` wiki](https://github.com/qwts/photos/wiki) — photos' own `ADR-NNNN` series and SOPs
