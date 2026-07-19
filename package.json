@@ -7,6 +7,6 @@
     "lint:markdown:fix": "markdownlint docs/ --fix"
   },
   "devDependencies": {
-    "markdownlint-cli": "^0.41.0"
+    "markdownlint-cli": "^0.49.1"
   }
 }
