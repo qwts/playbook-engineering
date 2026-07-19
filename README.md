@@ -2,6 +2,18 @@
 
 This repository is a curated collection of documents, processes, and workflows designed to guide software engineering practices and support the Software Development Life Cycle (SDLC). It serves as a centralized reference for teams to understand requirements gathering, architecture planning, infrastructure, security, observability, and more.
 
+It is also the home for **cross-repo engineering decisions** — see below.
+
+## Engineering decisions (ENG series)
+
+Durable records for decisions that span more than one repository: tooling
+direction, shared conventions, where things live, language and platform choices.
+
+### 📐 [Decision index](docs/decisions/README.md)
+
+Decisions owned by a single repository stay in that repository. The routing test
+is simple: **if exactly one repo would have to change, it is not an ENG record.**
+
 ## Documentation Structure
 
 The `docs/` folder contains 22 comprehensive guides covering the complete Software Development Life Cycle (SDLC), organized by phase:
