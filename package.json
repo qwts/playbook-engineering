@@ -1,0 +1,12 @@
+{
+  "name": "playbook-software-engineering",
+  "version": "1.0.0",
+  "description": "Software engineering planning and documentation",
+  "scripts": {
+    "lint:markdown": "markdownlint docs/",
+    "lint:markdown:fix": "markdownlint docs/ --fix"
+  },
+  "devDependencies": {
+    "markdownlint-cli": "^0.41.0"
+  }
+}
