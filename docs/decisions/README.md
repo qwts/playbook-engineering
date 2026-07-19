@@ -41,6 +41,7 @@ reasoning trail survives.
 | --- | --- | --- |
 | [ENG-0001](ENG-0001-cross-repo-decision-home.md) | Cross-repo decisions live in this repository | Accepted |
 | [ENG-0002](ENG-0002-static-analysis-direction.md) | Static analysis: per-language natives now, central instrument later | Accepted |
+| [ENG-0003](ENG-0003-repo-is-documentation-source-of-truth.md) | The repository is the source of truth for documentation | Accepted |
 
 ## Related
 
