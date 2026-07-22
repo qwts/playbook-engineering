@@ -98,13 +98,25 @@ than arriving ungoverned.
    in this repository and repos point to them; only repo-specific content
    lives in the repo's own AGENTS.md. Shared eval harness wiring is a
    playbook reusable workflow when it stabilizes.
+6. **Existing repos must align — there is no grandfathering.** This record
+   is prescriptive going forward, and "going forward" includes the current
+   repos: each one gets a tracked alignment issue, and a repo is conformant
+   only when (a) AGENTS.md exists and is canonical, (b) every vendor file is
+   a thin adapter with zero duplicated shared semantics, (c) the root file
+   passes a progressive-disclosure review, and (d) agent-facing supply chain
+   (MCP servers, third-party skills, tool permissions) is pinned and
+   least-privilege. New repos (quorum) are born conformant; existing repos
+   converge rather than coexist with the standard.
 
 ## Consequences
 
-- Immediate per-repo work: bookmarkit needs its CLAUDE.md content extracted
-  into a canonical AGENTS.md and its scaffolding-boilerplate
-  copilot-instructions deleted; this playbook repo needs a root AGENTS.md of
-  its own; photos' 287-line root file is due a progressive-disclosure pass.
+- Immediate, mandatory per-repo work (tracked as alignment issues, one per
+  repo): bookmarkit extracts its CLAUDE.md into a canonical AGENTS.md and
+  deletes the scaffolding-boilerplate copilot-instructions; this playbook
+  repo adds a root AGENTS.md of its own; photos and image-trail take
+  progressive-disclosure passes on their 287- and 222-line root files;
+  cartograph audits its (already close) pair for duplication; quorum is
+  bootstrapped conformant with its first code.
 - Eval-gating adds real friction and token cost to what used to be a
   ten-second markdown edit. Accepted deliberately: unmeasured instruction
   growth is how context windows rot. The golden-task sets start small
