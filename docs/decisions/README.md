@@ -44,6 +44,7 @@ reasoning trail survives.
 | [ENG-0003](ENG-0003-repo-is-documentation-source-of-truth.md) | The repository is the source of truth for documentation | Accepted |
 | [ENG-0004](ENG-0004-centralize-shared-cicd.md) | Centralize shared CI/CD in this repository | Accepted |
 | [ENG-0005](ENG-0005-static-analysis-survey-results.md) | Static-analysis survey: close the workflow-security gap, keep natives | Proposed |
+| [ENG-0006](ENG-0006-agentic-primitives-governance.md) | Governance of agentic primitives: one canonical source, progressive disclosure, eval-gated changes | Proposed |
 
 ## Related
 
