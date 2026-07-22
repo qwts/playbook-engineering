@@ -47,8 +47,8 @@ reasoning trail survives.
 | [ENG-0006](ENG-0006-agentic-primitives-governance.md) | Governance of agentic primitives: one canonical source, progressive disclosure, eval-gated changes | Proposed |
 | [ENG-0007](ENG-0007-feature-lifecycle-convention.md) | Feature lifecycle: open with problem/requirements/design/proposed patterns, close with the solution as built | Proposed |
 | [ENG-0008](ENG-0008-shared-sop-inheritance.md) | Shared SOPs: defined once here, inherited by default, varied only by explicit delta | Proposed |
-| [ENG-0009](ENG-0009-documentation-governance-gate.md) | Documentation is gated like code — deterministic checks first, evaluation later | Proposed |
-| [ENG-0010](ENG-0010-docs-evaluation-loop.md) | The docs evaluation loop — adopt with tight bounds, retire on silence | Proposed |
+| [ENG-0009](ENG-0009-documentation-governance-gate.md) | Documentation is gated like code — deterministic checks first, evaluation later | Accepted |
+| [ENG-0010](ENG-0010-docs-evaluation-loop.md) | The docs evaluation loop — adopt with tight bounds, retire on silence | Accepted |
 
 ## Related
 
