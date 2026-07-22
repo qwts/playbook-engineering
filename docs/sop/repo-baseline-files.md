@@ -12,7 +12,7 @@ inherit by default, vary by explicit delta.
 | `AGENTS.md` | Canonical agent context per [ENG-0006](../decisions/ENG-0006-agentic-primitives-governance.md); vendor files are thin adapters. |
 | `CONTRIBUTING.md` | May be a pointer stub into `docs/` (the photos pattern). |
 | `.github/CODEOWNERS` | Minimum: `* @qwts` plus explicit `/.github/` ownership. |
-| Feature issue template | The shared [ENG-0007](../decisions/ENG-0007-feature-lifecycle-convention.md) form; repos may add fields, not drop sections. |
+| Feature issue template | The shared [feature-lifecycle](feature-lifecycle.md) form ([ENG-0007](../decisions/ENG-0007-feature-lifecycle-convention.md)); repos may add fields, not drop sections. |
 
 ## Required when applicable
 
@@ -39,3 +39,4 @@ secret scanning + push protection and Dependabot security updates **on**
 ## Changelog
 
 - 2026-07-22 — initial version, from the basic-docs audit following PR #8.
+- 2026-07-22 — point the feature-template row at the new [feature-lifecycle SOP](feature-lifecycle.md) (playbook#9).

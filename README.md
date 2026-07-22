@@ -53,6 +53,7 @@ Each document includes navigation links, prerequisites, and cross-references to 
 ## Shared standards and tooling
 
 - [Shared SOPs](docs/sop/repo-baseline-files.md) — org-wide standard operating procedures, inherited by every repo (ENG-0008).
+- [Feature lifecycle](docs/sop/feature-lifecycle.md) — the shared feature issue form and the closeout every feature records at close (ENG-0007).
 - [Documentation governance](docs/reference/documentation-governance.md) — the `docs-gov` gate: deterministic checks that keep docs agent-readable, consumable by other repos as a reusable workflow.
 - [Documentation style guide](docs/23-documentation_style_guide.md) — conventions for writing docs in this playbook.
 - [Contributing](CONTRIBUTING.md) — how changes to this repository land.
