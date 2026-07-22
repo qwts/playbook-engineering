@@ -1,0 +1,32 @@
+{
+  "include": ["docs/**/*.md", "README.md", "AGENTS.md"],
+  "indexes": ["README.md"],
+  "tokenBudgets": {
+    "perDoc": 200,
+    "bankSlack": 0.25,
+    "overrides": [
+      { "path": "docs/big.md", "budget": 400 },
+      { "path": "docs/good.md", "budget": 1000, "reason": "kept roomy to exercise the bank-the-win finding" },
+      { "path": "docs/nonexistent.md", "budget": 100, "reason": "points nowhere on purpose" }
+    ],
+    "contextSets": [
+      { "name": "ctx-over", "entrypoints": ["AGENTS.md"], "budget": 50 },
+      { "name": "ctx-bank", "entrypoints": ["AGENTS.md"], "budget": 100000 }
+    ]
+  },
+  "structure": {
+    "summaryWithinTokens": 60,
+    "requiredFields": [
+      {
+        "glob": "docs/adr/ADR-*.md",
+        "fields": [
+          { "name": "Status", "pattern": "^(Proposed|Accepted|Superseded)" },
+          "Date"
+        ]
+      }
+    ]
+  },
+  "antiPatterns": {
+    "terminology": [{ "canonical": "lightbox", "aliases": ["image viewer"] }]
+  }
+}

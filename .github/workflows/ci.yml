@@ -1,0 +1,41 @@
+# Playbook CI: this repo gates itself with the tooling it ships. Per
+# ENG-0004, this must stay green before the v1 tag ever moves — a defect in
+# the reusable workflow breaks every consumer at once, and this is the gate
+# that catches it first.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: docs-gov unit tests
+        run: npm test
+      - name: markdownlint
+        run: |
+          npm ci
+          npm run lint:markdown
+
+  # Exercises the reusable workflow itself, from the local checkout rather
+  # than the v1 tag, so a broken change to it fails here and not in photos.
+  docs-gov:
+    uses: ./.github/workflows/docs-governance.yml
+    with:
+      use-local-tooling: true

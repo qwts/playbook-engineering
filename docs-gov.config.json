@@ -1,0 +1,40 @@
+{
+  "include": ["docs/**/*.md", "README.md", "CONTRIBUTING.md", "usage.md"],
+  "indexes": ["README.md"],
+  "tokenBudgets": {
+    "perDoc": 2600,
+    "bankSlack": 0.25,
+    "overrides": [
+      {
+        "path": "usage.md",
+        "budget": 4000,
+        "reason": "walkthrough of the full playbook flow; splitting it would break the single narrative it exists to provide"
+      }
+    ],
+    "contextSets": []
+  },
+  "structure": {
+    "maxHeadingDepth": 4,
+    "summaryWithinTokens": 250,
+    "requiredFields": [
+      {
+        "glob": "docs/decisions/ENG-*.md",
+        "fields": [
+          { "name": "Status", "pattern": "^(Proposed|Accepted|Superseded by ENG-\\d{4})$" },
+          { "name": "Date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+        ]
+      }
+    ]
+  },
+  "antiPatterns": {
+    "positionalReferences": true,
+    "unresolvedPlaceholders": true,
+    "duplicateParagraphs": { "minLength": 160, "allow": [] },
+    "terminology": []
+  },
+  "integrity": {
+    "links": true,
+    "orphans": true,
+    "stalePaths": { "roots": ["docs", "tools"] }
+  }
+}

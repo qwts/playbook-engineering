@@ -1,0 +1,4 @@
+{
+  "include": ["docs/**/*.md", "README.md"],
+  "indexes": ["README.md"]
+}

@@ -1,0 +1,74 @@
+# Reusable documentation-governance gate (ENG-0009, issue #2).
+#
+# Consumers call this per ENG-0004's delivery model:
+#
+#   jobs:
+#     docs-gov:
+#       uses: qwts/playbook-engineering/.github/workflows/docs-governance.yml@v1
+#
+# The caller repo provides its own docs-gov.config.json; the check
+# implementation is fetched from this repo, so a governance fix propagates to
+# every consumer without per-repo edits. The CLI is zero-dependency — no npm
+# install happens anywhere in this job.
+name: Docs governance
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        description: Path to the caller's docs-gov config
+        type: string
+        default: docs-gov.config.json
+      tooling-ref:
+        description: Ref of qwts/playbook-engineering to take the checks from
+        type: string
+        default: v1
+      use-local-tooling:
+        description: Run the checks from the caller's own checkout (this repo's self-test; exercises the un-tagged tooling before v1 moves)
+        type: boolean
+        default: false
+
+jobs:
+  docs-gov:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch docs-gov tooling
+        if: ${{ !inputs.use-local-tooling }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: qwts/playbook-engineering
+          ref: ${{ inputs.tooling-ref }}
+          path: .docs-gov/tooling
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Run docs-gov
+        env:
+          # Expanded via env, never inlined into the script — the ENG-0005
+          # workflow-injection lesson.
+          CONFIG: ${{ inputs.config }}
+          USE_LOCAL: ${{ inputs.use-local-tooling }}
+        run: |
+          if [ "$USE_LOCAL" = "true" ]; then
+            CLI=tools/docs-gov/docs-gov.mjs
+          else
+            CLI=.docs-gov/tooling/tools/docs-gov/docs-gov.mjs
+          fi
+          node "$CLI" --config "$CONFIG" --report docs-gov-report.json
+
+      - name: Upload drift report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-gov-report
+          path: docs-gov-report.json
+          if-no-files-found: ignore
