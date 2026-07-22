@@ -89,9 +89,14 @@ canonical form of the consumption path in the decision is:
 uses: qwts/playbook-engineering/.github/workflows/<name>.yml@v1
 ```
 
-Consumers already pinned to the old path keep working through GitHub's rename
-redirect; new wiring should use the canonical path. The pinning model and the
-CI-gated `v1` tag are unaffected. The original snippet above is left as
+GitHub's rename redirect covers git operations and web links but **not
+Actions**: per
+[GitHub's renaming documentation](https://docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository),
+calls to an action or workflow hosted by a renamed repository are not
+redirected and fail with `repository not found`. Any consumer whose `uses:`
+line still names the old repo must migrate it to the canonical path — this is
+a required edit, not an optional cleanup. The pinning model and the CI-gated
+`v1` tag are otherwise unaffected. The original snippet above is left as
 written, per the rule that accepted records are amended, not rewritten.
 
 ## References
