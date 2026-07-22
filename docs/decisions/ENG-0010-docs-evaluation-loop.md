@@ -16,7 +16,7 @@ The experiment has now been run. A 16-task benchmark (questions an agent
 must answer from the docs alone, deterministic regex grading, an 11/5
 train/validation split), a runner that stages any git revision of the docs
 and asks a fresh headless agent each question, and a comparator that accepts
-a revision only if the held-out validation score does not regress. Measured
+a revision only if the held-out validation score strictly improves. Measured
 on two real revisions with a haiku-class executor
 ([results](../../tools/docs-eval/results/)):
 

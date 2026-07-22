@@ -123,6 +123,11 @@ export function score(benchmark, answers) {
   });
   const rate = (split) => {
     const subset = perTask.filter((t) => !split || t.split === split);
+    // Fail fast rather than emit NaN: a result file with a hollow split would
+    // silently corrupt every later comparison.
+    if (subset.length === 0) {
+      throw new Error(`benchmark has no ${split ?? ''} tasks — a score over zero tasks is meaningless`);
+    }
     return subset.filter((t) => t.pass).length / subset.length;
   };
   return { perTask, scores: { overall: rate(null), train: rate('train'), validation: rate('validation') } };

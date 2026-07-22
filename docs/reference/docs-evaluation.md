@@ -6,7 +6,7 @@ The Phase 2 companion to [documentation governance](documentation-governance.md)
 
 1. **Benchmark** — [`tools/docs-eval/benchmark.json`](../../tools/docs-eval/benchmark.json) holds tasks an agent should complete from the docs alone ("which gate enforces X", "what is the routing test for Y"). Each task carries deterministic grading regexes (`mustMatch`, all case-insensitive) — no LLM judge, so a grade never flakes. Tasks are split **train / validation**: train tasks may inform doc edits; validation tasks are held out.
 2. **Run** — [`tools/docs-eval/run.mjs`](../../tools/docs-eval/run.mjs) stages the doc set from a git ref (or the working tree) into a temp dir, asks a fresh headless agent each question with that dir as its entire world (so code cannot answer for the docs), and grades. `--answers file.json` grades pre-collected answers instead, decoupling the executor from the grader.
-3. **Gate** — [`tools/docs-eval/compare.mjs`](../../tools/docs-eval/compare.mjs) compares two result files and ACCEPTs a doc revision only if the held-out validation score does not regress and something improved. Train-split gains alone are rejected as benchmark overfitting. This is the SkillOpt validation discipline, and the same ratchet logic as the coverage floors.
+3. **Gate** — [`tools/docs-eval/compare.mjs`](../../tools/docs-eval/compare.mjs) compares two result files and ACCEPTs a doc revision only if the held-out validation score strictly improves. Train-split gains with flat validation are rejected as benchmark overfitting; if validation sits at its ceiling, the fix is extending the validation set, not loosening the gate. This is the SkillOpt validation discipline, and the same ratchet logic as the coverage floors.
 
 ## Running
 

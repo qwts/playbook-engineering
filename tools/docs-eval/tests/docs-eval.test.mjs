@@ -57,13 +57,24 @@ function runCompare(baselineScores, candidateScores) {
   }
 }
 
-test('compare accepts only held-out improvement', () => {
+test('compare accepts only strict held-out improvement', () => {
   const base = { train: 0.6, validation: 0.5 };
   assert.equal(runCompare(base, { train: 0.6, validation: 0.8 }).accepted, true);
-  // Validation regression rejected even when train improves — the overfit case.
+  // Validation improvement is the evidence, even if train slipped.
+  assert.equal(runCompare(base, { train: 0.4, validation: 0.8 }).accepted, true);
+  // Validation regression rejected even when train improves.
   assert.equal(runCompare(base, { train: 1.0, validation: 0.4 }).accepted, false);
   // No movement anywhere: not defended by evidence.
   assert.equal(runCompare(base, { train: 0.6, validation: 0.5 }).accepted, false);
-  // Train-only improvement with validation flat is allowed through.
-  assert.equal(runCompare(base, { train: 0.8, validation: 0.5 }).accepted, true);
+  // Train-only improvement with validation flat is overfitting — rejected.
+  const trainOnly = runCompare(base, { train: 0.8, validation: 0.5 });
+  assert.equal(trainOnly.accepted, false);
+  assert.match(trainOnly.out, /overfit/i);
+});
+
+test('score fails fast on an empty split instead of emitting NaN', () => {
+  assert.throws(
+    () => score({ tasks: [{ id: 'a', split: 'train', mustMatch: ['x'] }] }, { a: 'x' }),
+    /no validation tasks/,
+  );
 });
