@@ -1,6 +1,6 @@
 # ENG-0009: Documentation is gated like code — deterministic checks first, evaluation later
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-07-22
 
 ## Context

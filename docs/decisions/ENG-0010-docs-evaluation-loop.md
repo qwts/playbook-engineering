@@ -1,6 +1,6 @@
 # ENG-0010: The docs evaluation loop — adopt with tight bounds, retire on silence
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-07-22
 
 ## Context
