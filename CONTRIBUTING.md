@@ -18,3 +18,6 @@ records), shared SOPs, and reusable CI. How work moves here:
 - **Shared CI** ([ENG-0004](docs/decisions/ENG-0004-centralize-shared-cicd.md)):
   reusable workflows are consumed by other repos at `@v1`; never move the tag
   without the playbook-side CI gate green.
+- **Agent primitives**: `AGENTS.md`, skills, prompts, and MCP config move
+  through the same PR review as source code — see
+  [AGENTS.md](AGENTS.md) and [ENG-0006](docs/decisions/ENG-0006-agentic-primitives-governance.md).

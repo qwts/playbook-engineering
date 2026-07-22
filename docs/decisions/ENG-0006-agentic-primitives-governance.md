@@ -137,6 +137,8 @@ than arriving ungoverned.
 
 ## References
 
+- [Org-wide agent conventions](../reference/agent-conventions.md) — the shared working agreement this record's decision item 5 places in this repository; every repo's `AGENTS.md` links here instead of restating it
+- [Agentic primitives conformance checklist](../reference/agentic-primitives-conformance-checklist.md) — the operationalized §6 checklist per-repo alignment issues link to
 - [ENG-0002](ENG-0002-static-analysis-direction.md) — the "agents write most of the code, quality must be machine-checkable" premise this extends to the agents' own configuration
 - [ENG-0003](ENG-0003-repo-is-documentation-source-of-truth.md) / [ENG-0004](ENG-0004-centralize-shared-cicd.md) — placement and shared-workflow delivery model
 - [ENG-0005](ENG-0005-static-analysis-survey-results.md) — the supply-chain pinning direction MCP/skill governance mirrors
