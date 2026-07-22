@@ -32,10 +32,10 @@ body:
     attributes:
       label: 2. Requirements
       description: Numbered, testable statements. Each one becomes an acceptance criterion that tests and review trace back to.
-      value: |
-        1.
-        2.
-        3.
+      placeholder: |
+        1. <testable requirement>
+        2. <testable requirement>
+        3. <testable requirement>
     validations:
       required: true
   - type: textarea

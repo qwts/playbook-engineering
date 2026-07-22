@@ -41,9 +41,9 @@ leaving the deviation unrecorded is the failure this catches. Name any pattern t
 emerged so the org's shared vocabulary grows rather than fragments.
 
 **Agents:** post this closeout before you close any feature you worked on. Review
-culture holds humans to the same bar. Closed features whose closeouts exist are the
-source [ENG-0006](../decisions/ENG-0006-agentic-primitives-governance.md)'s golden-task
-evals draw from — the closeout is the artifact those evals need, not paperwork.
+culture holds humans to the same bar. Closed features whose closeouts exist are what
+[ENG-0006](../decisions/ENG-0006-agentic-primitives-governance.md)'s golden-task evals
+draw from — the closeout is the artifact those evals need, not paperwork.
 
 ### Closeout comment template
 

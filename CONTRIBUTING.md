@@ -11,7 +11,7 @@ records), shared SOPs, and reusable CI. How work moves here:
   [ENG-0008](docs/decisions/ENG-0008-shared-sop-inheritance.md) — baseline
   edits here propagate to every repo, so changes go through PR review with
   the changelog updated.
-- **Workflow**: branch → PR → review → merge to `master`. Features follow the
+- **Workflow**: branch → PR → review → merge to `main`. Features follow the
   [feature-lifecycle SOP](docs/sop/feature-lifecycle.md)
   ([ENG-0007](docs/decisions/ENG-0007-feature-lifecycle-convention.md)):
   problem, requirements, design, proposed patterns at open; closeout at close.
