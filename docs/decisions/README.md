@@ -43,6 +43,7 @@ reasoning trail survives.
 | [ENG-0002](ENG-0002-static-analysis-direction.md) | Static analysis: per-language natives now, central instrument later | Accepted |
 | [ENG-0003](ENG-0003-repo-is-documentation-source-of-truth.md) | The repository is the source of truth for documentation | Accepted |
 | [ENG-0004](ENG-0004-centralize-shared-cicd.md) | Centralize shared CI/CD in this repository | Accepted |
+| [ENG-0005](ENG-0005-static-analysis-survey-results.md) | Static-analysis survey: close the workflow-security gap, keep natives | Proposed |
 
 ## Related
 
