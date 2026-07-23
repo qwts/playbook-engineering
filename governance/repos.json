@@ -48,6 +48,22 @@
       "sharedCi": false,
       "delta": "",
       "note": "Pure consumer, created 2026-07-22; inherits from day one."
+    },
+    {
+      "name": "agent-bot-identity",
+      "visibility": "public",
+      "status": "onboarding",
+      "sharedCi": false,
+      "delta": "",
+      "note": "Extracted from this repo's tools/agent-bot (ENG-0016) as a standalone, shareable tool."
+    },
+    {
+      "name": "codex-rules-editor",
+      "visibility": "public",
+      "status": "onboarding",
+      "sharedCi": false,
+      "delta": "",
+      "note": ""
     }
   ]
 }

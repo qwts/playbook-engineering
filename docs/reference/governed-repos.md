@@ -65,4 +65,6 @@ generated table below by hand.
 | `cartograph` | public | active | no | Branch prefixes feat/ fix/ chore/ docs/; issue-before-branch; Rust gate (fmt, clippy -D warnings, test); spec/traceability artifacts in the same PR. |
 | `bookmarkit` | public | active | no | — |
 | `quorum` | public | active | no | — |
+| `agent-bot-identity` | public | onboarding | no | — |
+| `codex-rules-editor` | public | onboarding | no | — |
 <!-- END GENERATED governed-repos -->
