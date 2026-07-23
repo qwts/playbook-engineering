@@ -16,6 +16,11 @@ substitute the name the App was actually registered under.
    - **Repository permissions:** Contents *Read and write*; Pull requests
      *Read and write*; Issues *Read and write*. Metadata read-only is added
      automatically. Nothing else.
+   - **Identifying and authorizing users** and **Post installation:** leave
+     every field blank and every box unchecked — that section configures
+     user-to-server OAuth, where the App acts *as a signed-in user*. A token
+     authorized by `qwts` attributes actions to `qwts`, which recreates the
+     self-approval deadlock; the bot only ever uses installation tokens.
    - **Where can this GitHub App be installed?** Only on this account.
 2. After creating, note the **App ID** shown at the top of the App's page.
 3. **Generate a private key** on the same page. Move the downloaded `.pem`
