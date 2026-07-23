@@ -82,9 +82,11 @@ In a configured worktree, commit attribution and no-signing are already
 applied by the post-checkout hook. Only outside one (or with the hook not
 installed) set them manually — a bot commit signed with the human's GPG/SSH
 key shows **Unverified** on GitHub, because the key's identity does not match
-the bot's committer email:
+the bot's committer email. The manual block requires `GH_AGENT_APP`, so name
+the App first:
 
 ```bash
+export GH_AGENT_APP=qwts-claude-agent   # the App this task authors as
 BOT_UID=$(gh api "users/${GH_AGENT_APP}%5Bbot%5D" --jq .id)
 export GIT_AUTHOR_NAME="${GH_AGENT_APP}[bot]" GIT_COMMITTER_NAME="${GH_AGENT_APP}[bot]"
 export GIT_AUTHOR_EMAIL="${BOT_UID}+${GH_AGENT_APP}[bot]@users.noreply.github.com" GIT_COMMITTER_EMAIL="${BOT_UID}+${GH_AGENT_APP}[bot]@users.noreply.github.com"
