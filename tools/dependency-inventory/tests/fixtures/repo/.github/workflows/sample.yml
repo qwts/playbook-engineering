@@ -1,0 +1,11 @@
+name: Sample
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/local-thing
+      - name: Third party, short ref
+        uses: some/action@abc123

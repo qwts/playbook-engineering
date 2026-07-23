@@ -1,0 +1,55 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "components": [
+    {
+      "type": "library",
+      "name": "lodash",
+      "version": "4.17.21",
+      "purl": "pkg:npm/lodash@4.17.21",
+      "licenses": [{ "license": { "id": "MIT" } }]
+    },
+    {
+      "type": "library",
+      "name": "eslint",
+      "version": "9.0.0",
+      "purl": "pkg:npm/eslint@9.0.0",
+      "licenses": [{ "license": { "id": "MIT" } }]
+    },
+    {
+      "type": "library",
+      "name": "prettier",
+      "version": "3.0.0",
+      "purl": "pkg:npm/prettier@3.0.0",
+      "licenses": [{ "license": { "name": "The Prettier License" } }]
+    },
+    {
+      "type": "library",
+      "group": "@types",
+      "name": "node",
+      "version": "20.0.0",
+      "purl": "pkg:npm/%40types/node@20.0.0",
+      "licenses": [{ "expression": "(MIT OR Apache-2.0)" }]
+    },
+    {
+      "type": "library",
+      "name": "serde",
+      "version": "1.0.0",
+      "purl": "pkg:cargo/serde@1.0.0",
+      "licenses": [{ "license": { "name": "MIT OR Apache-2.0" } }]
+    },
+    {
+      "type": "library",
+      "name": "criterion",
+      "version": "0.5.0",
+      "purl": "pkg:cargo/criterion@0.5.0",
+      "licenses": [{ "license": { "id": "Apache-2.0" } }]
+    },
+    {
+      "type": "library",
+      "name": "mystery-lib",
+      "version": "1.0.0",
+      "purl": "pkg:npm/mystery-lib@1.0.0"
+    }
+  ]
+}

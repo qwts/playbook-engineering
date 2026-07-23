@@ -1,0 +1,12 @@
+{
+  "name": "fixture-repo",
+  "version": "1.0.0",
+  "dependencies": {
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "@types/node": "^20.0.0"
+  }
+}

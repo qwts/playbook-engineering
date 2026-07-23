@@ -1,0 +1,21 @@
+{
+  "comment": "Fallback config the central catalog uses for a fleet repo that has not yet added its own dependency-inventory.config.json. Generic globs across the ecosystems the fleet uses (npm, cargo). A repo overrides this by committing its own config.",
+  "manifests": {
+    "npm": ["package.json"],
+    "cargo": ["Cargo.toml"]
+  },
+  "workflows": [".github/workflows/*.yml", ".github/workflows/*.yaml"],
+  "toolConfigs": [
+    ".markdownlint.json",
+    ".markdownlint.jsonc",
+    ".eslintrc*",
+    "eslint.config.*",
+    ".prettierrc*",
+    "prettier.config.*",
+    "tsconfig*.json",
+    "deny.toml",
+    "rustfmt.toml",
+    ".rustfmt.toml",
+    "clippy.toml"
+  ]
+}

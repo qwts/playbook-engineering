@@ -1,0 +1,146 @@
+# Fleet dependency & tooling catalog (ENG-0011).
+#
+# The cross-repo "avoid recreating the wheel" surface: fans out over the
+# governed fleet listed in inventory-fleet.json, builds each repo's inventory
+# (Syft SBOM + the normalizer this repo ships), and aggregates them into one
+# catalog artifact — which tools are already standard, which licenses are in
+# use, and which GitHub Actions are still unpinned across the fleet.
+#
+# Report-only, and on demand or weekly — never a merge gate.
+#
+# Prerequisite: a repo-scoped token in the FLEET_INVENTORY_TOKEN secret with
+# read access to the fleet repos (some are private). Provision it before the
+# first run; without it the cross-repo checkouts fail.
+name: Fleet inventory catalog
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays 06:00 UTC. Weekly is enough for a trend/reuse artifact.
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: inventory-catalog-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fleet:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.read.outputs.matrix }}
+      owner: ${{ steps.read.outputs.owner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: read
+        run: |
+          echo "matrix=$(jq -c '.repos' inventory-fleet.json)" >> "$GITHUB_OUTPUT"
+          echo "owner=$(jq -r '.owner' inventory-fleet.json)" >> "$GITHUB_OUTPUT"
+
+  inventory:
+    needs: fleet
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJSON(needs.fleet.outputs.matrix) }}
+    steps:
+      - name: Check out target repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ needs.fleet.outputs.owner }}/${{ matrix.repo }}
+          token: ${{ secrets.FLEET_INVENTORY_TOKEN }}
+          path: target
+          persist-credentials: false
+
+      - name: Check out inventory tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: qwts/playbook-engineering
+          ref: v1
+          path: tooling
+          persist-credentials: false
+
+      - name: Generate SBOM (CycloneDX)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: target
+          format: cyclonedx-json
+          output-file: sbom.json
+          upload-artifact: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Normalize inventory
+        env:
+          REPO: ${{ matrix.repo }}
+          # Provenance stamp: the catalog run's own commit, so a re-run diffs clean.
+          GENERATED_AT: ${{ github.sha }}
+        run: |
+          # Use the repo's own config if present; otherwise the shipped default,
+          # copied in so the config path stays relative to the target root.
+          if [ ! -f target/dependency-inventory.config.json ]; then
+            cp tooling/inventory-defaults.config.json target/dependency-inventory.config.json
+          fi
+          node tooling/tools/dependency-inventory/inventory.mjs \
+            --sbom sbom.json \
+            --config dependency-inventory.config.json \
+            --root target \
+            --repo "$REPO" \
+            --generated-at "$GENERATED_AT" \
+            --report "$REPO.inventory.json"
+
+      - name: Upload per-repo inventory
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: inv-${{ matrix.repo }}
+          path: ${{ matrix.repo }}.inventory.json
+          if-no-files-found: ignore
+
+  catalog:
+    needs: inventory
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download per-repo inventories
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: inventories
+          pattern: inv-*
+          merge-multiple: true
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Aggregate catalog
+        env:
+          GENERATED_AT: ${{ github.sha }}
+        run: |
+          node tools/dependency-inventory/inventory.mjs \
+            --aggregate inventories \
+            --generated-at "$GENERATED_AT" \
+            --report CATALOG.json \
+            --markdown CATALOG.md
+
+      - name: Upload fleet catalog
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fleet-catalog
+          path: |
+            CATALOG.json
+            CATALOG.md
+          if-no-files-found: ignore

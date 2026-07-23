@@ -1,0 +1,8 @@
+{
+  "manifests": {
+    "npm": ["package.json"],
+    "cargo": ["Cargo.toml"]
+  },
+  "workflows": [".github/workflows/*.yml", ".github/workflows/*.yaml"],
+  "toolConfigs": [".markdownlint.json", "tsconfig*.json", "deny.toml"]
+}

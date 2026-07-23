@@ -1,0 +1,11 @@
+{
+  "owner": "qwts",
+  "comment": "Governed repos the central catalog fans out over. Keep in sync with the fleet surveyed in ENG-0005 and docs/reference/github-account.md. A repo appears here once it has code and its own dependency-inventory.config.json.",
+  "repos": [
+    "photos",
+    "cartograph",
+    "image-trail",
+    "bookmarkit",
+    "quorum"
+  ]
+}

@@ -49,6 +49,7 @@ reasoning trail survives.
 | [ENG-0008](ENG-0008-shared-sop-inheritance.md) | Shared SOPs: defined once here, inherited by default, varied only by explicit delta | Accepted |
 | [ENG-0009](ENG-0009-documentation-governance-gate.md) | Documentation is gated like code — deterministic checks first, evaluation later | Accepted |
 | [ENG-0010](ENG-0010-docs-evaluation-loop.md) | The docs evaluation loop — adopt with tight bounds, retire on silence | Accepted |
+| [ENG-0011](ENG-0011-dependency-inventory.md) | Inventory dependencies and tooling across the fleet — report-only, Syft SBOM plus a shared normalizer | Proposed |
 
 ## Related
 

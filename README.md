@@ -56,6 +56,7 @@ Each document includes navigation links, prerequisites, and cross-references to 
 - [Org-wide agent conventions](docs/reference/agent-conventions.md) — the shared agent working agreement every repo's `AGENTS.md` links to (ENG-0006).
 - [Agentic primitives conformance checklist](docs/reference/agentic-primitives-conformance-checklist.md) — the ENG-0006 §6 checklist per-repo alignment issues link to.
 - [Documentation governance](docs/reference/documentation-governance.md) — the `docs-gov` gate: deterministic checks that keep docs agent-readable, consumable by other repos as a reusable workflow.
+- [Dependency & tooling inventory](docs/reference/dependency-inventory.md) — the report-only inventory of dependencies, licenses, and tooling across governed repos, consumed as a reusable workflow (ENG-0011).
 - [Documentation style guide](docs/23-documentation_style_guide.md) — conventions for writing docs in this playbook.
 - [Contributing](CONTRIBUTING.md) — how changes to this repository land.
 

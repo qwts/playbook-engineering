@@ -39,3 +39,10 @@ jobs:
     uses: ./.github/workflows/docs-governance.yml
     with:
       use-local-tooling: true
+
+  # Same self-test for the dependency inventory: runs Syft + the normalizer
+  # from this checkout so a broken change fails here before the v1 tag moves.
+  dependency-inventory:
+    uses: ./.github/workflows/dependency-inventory.yml
+    with:
+      use-local-tooling: true
