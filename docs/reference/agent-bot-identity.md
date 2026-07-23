@@ -96,28 +96,43 @@ Agent checkouts must use **HTTPS remotes**. An SSH remote (`git@github.com:…`)
 authenticates the push with the human's SSH key regardless of `GH_TOKEN`,
 silently making `qwts` the pusher again.
 
-## Automating worktrees
+## Automating worktrees (tool-agnostic)
 
-Agents work in linked git worktrees, so the identity can ride on the worktree
-instead of on anyone's memory. One command configures the current worktree:
+Agents work in linked git worktrees, so the identity rides on the worktree and
+is applied by git itself — no per-tool or per-repo setup, and nothing specific
+to any one IDE. One machine-wide command enables it:
 
 ```bash
-node tools/agent-bot/setup-worktree.mjs
+git config --global core.hooksPath ~/Code/playbook-engineering/tools/agent-bot/hooks
 ```
 
-It reads `GH_AGENT_APP` (or takes the slug as an argument) and, scoped via
-`extensions.worktreeConfig` so nothing leaks into the primary checkout: sets
-the bot author/committer identity, disables commit signing, rewrites an SSH
-origin to HTTPS, and wires `tools/agent-bot/git-credential-bot.mjs` as the
-credential helper — every later `git push` mints its own fresh token, so no
-`GH_TOKEN` is needed for pushes at all. The script only touches *linked*
-worktrees (a primary checkout is left alone) and exits quietly when there is
-nothing to do, which makes it safe to run from a session-start hook. Claude
-Code automates it with a `SessionStart` hook in `~/.claude/settings.json`
-running the command above; harnesses without hooks run it once per worktree.
+That points every repo's git hooks at this repo's [`hooks/`](../../tools/agent-bot/hooks/).
+Its `post-checkout` hook runs on `git worktree add` **regardless of which tool
+created the worktree** — Codex, Cursor, VS Code, a plain terminal — and calls
+`setup-worktree.mjs`, which:
+
+- **Detects which IDE is running** from the environment that tool sets on its
+  own (`CLAUDECODE`, `CODEX_*`, Cursor's bundle id, `TERM_PROGRAM=vscode`; see
+  [`detect-harness.mjs`](../../tools/agent-bot/detect-harness.mjs)) and picks
+  the matching bot — `qwts-codex-agent` in Codex, `qwts-cursor-agent` in
+  Cursor, and so on. Nothing hard-codes one identity across tools.
+- Scoped via `extensions.worktreeConfig` so nothing leaks into the primary
+  checkout, sets the bot author/committer identity, disables commit signing,
+  rewrites an SSH origin to HTTPS, and wires
+  `git-credential-bot.mjs` as the credential helper — every later `git push`
+  mints its own fresh token, so no `GH_TOKEN` is needed for pushes.
+
+The hook only touches *linked* worktrees (a primary checkout, and a bare human
+shell with no IDE markers, are left as the human) and swallows any error so it
+never blocks a checkout. It also chains to a repo-local `post-checkout` if one
+exists, so the global path never disables another repo's hook. An explicit
+`--app <slug>`, `GH_AGENT_APP`, or `git config qwts.agentApp` still overrides
+detection when you need to force a specific identity.
 
 Minting `GH_TOKEN` explicitly (previous section) then only matters for API
-calls such as `gh pr create` — the step that sets the PR's author.
+calls such as `gh pr create` — the step that sets the PR's author — and
+`mint-token.mjs` uses the same IDE detection, so it picks the right bot with no
+argument.
 
 ## Verifying it works
 

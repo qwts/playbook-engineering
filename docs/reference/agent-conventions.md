@@ -20,6 +20,22 @@ Run the repo's own gates locally before opening or updating a PR: lint, tests, a
 - A PR touching an agent primitive (`AGENTS.md`, a skill, a prompt, an MCP config entry) states what agent behavior changes and, where an eval exists, cites the before/after score — "it reads better" is not evidence (ENG-0006, decision item 4).
 - Feature work follows [ENG-0007](../decisions/ENG-0007-feature-lifecycle-convention.md)'s lifecycle where the repo has adopted it.
 
+## Review-thread conduct
+
+An agent that addresses a review comment — a reply plus a change — resolves
+the thread in the same pass. Reply → fix → resolve is one unit of work: an
+addressed-but-open thread forces the reviewer to chase state before they can
+approve. A thread stays open only when the agent neither replied nor made a
+change for it (qwts/playbook-engineering#28).
+
+## Clarify before large efforts
+
+Before significant exploration, multi-tool work, or a fan-out of subagents,
+an agent states the objective as it understands it and its recommendation,
+then asks how to proceed. Quick single-fact lookups are exempt — the rule
+exists so that large token spends follow confirmed intent, not guessed
+intent (qwts/playbook-engineering#28).
+
 ## Supply chain and permissions
 
 MCP servers and third-party skills are allow-listed per repo and pinned by version or commit hash, mirroring the [ENG-0005](../decisions/ENG-0005-static-analysis-survey-results.md) SHA-pinning direction for Actions. Tool permissions (`settings.json` or the vendor equivalent) are least-privilege: grant what the task needs, not what is convenient. No secrets in any agent-facing file.

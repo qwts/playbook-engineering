@@ -1,9 +1,18 @@
 #!/usr/bin/env node
 // One-shot bot-identity setup for the current git worktree (ENG-0016).
-// Designed to run from a session-start hook: it exits 0 quietly whenever it
-// has nothing to do, and configures nothing outside the worktree it runs in.
+// Harness-agnostic: it is invoked by git's own post-checkout hook (which fires
+// on `git worktree add` no matter what created the worktree), so it needs no
+// tool-specific session mechanism. Exits 0 quietly whenever it has nothing to
+// do, and configures nothing outside the worktree it runs in.
 //
-//   node tools/agent-bot/setup-worktree.mjs [app-slug]     (slug defaults to $GH_AGENT_APP)
+//   node tools/agent-bot/setup-worktree.mjs [app-slug]
+//
+// Slug resolution, first hit wins: explicit arg, then $GH_AGENT_APP, then the
+// git config value `qwts.agentApp`. Set the git config once per checkout and
+// no env var is ever needed:
+//
+//   git config qwts.agentApp qwts-codex-agent      (per checkout)
+//   git config --global qwts.agentApp qwts-...      (machine default)
 //
 // What it does, all scoped via extensions.worktreeConfig:
 //   - author/committer identity = <slug>[bot] with the bot's noreply email
@@ -21,6 +30,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { detectHarness } from './detect-harness.mjs';
 
 function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8' }).trim();
@@ -43,9 +53,20 @@ async function botUid(slug) {
   return uid;
 }
 
+function slugFromGitConfig() {
+  try {
+    return git('config', '--get', 'qwts.agentApp') || null;
+  } catch {
+    return null; // unset — git exits non-zero
+  }
+}
+
 async function main() {
-  const slug = process.argv[2] ?? process.env.GH_AGENT_APP;
-  if (!slug) return; // no identity configured for this launcher — nothing to do
+  // Explicit override wins; otherwise detect the IDE from its own environment
+  // so the bot matches the tool with no per-tool setup.
+  const slug =
+    process.argv[2] ?? process.env.GH_AGENT_APP ?? slugFromGitConfig() ?? detectHarness();
+  if (!slug) return; // no identity resolved for this checkout — nothing to do
 
   let gitDir; let commonDir;
   try {
