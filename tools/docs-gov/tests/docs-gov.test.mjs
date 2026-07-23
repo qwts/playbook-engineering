@@ -89,6 +89,31 @@ test('violations fixture: messages carry the pointers a fixer needs', () => {
   assert.match(messages, /ctx-over/);
 });
 
+test('decision-series fixture: number uniqueness and issue-derived provenance', () => {
+  const { exitCode, report } = runCli('decision-series');
+  assert.equal(exitCode, 1);
+
+  // Only the decision-number rule fires, and only on the three records that
+  // should: a number/issue mismatch, a duplicated number, and an issue in the
+  // wrong repo. The grandfathered ENG-0002 (whose number ≠ its issue), the
+  // clean ENG-0050, and the first holder of the duplicated number stay silent.
+  const byFile = new Map();
+  for (const f of report.findings) {
+    assert.equal(f.rule, 'decision-number', `unexpected rule ${f.rule} on ${f.file}`);
+    byFile.set(f.file, (byFile.get(f.file) ?? 0) + 1);
+  }
+  assert.deepEqual(Object.fromEntries([...byFile.entries()].sort()), {
+    'docs/decisions/ENG-0051-mismatch.md': 1,
+    'docs/decisions/ENG-0052-second.md': 1,
+    'docs/decisions/ENG-0053-wrongrepo.md': 1,
+  });
+
+  const messages = report.findings.map((f) => f.message).join('\n');
+  assert.match(messages, /should be ENG-0099/); // provenance names the correct number
+  assert.match(messages, /used by 2 records/); // duplicate names the collision
+  assert.match(messages, /qwts\/photos/); // home-repo guard names the offending repo
+});
+
 test('slugify matches GitHub anchors, including stripped emoji', () => {
   assert.equal(slugify('Planning Phase'), 'planning-phase');
   assert.equal(slugify('🔍 Planning Phase (Documents 1-6)'), '-planning-phase-documents-1-6');

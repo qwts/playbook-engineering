@@ -1,0 +1,10 @@
+{
+  "include": ["docs/**/*.md", "README.md"],
+  "indexes": ["README.md"],
+  "decisionSeries": {
+    "glob": "docs/decisions/ENG-*.md",
+    "issueField": "Issue",
+    "homeRepo": "qwts/playbook-engineering",
+    "grandfathered": ["docs/decisions/ENG-000?-*.md", "docs/decisions/ENG-001?-*.md"]
+  }
+}

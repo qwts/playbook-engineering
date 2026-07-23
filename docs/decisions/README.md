@@ -22,9 +22,17 @@ The test: **if exactly one repo would have to change, it is not an ENG record.**
 
 ## Numbering
 
-`ENG-NNNN`, zero-padded, allocated in order. The prefix is deliberately distinct
-from photos' `ADR-NNNN` so that a citation is never ambiguous about which series
-and which home it refers to.
+`ENG-NNNN`, zero-padded. A new record's number **is its originating GitHub issue
+number** ([ENG-0035](ENG-0035-issue-derived-record-numbers.md)): file the
+issue-first issue this series already requires, then name the record after it —
+issue #35 → `ENG-0035`. GitHub allocates issue numbers atomically and never
+reuses them, so numbers are collision-free and no two open PRs can claim the
+same one. Numbering is therefore sparse and non-consecutive, not `+1` — that is
+expected. Records ENG-0001–0016 predate the rule and keep their sequential
+numbers. docs-gov enforces the mapping and rejects duplicate numbers.
+
+The prefix is deliberately distinct from photos' `ADR-NNNN` so that a citation
+is never ambiguous about which series and which home it refers to.
 
 ## Format
 
@@ -67,6 +75,7 @@ principles; it does not waive the lower priorities.
 | [ENG-0014](ENG-0014-canonical-agent-context.md) | Canonical agent context is CLAUDE.md — AGENTS.md generated, copies gated, baselines vendored | Proposed |
 | [ENG-0015](ENG-0015-dependency-inventory.md) | Inventory dependencies and tooling across the fleet — report-only, Syft SBOM plus a shared normalizer | Proposed |
 | [ENG-0016](ENG-0016-agent-pr-bot-identity.md) | Agent-authored PRs come from dedicated bot identities (GitHub Apps, one per harness) | Proposed |
+| [ENG-0035](ENG-0035-issue-derived-record-numbers.md) | ENG record numbers are the originating issue number — allocation cannot collide | Proposed |
 
 ## Related
 

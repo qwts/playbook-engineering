@@ -78,6 +78,13 @@ export const RULES = [
     prevents:
       'Aliases split retrieval: a search for the canonical term misses the doc that used the alias, so the agent concludes the topic is undocumented.',
   },
+  {
+    id: 'decision-number',
+    summary:
+      'Decision-record numbers are unique and, for records under the issue-derived convention, equal their originating issue number.',
+    prevents:
+      'A number used by two records makes a citation like "ENG-0015" resolve to two different decisions, and the agent follows whichever it retrieved; a number that does not equal its issue breaks the number→issue inference the series licenses ("ENG-0035" ⇒ issue #35), sending the agent to the wrong discussion. Upstream, deriving the number from the atomically-allocated issue is what stops two open PRs from claiming the same number and colliding at merge.',
+  },
 ];
 
 const DEFAULTS = {
@@ -106,6 +113,10 @@ const DEFAULTS = {
     orphans: true,
     stalePaths: { roots: null },
   },
+  // Off unless a repo configures it: photos numbers its ADRs off a different
+  // counter, and the reusable workflow must not impose a series a repo does
+  // not run.
+  decisionSeries: null,
 };
 
 export function resolveConfig(raw) {
@@ -607,6 +618,95 @@ function checkTerminology(docs, terms, findings) {
   }
 }
 
+// Two invariants on a decision series whose numbers are allocated from the
+// GitHub issue counter (qwts/playbook-engineering#35):
+//   1. Uniqueness — no two records share a number (holds for every record,
+//      grandfathered or not; an ambiguous citation is the failure).
+//   2. Provenance — a record's number equals its originating issue number, so
+//      the number is reserved atomically when the issue is filed and can never
+//      race another open PR. Records predating the convention are grandfathered
+//      by glob, exactly as ENG-0013 scoped its own Issue field.
+// The number itself lives in the filename (`ENG-NNNN-*.md`); the issue number
+// lives in the `Issue:` header field this check reads.
+function checkDecisionSeries(docs, spec, findings) {
+  const glob = globToRegExp(spec.glob);
+  const nameRe = /(?:^|\/)([A-Z]+)-(\d{4})-[^/]*\.md$/;
+  const byNumber = new Map(); // "NNNN" → [rel]
+  const matched = [];
+  for (const [rel, doc] of docs) {
+    if (!glob.test(rel)) continue;
+    const m = rel.match(nameRe);
+    if (!m) {
+      findings.push({
+        rule: 'decision-number',
+        file: rel,
+        line: 1,
+        message: `filename does not encode a zero-padded PREFIX-NNNN number — the series number is unparseable`,
+      });
+      continue;
+    }
+    const number = m[2];
+    matched.push({ rel, prefix: m[1], number, doc });
+    const list = byNumber.get(number) ?? [];
+    list.push(rel);
+    byNumber.set(number, list);
+  }
+
+  for (const [number, rels] of byNumber) {
+    if (rels.length < 2) continue;
+    const where = rels.join(', ');
+    // Flag every duplicate after the first so the finding is deterministic and
+    // points at the record that must renumber.
+    for (const rel of rels.slice(1)) {
+      findings.push({
+        rule: 'decision-number',
+        file: rel,
+        line: 1,
+        message: `number ${number} is used by ${rels.length} records (${where}) — a citation to it is ambiguous`,
+      });
+    }
+  }
+
+  const homeRepo = spec.homeRepo ?? null;
+  const searchLines = spec.searchLines ?? 30;
+  for (const { rel, prefix, number, doc } of matched) {
+    if (spec.grandfathered && matchesAny(rel, spec.grandfathered)) continue;
+    const head = doc.lines.slice(0, searchLines);
+    let value = null;
+    for (const line of head) {
+      const plain = line.replace(/[*_]/g, '');
+      const fm = plain.match(new RegExp(`^\\s*${spec.issueField}\\s*:\\s*(.+)$`));
+      if (fm) {
+        value = fm[1].trim();
+        break;
+      }
+    }
+    // A missing or malformed Issue field is already the required-fields rule's
+    // finding; don't double-report it here.
+    if (value === null) continue;
+    const ref = value.match(/^([\w.-]+\/[\w.-]+)#(\d+)$/);
+    if (!ref) continue;
+    const [, repo, issueNum] = ref;
+    if (homeRepo && repo !== homeRepo) {
+      findings.push({
+        rule: 'decision-number',
+        file: rel,
+        line: 1,
+        message: `Issue is in ${repo}, but issue-derived numbers come from ${homeRepo}'s counter — cite the decision-home issue`,
+      });
+      continue;
+    }
+    if (issueNum.padStart(number.length, '0') !== number) {
+      findings.push({
+        rule: 'decision-number',
+        file: rel,
+        line: 1,
+        message: `${prefix}-${number} does not match its issue #${issueNum} — a record's number is its issue number (should be ${prefix}-${issueNum.padStart(number.length, '0')})`,
+      });
+    }
+  }
+}
+
 // --- entry ---------------------------------------------------------------
 
 export function runChecks(root, includedFiles, config) {
@@ -631,6 +731,7 @@ export function runChecks(root, includedFiles, config) {
   if (config.antiPatterns.unresolvedPlaceholders) checkPlaceholders(docs, findings);
   checkDuplicates(docs, config.antiPatterns.duplicateParagraphs, findings);
   checkTerminology(docs, config.antiPatterns.terminology, findings);
+  if (config.decisionSeries) checkDecisionSeries(docs, config.decisionSeries, findings);
 
   findings.sort(
     (a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.rule.localeCompare(b.rule),
