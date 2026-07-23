@@ -90,6 +90,29 @@ Agent checkouts must use **HTTPS remotes**. An SSH remote (`git@github.com:…`)
 authenticates the push with the human's SSH key regardless of `GH_TOKEN`,
 silently making `qwts` the pusher again.
 
+## Automating worktrees
+
+Agents work in linked git worktrees, so the identity can ride on the worktree
+instead of on anyone's memory. One command configures the current worktree:
+
+```bash
+node tools/agent-bot/setup-worktree.mjs
+```
+
+It reads `GH_AGENT_APP` (or takes the slug as an argument) and, scoped via
+`extensions.worktreeConfig` so nothing leaks into the primary checkout: sets
+the bot author/committer identity, disables commit signing, rewrites an SSH
+origin to HTTPS, and wires `tools/agent-bot/git-credential-bot.mjs` as the
+credential helper — every later `git push` mints its own fresh token, so no
+`GH_TOKEN` is needed for pushes at all. The script only touches *linked*
+worktrees (a primary checkout is left alone) and exits quietly when there is
+nothing to do, which makes it safe to run from a session-start hook. Claude
+Code automates it with a `SessionStart` hook in `~/.claude/settings.json`
+running the command above; harnesses without hooks run it once per worktree.
+
+Minting `GH_TOKEN` explicitly (previous section) then only matters for API
+calls such as `gh pr create` — the step that sets the PR's author.
+
 ## Verifying it works
 
 ```bash

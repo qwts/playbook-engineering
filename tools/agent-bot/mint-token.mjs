@@ -75,11 +75,14 @@ async function gh(method, path, jwt) {
   return body;
 }
 
-async function main() {
-  const { appId, privateKeyPem } = appConfig();
+// Programmatic entry point (used by git-credential-bot.mjs): mint a token
+// for a slug, or for whatever appConfig() resolves when slug is omitted.
+export async function mint({ slug, env = process.env } = {}) {
+  const argv = slug ? ['node', 'mint-token.mjs', '--app', slug] : process.argv;
+  const { appId, privateKeyPem } = appConfig({ argv, env });
   const jwt = buildAppJwt(appId, privateKeyPem, Math.floor(Date.now() / 1000));
 
-  let installationId = process.env.GH_APP_INSTALLATION_ID;
+  let installationId = env.GH_APP_INSTALLATION_ID;
   if (!installationId) {
     const installations = await gh('GET', '/app/installations', jwt);
     if (installations.length !== 1) {
@@ -89,12 +92,13 @@ async function main() {
   }
 
   const grant = await gh('POST', `/app/installations/${installationId}/access_tokens`, jwt);
+  return { token: grant.token, expires_at: grant.expires_at, installation_id: Number(installationId) };
+}
+
+async function main() {
+  const grant = await mint();
   if (process.argv.includes('--json')) {
-    process.stdout.write(`${JSON.stringify({
-      token: grant.token,
-      expires_at: grant.expires_at,
-      installation_id: Number(installationId),
-    })}\n`);
+    process.stdout.write(`${JSON.stringify(grant)}\n`);
   } else {
     process.stdout.write(`${grant.token}\n`);
   }
