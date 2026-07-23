@@ -50,6 +50,25 @@ generated table below by hand.
   [the SOP inventory](../sop/inventory.md).
 - `note` — optional free-text context.
 
+## Drift detection
+
+The manifest is checked against **live GitHub**, not just against this repo's
+docs, by `tools/repos/drift.mjs` (read-only; issue #38 phase 1):
+
+```bash
+node tools/repos/drift.mjs
+```
+
+Per governed repo it verifies the
+[baseline files](../sop/repo-baseline-files.md), a default-branch rule
+requiring at least one approving review, private vulnerability reporting, and
+all four agent-App installations
+([ENG-0016](../decisions/ENG-0016-agent-pr-bot-identity.md)). Repos with
+`status: active` are expected to conform — their drift sets a non-zero exit
+code so CI can gate on it; `status: onboarding` repos report drift without
+failing, which is what makes migrating an old repo under governance a declared
+state instead of a surprise.
+
 ## Governed repositories
 
 <!-- BEGIN GENERATED governed-repos -->
