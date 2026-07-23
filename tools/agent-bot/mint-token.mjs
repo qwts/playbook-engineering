@@ -1,15 +1,19 @@
 #!/usr/bin/env node
-// Mints a short-lived GitHub App installation token for the agent bot
+// Mints a short-lived GitHub App installation token for an agent bot
 // identity (ENG-0011). Prints the token to stdout for use as GH_TOKEN.
 // Zero-dependency by design, like the rest of tools/ (ENG-0004).
 //
-// Env:  GH_APP_ID                — the App's numeric ID (required)
-//       GH_APP_PRIVATE_KEY_PATH  — path to the App's .pem key (required)
-//       GH_APP_INSTALLATION_ID   — only needed when the App has >1 installation
-// Flag: --json                   — print { token, expires_at, installation_id }
+// App selection (first match wins):
+//   --app <slug>             — read ~/.config/<slug>/{app-id,private-key.pem}
+//   GH_AGENT_APP=<slug>      — same lookup, set once per launcher environment
+//   GH_APP_ID + GH_APP_PRIVATE_KEY_PATH — explicit pair (CI, overrides)
+// Env:  GH_APP_INSTALLATION_ID — only needed when the App has >1 installation
+// Flag: --json                — print { token, expires_at, installation_id }
 
 import { createSign, createPrivateKey } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 
@@ -31,6 +35,29 @@ export function buildAppJwt(appId, privateKeyPem, nowSeconds) {
   return `${signingInput}.${b64url(signature)}`;
 }
 
+export function appConfig({ argv = process.argv, env = process.env, home = homedir() } = {}) {
+  const flag = argv.indexOf('--app');
+  if (flag !== -1 && !argv[flag + 1]) {
+    throw new Error('--app requires a slug, e.g. --app qwts-claude-agent');
+  }
+  const slug = flag !== -1 ? argv[flag + 1] : env.GH_AGENT_APP;
+  if (slug) {
+    const dir = join(home, '.config', slug);
+    try {
+      return {
+        appId: readFileSync(join(dir, 'app-id'), 'utf8').trim(),
+        privateKeyPem: readFileSync(join(dir, 'private-key.pem'), 'utf8'),
+      };
+    } catch {
+      throw new Error(`no app config for "${slug}" — expected ${dir}/app-id and ${dir}/private-key.pem`);
+    }
+  }
+  if (env.GH_APP_ID && env.GH_APP_PRIVATE_KEY_PATH) {
+    return { appId: env.GH_APP_ID, privateKeyPem: readFileSync(env.GH_APP_PRIVATE_KEY_PATH, 'utf8') };
+  }
+  throw new Error('pass --app <slug>, set GH_AGENT_APP, or set GH_APP_ID and GH_APP_PRIVATE_KEY_PATH — see docs/reference/agent-bot-identity.md');
+}
+
 async function gh(method, path, jwt) {
   const res = await fetch(`${API}${path}`, {
     method,
@@ -49,12 +76,8 @@ async function gh(method, path, jwt) {
 }
 
 async function main() {
-  const appId = process.env.GH_APP_ID;
-  const keyPath = process.env.GH_APP_PRIVATE_KEY_PATH;
-  if (!appId || !keyPath) {
-    throw new Error('GH_APP_ID and GH_APP_PRIVATE_KEY_PATH must be set — see docs/reference/agent-bot-identity.md');
-  }
-  const jwt = buildAppJwt(appId, readFileSync(keyPath, 'utf8'), Math.floor(Date.now() / 1000));
+  const { appId, privateKeyPem } = appConfig();
+  const jwt = buildAppJwt(appId, privateKeyPem, Math.floor(Date.now() / 1000));
 
   let installationId = process.env.GH_APP_INSTALLATION_ID;
   if (!installationId) {

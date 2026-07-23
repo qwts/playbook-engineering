@@ -1,8 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, createVerify } from 'node:crypto';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { buildAppJwt } from '../mint-token.mjs';
+import { buildAppJwt, appConfig } from '../mint-token.mjs';
 
 const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const pem = privateKey.export({ type: 'pkcs8', format: 'pem' });
@@ -43,4 +46,53 @@ test('numeric app ids are coerced to the string iss GitHub expects', () => {
   const jwt = buildAppJwt(12345, pem, NOW);
   const [, payload] = decodeClaims(jwt);
   assert.equal(payload.iss, '12345');
+});
+
+function fakeHome(slug) {
+  const home = mkdtempSync(join(tmpdir(), 'agent-bot-'));
+  const dir = join(home, '.config', slug);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'app-id'), '98765\n');
+  writeFileSync(join(dir, 'private-key.pem'), pem);
+  return home;
+}
+
+test('--app <slug> resolves app-id and key from ~/.config/<slug>/', () => {
+  const home = fakeHome('qwts-claude-agent');
+  const config = appConfig({ argv: ['node', 'mint-token.mjs', '--app', 'qwts-claude-agent'], env: {}, home });
+  assert.equal(config.appId, '98765');
+  assert.equal(config.privateKeyPem, pem);
+});
+
+test('GH_AGENT_APP resolves the same lookup without a flag', () => {
+  const home = fakeHome('qwts-codex-agent');
+  const config = appConfig({ argv: ['node', 'mint-token.mjs'], env: { GH_AGENT_APP: 'qwts-codex-agent' }, home });
+  assert.equal(config.appId, '98765');
+});
+
+test('explicit GH_APP_ID/GH_APP_PRIVATE_KEY_PATH pair still works', () => {
+  const home = fakeHome('qwts-cursor-agent');
+  const keyPath = join(home, '.config', 'qwts-cursor-agent', 'private-key.pem');
+  const config = appConfig({
+    argv: ['node', 'mint-token.mjs'],
+    env: { GH_APP_ID: '11111', GH_APP_PRIVATE_KEY_PATH: keyPath },
+    home,
+  });
+  assert.equal(config.appId, '11111');
+  assert.equal(config.privateKeyPem, pem);
+});
+
+test('a slug with no config directory fails with the expected paths named', () => {
+  const home = mkdtempSync(join(tmpdir(), 'agent-bot-'));
+  assert.throws(
+    () => appConfig({ argv: ['node', 'mint-token.mjs', '--app', 'qwts-vscode-agent'], env: {}, home }),
+    /no app config for "qwts-vscode-agent"/,
+  );
+});
+
+test('no selection at all names every option in the error', () => {
+  assert.throws(
+    () => appConfig({ argv: ['node', 'mint-token.mjs'], env: {}, home: mkdtempSync(join(tmpdir(), 'agent-bot-')) }),
+    /--app <slug>, set GH_AGENT_APP, or set GH_APP_ID/,
+  );
 });

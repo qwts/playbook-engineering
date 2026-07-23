@@ -1,4 +1,4 @@
-# ENG-0011: Agent-authored PRs come from a dedicated bot identity (GitHub App)
+# ENG-0011: Agent-authored PRs come from dedicated bot identities (GitHub Apps, one per harness)
 
 **Status:** Proposed
 **Date:** 2026-07-23
@@ -17,10 +17,16 @@ missing workflow step.
 
 ## Decision
 
-1. **Agents author under a dedicated machine identity — a GitHub App** owned
-   by `qwts` and installed on the repositories agents work in. PRs then arrive
-   authored by `<app-slug>[bot]`, and `qwts` reviews and approves them as the
-   human the SOP already requires.
+1. **Agents author under dedicated machine identities — one GitHub App per
+   agent harness** (`qwts-claude-agent`, `qwts-codex-agent`,
+   `qwts-cursor-agent`, `qwts-vscode-agent`), owned by `qwts` and installed on
+   the repositories agents work in. PRs then arrive authored by
+   `<app-slug>[bot]`, and `qwts` reviews and approves them as the human the
+   SOP already requires. Per-harness rather than one shared bot because PR
+   authorship is immutable — attribution not captured at authoring time is
+   lost forever — and author-level identity gives machine-queryable
+   per-harness metrics (merge rate, review churn) plus independent key
+   revocation and repo scoping per harness.
 2. **Permissions are minimal and repo-scoped:** Contents and Pull requests
    (read/write), Issues (read/write, for the issue linkage the SOP mandates),
    Metadata (read). The App is installed only on selected repositories, never
@@ -55,9 +61,11 @@ missing workflow step.
 - Installation tokens expire after one hour. Minting is one command, but every
   agent task that pushes or opens a PR must mint first, and a long-running
   session may need to re-mint.
-- The App's private key is a standing credential on the workstation. It is
-  scoped to the installed repositories and revocable in one click, but it must
-  be custodied like any secret: outside repos, file mode 600.
+- Each App's private key is a standing credential on the workstation — four
+  today, one more per future harness. Each is scoped to its installed
+  repositories and revocable in one click, but must be custodied like any
+  secret: outside repos, file mode 600. Adopting a new harness now includes
+  registering its App.
 - On a repo with "require approval of the most recent reviewable push"
   enabled, a fixup commit pushed by `qwts` to a bot PR makes `qwts` the last
   pusher and blocks their approval again. In that configuration, review fixes
@@ -65,10 +73,10 @@ missing workflow step.
 - PR authorship is immutable, so agent PRs already opened as `qwts` cannot be
   re-authored. They land by owner merge with a note — the final uses of the
   bypass this record eliminates.
-- Agent-vs-human authorship becomes machine-distinguishable in every repo's
-  history (`<app-slug>[bot]` vs `qwts`) — useful for the
-  [ENG-0006](ENG-0006-agentic-primitives-governance.md) evaluation loop and
-  any future audit.
+- Authorship in every repo's history now distinguishes not just agent vs
+  human but *which harness* (`qwts-claude-agent[bot]` vs `qwts`) — usable as
+  evidence in the [ENG-0006](ENG-0006-agentic-primitives-governance.md)
+  evaluation loop and any future audit via a plain `author:` query.
 
 ## References
 
