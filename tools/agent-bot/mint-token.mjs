@@ -16,6 +16,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import process from 'node:process';
+import { detectHarness } from './detect-harness.mjs';
 
 const API = 'https://api.github.com';
 
@@ -40,7 +41,7 @@ export function appConfig({ argv = process.argv, env = process.env, home = homed
   if (flag !== -1 && !argv[flag + 1]) {
     throw new Error('--app requires a slug, e.g. --app qwts-claude-agent');
   }
-  const slug = flag !== -1 ? argv[flag + 1] : env.GH_AGENT_APP;
+  const slug = (flag !== -1 ? argv[flag + 1] : env.GH_AGENT_APP) ?? detectHarness(env);
   if (slug) {
     const dir = join(home, '.config', slug);
     try {
