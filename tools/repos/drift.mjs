@@ -31,9 +31,12 @@ const APPS = ['qwts-claude-agent', 'qwts-codex-agent', 'qwts-cursor-agent', 'qwt
 const BASELINE_FILES = ['README.md', 'LICENSE', 'AGENTS.md', 'CONTRIBUTING.md', '.github/CODEOWNERS'];
 
 function userToken() {
-  return (
-    process.env.GH_DRIFT_TOKEN ?? execFileSync('gh', ['auth', 'token'], { encoding: 'utf8' }).trim()
-  );
+  if (process.env.GH_DRIFT_TOKEN) return process.env.GH_DRIFT_TOKEN;
+  try {
+    return execFileSync('gh', ['auth', 'token'], { encoding: 'utf8' }).trim();
+  } catch {
+    throw new Error('no GitHub token — set GH_DRIFT_TOKEN, or install and authenticate the gh CLI (gh auth login)');
+  }
 }
 
 async function api(path, token) {
@@ -80,7 +83,8 @@ export async function checkRepo(owner, entry, coverage, token) {
   if (!meta) return { name: entry.name, status: entry.status, error: 'repo not found or not visible' };
 
   for (const file of BASELINE_FILES) {
-    checks[file] = (await api(`/repos/${owner}/${entry.name}/contents/${encodeURIComponent(file)}`, token)) !== null;
+    const path = file.split('/').map(encodeURIComponent).join('/');
+    checks[file] = (await api(`/repos/${owner}/${entry.name}/contents/${path}`, token)) !== null;
   }
   const templates = await api(`/repos/${owner}/${entry.name}/contents/.github/ISSUE_TEMPLATE`, token);
   checks['feature issue template'] = Array.isArray(templates) && templates.some((t) => /feature/i.test(t.name));
