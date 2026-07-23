@@ -82,6 +82,13 @@ test('renderTable escapes pipes in a delta', () => {
   assert.ok(renderTable(m).includes('a \\| b'));
 });
 
+test('renderTable escapes backslashes before pipes, so \\| cannot smuggle a raw pipe', () => {
+  const m = validManifest();
+  m.repos[1].delta = 'a \\| b';
+  // Backslash doubles first, then the pipe is escaped: `a \\\| b`.
+  assert.ok(renderTable(m).includes('a \\\\\\| b'));
+});
+
 test('renderTable shows an em dash for an empty delta', () => {
   // playbook-engineering has an empty delta in the fixture -> em dash cell.
   assert.match(renderTable(validManifest()), /playbook-engineering.*\| — \|/);

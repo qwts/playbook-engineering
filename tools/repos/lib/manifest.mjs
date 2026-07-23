@@ -82,10 +82,13 @@ export function validateManifest(manifest) {
 
 function escapeCell(text) {
   // Table cells cannot contain a raw pipe or newline; collapse whitespace and
-  // escape pipes so a multi-clause delta stays on one row.
+  // escape pipes so a multi-clause delta stays on one row. Backslashes are
+  // escaped first so a value containing `\|` cannot smuggle an unescaped pipe
+  // through (CodeQL js/incomplete-sanitization).
   return String(text ?? '')
     .replace(/\r?\n/g, ' ')
     .replace(/\s+/g, ' ')
+    .replace(/\\/g, '\\\\')
     .replace(/\|/g, '\\|')
     .trim();
 }
