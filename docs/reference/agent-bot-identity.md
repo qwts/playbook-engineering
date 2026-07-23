@@ -37,14 +37,12 @@ you which harness produced a change: `qwts-claude-agent`, `qwts-codex-agent`,
 3. **Install App** (left sidebar) → install on `qwts` → *Only select
    repositories* → the repos this harness works in. Extend the selection when
    a new repo joins; tokens only ever reach the selected list.
-4. In each harness's launch environment, name the App it authors as:
-
-   ```bash
-   export GH_AGENT_APP=qwts-claude-agent
-   ```
-
-5. Once, as the human: `gh auth setup-git`, so git uses `gh` as its
-   credential helper (needed for the bot pushes below).
+4. Nothing else. Identity is auto-detected per IDE (see
+   [Automating worktrees](#automating-worktrees-tool-agnostic)); exporting
+   `GH_AGENT_APP` is only an override for forcing a specific App. No
+   `gh auth setup-git` is required either — bot pushes authenticate through
+   the per-worktree credential helper, not through `gh`, and the human's own
+   push setup (SSH, keychain, or `gh`) is untouched.
 
 ## Per-task usage (agent)
 
@@ -75,17 +73,20 @@ credentials under `~/.config/<slug>/`.
 - `gh` gives `GH_TOKEN` precedence over the stored `qwts` login, so
   `gh pr create` (and every other call) now acts as the bot. The PR's author
   is whoever *creates* it — this is the step that matters.
-- `git push` also authenticates as the bot, because the `gh` credential
-  helper honors `GH_TOKEN` (setup step 5).
-- Without `GH_TOKEN` set, `gh` and `git` fall back to the stored `qwts`
-  login — the human side needs no change.
+- `git push` needs no token at all in a configured worktree — the
+  per-worktree credential helper mints its own on demand.
+- Without `GH_TOKEN` set, `gh` falls back to the stored `qwts` login — which
+  is why the mint is a hard gate for API calls.
 
-Attribute the commits to the bot as well, so history matches the PR author,
-and disable commit signing — a bot commit signed with the human's GPG/SSH key
-shows **Unverified** on GitHub, because the key's identity does not match the
-bot's committer email:
+In a configured worktree, commit attribution and no-signing are already
+applied by the post-checkout hook. Only outside one (or with the hook not
+installed) set them manually — a bot commit signed with the human's GPG/SSH
+key shows **Unverified** on GitHub, because the key's identity does not match
+the bot's committer email. The manual block requires `GH_AGENT_APP`, so name
+the App first:
 
 ```bash
+export GH_AGENT_APP=qwts-claude-agent   # the App this task authors as
 BOT_UID=$(gh api "users/${GH_AGENT_APP}%5Bbot%5D" --jq .id)
 export GIT_AUTHOR_NAME="${GH_AGENT_APP}[bot]" GIT_COMMITTER_NAME="${GH_AGENT_APP}[bot]"
 export GIT_AUTHOR_EMAIL="${BOT_UID}+${GH_AGENT_APP}[bot]@users.noreply.github.com" GIT_COMMITTER_EMAIL="${BOT_UID}+${GH_AGENT_APP}[bot]@users.noreply.github.com"
