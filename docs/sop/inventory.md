@@ -6,6 +6,11 @@ baseline or a repo-local concern, and the delta each repo carries once it
 re-points at the [shared SOPs](README.md). This is a migration record, not a
 procedure — the SOPs themselves are the authority.
 
+The authoritative list of governed repos is the manifest behind
+[governed-repos.md](../reference/governed-repos.md) ([ENG-0011](../decisions/ENG-0011-governed-scope-manifest.md));
+the repo names below are a point-in-time snapshot of this migration survey, not
+the source of truth.
+
 ## Where procedures live today
 
 | Repo | Source of its procedures | Notes |

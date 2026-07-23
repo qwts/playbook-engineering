@@ -28,6 +28,8 @@ jobs:
           node-version: 22
       - name: docs-gov unit tests
         run: npm test
+      - name: governed-repos manifest check
+        run: node tools/repos/repos.mjs check
       - name: markdownlint
         run: |
           npm ci

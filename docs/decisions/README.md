@@ -35,6 +35,18 @@ Status is one of `Proposed`, `Accepted`, `Superseded by ENG-NNNN`. Records are
 never deleted or rewritten after acceptance; supersede them instead, so the
 reasoning trail survives.
 
+Every record is issue-first ([ENG-0013](ENG-0013-issue-first-provenance.md)):
+an `**Issue:**` header field cites the GitHub issue that holds the why and the
+discussion. Records predating the rule carry
+`predates issue-first (ENG-0013)`. docs-gov enforces the field.
+
+## Review lens
+
+Every record is reviewed against the priority order of
+[ENG-0012](ENG-0012-decision-priority-order.md): **security → compliance →
+agentic development → human developers**. The order settles conflicts between
+principles; it does not waive the lower priorities.
+
 ## Index
 
 | ID | Title | Status |
@@ -49,6 +61,10 @@ reasoning trail survives.
 | [ENG-0008](ENG-0008-shared-sop-inheritance.md) | Shared SOPs: defined once here, inherited by default, varied only by explicit delta | Accepted |
 | [ENG-0009](ENG-0009-documentation-governance-gate.md) | Documentation is gated like code — deterministic checks first, evaluation later | Accepted |
 | [ENG-0010](ENG-0010-docs-evaluation-loop.md) | The docs evaluation loop — adopt with tight bounds, retire on silence | Accepted |
+| [ENG-0011](ENG-0011-governed-scope-manifest.md) | Governed scope is a manifest — one source of truth, add/remove by editing it | Proposed |
+| [ENG-0012](ENG-0012-decision-priority-order.md) | Decision priority order — security, compliance, agentic development, human developers | Proposed |
+| [ENG-0013](ENG-0013-issue-first-provenance.md) | ENG records are issue-first — the issue holds the why, the record holds the decision | Proposed |
+| [ENG-0014](ENG-0014-canonical-agent-context.md) | Canonical agent context is CLAUDE.md — AGENTS.md generated, copies gated, baselines vendored | Proposed |
 
 ## Related
 

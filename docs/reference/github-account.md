@@ -1,7 +1,10 @@
 # GitHub account — maintained baseline
 
 Reference for the account these repos live under, so decisions and tooling
-assume the right tier instead of guessing.
+assume the right tier instead of guessing. For *which* repos are governed, the
+source of truth is the manifest behind [governed-repos.md](governed-repos.md)
+([ENG-0011](../decisions/ENG-0011-governed-scope-manifest.md)); repo names below
+are illustrative of the account tier, not an inventory.
 
 ## The account
 

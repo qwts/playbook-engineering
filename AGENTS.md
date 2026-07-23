@@ -14,6 +14,7 @@ PR-first workflow, validation-before-push, commit and PR hygiene, supply-chain p
 
 - **ENG records:** format, numbering, and the supersede-don't-rewrite rule are in [docs/decisions/README.md](docs/decisions/README.md). Adding or changing a record updates its row in that index table in the same PR — an unindexed record fails docs-gov's `orphan-doc` check.
 - **SOPs:** baselines under [docs/sop/](docs/sop/) propagate to every repo per [ENG-0008](docs/decisions/ENG-0008-shared-sop-inheritance.md); edits need the changelog at the bottom of the SOP updated.
+- **Governed scope:** the set of governed repos is the manifest `governance/repos.json` ([ENG-0011](docs/decisions/ENG-0011-governed-scope-manifest.md)). Editing it requires regenerating the table with `node tools/repos/repos.mjs --write` and passing `node tools/repos/repos.mjs check` — CI runs the check, so an un-regenerated edit fails.
 - **Docs-gov gate:** every change under `docs/`, plus this file, must pass `node tools/docs-gov/docs-gov.mjs` and `npm run lint:markdown` before a PR is opened or updated. See [documentation governance](docs/reference/documentation-governance.md) for what each rule catches. New files must be reachable by link from [README.md](README.md), or the `orphan-doc` rule fails them.
 - **Shared CI:** reusable workflows are consumed by other repos at `@v1`; the tag never moves without this repo's own CI (`test`, `docs-gov / docs-gov`) passing on the change first ([ENG-0004](docs/decisions/ENG-0004-centralize-shared-cicd.md)).
 

@@ -1,0 +1,53 @@
+{
+  "account": "qwts",
+  "repos": [
+    {
+      "name": "playbook-engineering",
+      "visibility": "public",
+      "status": "active",
+      "sharedCi": true,
+      "delta": "",
+      "note": "This repository — source of the governance it describes."
+    },
+    {
+      "name": "photos",
+      "visibility": "public",
+      "status": "active",
+      "sharedCi": false,
+      "delta": "Version-consistency gate in CI.",
+      "note": "Most mature working agreement; shared baselines were extracted from it. Shared-CI adoption pending (ENG-0009 order: this repo, then photos)."
+    },
+    {
+      "name": "image-trail",
+      "visibility": "public",
+      "status": "active",
+      "sharedCi": false,
+      "delta": "Coverage floor 71% lines / 80% branches; acceptance coverage-map update for UI/content changes.",
+      "note": ""
+    },
+    {
+      "name": "cartograph",
+      "visibility": "public",
+      "status": "active",
+      "sharedCi": false,
+      "delta": "Branch prefixes feat/ fix/ chore/ docs/; issue-before-branch; Rust gate (fmt, clippy -D warnings, test); spec/traceability artifacts in the same PR.",
+      "note": ""
+    },
+    {
+      "name": "bookmarkit",
+      "visibility": "public",
+      "status": "active",
+      "sharedCi": false,
+      "delta": "",
+      "note": "Pure consumer — inherits every baseline, proving the inheritance model."
+    },
+    {
+      "name": "quorum",
+      "visibility": "public",
+      "status": "active",
+      "sharedCi": false,
+      "delta": "",
+      "note": "Pure consumer, created 2026-07-22; inherits from day one."
+    }
+  ]
+}

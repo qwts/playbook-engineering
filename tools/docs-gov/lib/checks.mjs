@@ -372,6 +372,11 @@ function checkRequiredFields(docs, specs, findings) {
     const re = globToRegExp(spec.glob);
     for (const [rel, doc] of docs) {
       if (!re.test(rel)) continue;
+      // Optional per-spec exclusion globs: the glob language has no negation,
+      // so a field rule that applies to "all but a grandfathered subset"
+      // (e.g. ENG-0013 scoping its escape value to ENG-0001..0010) needs an
+      // explicit carve-out rather than a wider pattern every file could use.
+      if (spec.exclude && matchesAny(rel, spec.exclude)) continue;
       const head = doc.lines.slice(0, spec.searchLines ?? 30);
       for (const field of spec.fields) {
         const name = typeof field === 'string' ? field : field.name;

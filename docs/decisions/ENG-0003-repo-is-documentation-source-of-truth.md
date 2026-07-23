@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-07-19
+**Issue:** predates issue-first (ENG-0013)
 
 ## Context
 

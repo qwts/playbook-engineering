@@ -7,7 +7,8 @@
     "lint:markdown:fix": "markdownlint docs/ AGENTS.md --fix",
     "docs:gov": "node tools/docs-gov/docs-gov.mjs",
     "docs:eval": "node tools/docs-eval/run.mjs",
-    "test": "node --test tools/docs-gov/tests/docs-gov.test.mjs tools/docs-eval/tests/docs-eval.test.mjs"
+    "repos:check": "node tools/repos/repos.mjs check",
+    "test": "node --test tools/docs-gov/tests/docs-gov.test.mjs tools/docs-eval/tests/docs-eval.test.mjs tools/repos/tests/repos.test.mjs"
   },
   "devDependencies": {
     "markdownlint-cli": "^0.49.1"

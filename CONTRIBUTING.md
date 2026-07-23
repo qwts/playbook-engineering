@@ -3,10 +3,14 @@
 This repository is the org's cross-repo home for engineering decisions (ENG
 records), shared SOPs, and reusable CI. How work moves here:
 
-- **Decisions**: new or changed cross-repo direction lands as an ENG record —
-  format, numbering, and the supersede-don't-rewrite rule are in
+- **Decisions**: new or changed cross-repo direction is issue-first
+  ([ENG-0013](docs/decisions/ENG-0013-issue-first-provenance.md)): open a
+  GitHub issue holding the why, then land the ENG record citing it — format,
+  numbering, and the supersede-don't-rewrite rule are in
   [docs/decisions/README.md](docs/decisions/README.md). Records enter as
-  `Proposed`; the repo owner flips them to `Accepted` in review.
+  `Proposed`; the repo owner flips them to `Accepted` in review. All records
+  are reviewed against the
+  [ENG-0012 priority order](docs/decisions/ENG-0012-decision-priority-order.md).
 - **SOPs**: shared procedures live in the [shared SOPs index](docs/sop/README.md) and follow
   [ENG-0008](docs/decisions/ENG-0008-shared-sop-inheritance.md) — baseline
   edits here propagate to every repo, so changes go through PR review with

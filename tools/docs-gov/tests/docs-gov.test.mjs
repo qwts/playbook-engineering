@@ -56,8 +56,11 @@ test('violations fixture: every rule fires where expected', () => {
     ['heading-structure docs/structure.md', 3], // second H1, level skip, depth
     ['heading-structure docs/orphan.md', 1], // first heading is H2
     ['front-loaded-summary docs/structure.md', 1],
+    // ADR-0001 fires only for Status: the Resolution spec excludes it, so a
+    // second finding here means `exclude` is being ignored. ADR-0003 is also
+    // excluded and must not appear for Resolution at all.
     ['required-fields docs/adr/ADR-0001.md', 1], // Status missing
-    ['required-fields docs/adr/ADR-0002.md', 1], // Status unparseable
+    ['required-fields docs/adr/ADR-0002.md', 2], // Status unparseable + Resolution missing (in exclude-scoped spec)
     ['token-budget docs/heavy.md', 1], // over default budget
     ['token-budget docs/big.md', 1], // raised override without a reason
     ['token-budget docs/good.md', 1], // far under override — bank the win

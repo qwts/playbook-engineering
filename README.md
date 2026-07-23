@@ -52,6 +52,7 @@ Each document includes navigation links, prerequisites, and cross-references to 
 
 ## Shared standards and tooling
 
+- [Governed repositories](docs/reference/governed-repos.md) — which repos this playbook governs, and how to add or remove one; generated from the `governance/repos.json` manifest (ENG-0011).
 - [Shared SOPs](docs/sop/README.md) — org-wide standard operating procedures for how work moves, inherited by every repo (ENG-0008).
 - [Org-wide agent conventions](docs/reference/agent-conventions.md) — the shared agent working agreement every repo's `AGENTS.md` links to (ENG-0006).
 - [Agentic primitives conformance checklist](docs/reference/agentic-primitives-conformance-checklist.md) — the ENG-0006 §6 checklist per-repo alignment issues link to.

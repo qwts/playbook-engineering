@@ -2,6 +2,9 @@
 
 The test for whether a repo is aligned with [ENG-0006](../decisions/ENG-0006-agentic-primitives-governance.md) §6, for the per-repo alignment issues to link to instead of restating: qwts/playbook-engineering#7 (this repo), qwts/photos#718, qwts/image-trail#688, qwts/cartograph#262, qwts/bookmarkit#64.
 
+The governed repos these issues track are enumerated in the manifest behind
+[governed-repos.md](governed-repos.md) ([ENG-0011](../decisions/ENG-0011-governed-scope-manifest.md)).
+
 A repo is conformant when all four hold.
 
 ## a. AGENTS.md exists and is canonical
