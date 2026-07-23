@@ -62,6 +62,12 @@ export GH_TOKEN
 
 A failed mint must abort the task, never continue as `qwts`.
 
+The `tools/agent-bot/` paths here are relative to this repository; in a
+worktree of any *other* repo, run the same tools from the canonical checkout,
+`~/Code/playbook-engineering/tools/agent-bot/` — they are centralized here per
+[ENG-0004](../decisions/ENG-0004-centralize-shared-cicd.md) and need no
+per-repo copies.
+
 The tool reads `GH_AGENT_APP` (or an explicit `--app qwts-claude-agent` flag,
 or a `GH_APP_ID`/`GH_APP_PRIVATE_KEY_PATH` pair for CI) and finds the App's
 credentials under `~/.config/<slug>/`.
