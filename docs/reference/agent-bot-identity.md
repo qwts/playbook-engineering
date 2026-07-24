@@ -46,12 +46,15 @@ you which harness produced a change: `qwts-claude-agent`, `qwts-codex-agent`,
 
 ## Per-task usage (agent)
 
-Mint a token — valid one hour, scoped to that App's installed repositories —
-and act through it. Minting is a hard gate: assignment and export are two
-steps, because `export GH_TOKEN=$(…)` returns `export`'s own status (0) even
-when the mint fails, and `gh` treats the resulting empty `GH_TOKEN` as absent
-— silently falling back to the stored `qwts` login and recreating the
-human-authored PR this runbook exists to prevent.
+With the [gh shim](#the-gh-shim-prs-and-comments-as-the-bot-automatically)
+installed, there is no per-task step: `gh` inside a bot worktree
+authenticates as that worktree's bot on its own. The manual mint below
+remains for CI and for environments without the shim. Minting is a hard
+gate: assignment and export are two steps, because `export GH_TOKEN=$(…)`
+returns `export`'s own status (0) even when the mint fails, and `gh` treats
+the resulting empty `GH_TOKEN` as absent — silently falling back to the
+stored `qwts` login and recreating the human-authored PR this runbook exists
+to prevent.
 
 ```bash
 GH_TOKEN=$(node tools/agent-bot/mint-token.mjs) || exit 1
@@ -134,6 +137,28 @@ Minting `GH_TOKEN` explicitly (previous section) then only matters for API
 calls such as `gh pr create` — the step that sets the PR's author — and
 `mint-token.mjs` uses the same IDE detection, so it picks the right bot with no
 argument.
+
+## The gh shim (PRs and comments as the bot, automatically)
+
+`gh` never reads git config — it uses its stored human login or `GH_TOKEN` —
+so without help, a perfectly configured bot worktree still opens PRs as
+`qwts`. The shim closes that lane. One machine-wide install:
+
+```bash
+node tools/agent-bot/install-gh-shim.mjs
+```
+
+It writes `~/.config/agent-bot/bin/gh` and an idempotent PATH line to
+`~/.zshenv`. Behavior: outside bot territory, or with `GH_TOKEN` already
+set, it is a pure passthrough — the human's `gh` never changes. Inside a bot
+worktree it resolves the bot from the worktree's own config (the same
+`config.worktree` that governs commits, via `tools/agent-bot/worktree-token.mjs`,
+so git and `gh` can never disagree), mints a token cached in the private git
+dir, and exports it. **If the mint fails it aborts** — it never falls back to
+the human. Processes that never read `~/.zshenv` keep stock `gh` (fail-open);
+the ENG-0045
+([qwts/playbook-engineering#45](https://github.com/qwts/playbook-engineering/issues/45))
+review-requirement backstop covers that residue.
 
 ## Verifying it works
 
