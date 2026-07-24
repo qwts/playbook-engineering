@@ -9,7 +9,7 @@
     "docs:eval": "node tools/docs-eval/run.mjs",
     "inventory": "node tools/dependency-inventory/inventory.mjs",
     "repos:check": "node tools/repos/repos.mjs check",
-    "test": "node --test tools/docs-gov/tests/docs-gov.test.mjs tools/docs-eval/tests/docs-eval.test.mjs tools/repos/tests/repos.test.mjs tools/dependency-inventory/tests/inventory.test.mjs tools/agent-bot/tests/mint-token.test.mjs tools/agent-bot/tests/credential-helper.test.mjs tools/agent-bot/tests/detect-harness.test.mjs tools/agent-bot/tests/worktree-token.test.mjs"
+    "test": "node --test tools/docs-gov/tests/docs-gov.test.mjs tools/docs-eval/tests/docs-eval.test.mjs tools/repos/tests/repos.test.mjs tools/repos/tests/reconcile.test.mjs tools/dependency-inventory/tests/inventory.test.mjs tools/agent-bot/tests/mint-token.test.mjs tools/agent-bot/tests/credential-helper.test.mjs tools/agent-bot/tests/detect-harness.test.mjs tools/agent-bot/tests/worktree-token.test.mjs"
   },
   "devDependencies": {
     "markdownlint-cli": "^0.49.1"

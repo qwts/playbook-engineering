@@ -69,6 +69,26 @@ code so CI can gate on it; `status: onboarding` repos report drift without
 failing, which is what makes migrating an old repo under governance a declared
 state instead of a surprise.
 
+## Reconciling
+
+Drift's write path ([ENG-0038](../decisions/ENG-0038-governance-reconciler.md)):
+
+```bash
+node tools/repos/reconcile.mjs            # dry run: plan per repo
+node tools/repos/reconcile.mjs --apply    # converge; --repo <name> to scope
+```
+
+Three lanes per repo, split by GitHub's permission model: **settings**
+(ruleset review count, vulnerability reporting) applied with your token —
+Apps on a user account can never hold admin; **seeds** (missing baseline
+files from [`governance/baseline/`](../../governance/baseline/) plus the
+shared feature form) proposed as a bot-authored PR, so the seeded content is
+itself reviewed; **human** steps (repo creation, App installs,
+README/LICENSE) printed, never attempted. Only missing files are added —
+existing content is never clobbered. Run it from this checkout; onboard a
+repo by adding its manifest row, running `--apply`, reviewing the seed PR,
+then flipping the row to `active`.
+
 ## Governed repositories
 
 <!-- BEGIN GENERATED governed-repos -->

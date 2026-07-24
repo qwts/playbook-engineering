@@ -27,10 +27,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mint } from '../agent-bot/mint-token.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const APPS = ['qwts-claude-agent', 'qwts-codex-agent', 'qwts-cursor-agent', 'qwts-vscode-agent'];
-const BASELINE_FILES = ['README.md', 'LICENSE', 'AGENTS.md', 'CONTRIBUTING.md', '.github/CODEOWNERS'];
+export const APPS = ['qwts-claude-agent', 'qwts-codex-agent', 'qwts-cursor-agent', 'qwts-vscode-agent'];
+export const BASELINE_FILES = ['README.md', 'LICENSE', 'AGENTS.md', 'CONTRIBUTING.md', '.github/CODEOWNERS'];
 
-function userToken() {
+export function userToken() {
   if (process.env.GH_DRIFT_TOKEN) return process.env.GH_DRIFT_TOKEN;
   try {
     return execFileSync('gh', ['auth', 'token'], { encoding: 'utf8' }).trim();
@@ -39,7 +39,7 @@ function userToken() {
   }
 }
 
-async function api(path, token) {
+export async function api(path, token) {
   const res = await fetch(`https://api.github.com${path}`, {
     headers: {
       authorization: `Bearer ${token}`,
@@ -54,7 +54,7 @@ async function api(path, token) {
 }
 
 // One installation-repository listing per App; every repo check reads the set.
-async function appCoverage() {
+export async function appCoverage() {
   const coverage = {};
   for (const slug of APPS) {
     const { token } = await mint({ slug });
