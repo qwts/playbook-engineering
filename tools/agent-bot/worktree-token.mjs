@@ -19,8 +19,10 @@ import process from 'node:process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { mint } from './mint-token.mjs';
+import { HARNESSES } from './detect-harness.mjs';
 
 function git(...args) {
   // stdio pipes throughout: execFileSync otherwise passes git's stderr
@@ -29,22 +31,42 @@ function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-// The credential-helper line baked in by setup-worktree is the territory
-// marker: only worktrees it configured ever have one. A pinned identity
-// (either config key generation) overrides WHICH bot, but never turns a
-// checkout without the helper into bot territory — a stray qwts.agentApp in
-// a human clone must not make the shim mint (ENG-0045, decision 3).
-export function worktreeSlug(helperLines, pinned) {
-  let fromHelper = null;
+// ENG-0045 decision 1: the directory dictates the App. ~/.<tool>/worktrees/**
+// belongs to that tool's bot regardless of which process created it — and
+// regardless of whether the worktree config ever landed: sandboxed harnesses
+// (Codex) can be unable to write the shared git dir at setup time, and an
+// unconfigured bot worktree must still resolve as the bot, never the human.
+export function pathSlug(toplevel, home) {
+  if (!toplevel || !home) return null;
+  const m = toplevel.startsWith(`${home}/`) && toplevel.slice(home.length + 1).match(/^\.([a-z]+)\/worktrees\//);
+  if (!m) return null;
+  return HARNESSES.find((h) => h.slug.split('-')[1] === m[1])?.slug ?? null;
+}
+
+// The credential-helper line baked in by setup-worktree marks territory the
+// path rule cannot see (an explicitly configured worktree elsewhere).
+export function helperSlug(helperLines) {
   for (const line of (helperLines ?? '').split('\n').reverse()) {
     const m = line.match(/git-credential-bot\.mjs\s+(\S+)\s*$/);
-    if (m) {
-      fromHelper = m[1];
-      break;
-    }
+    if (m) return m[1];
   }
-  if (!fromHelper) return null;
-  return pinned || fromHelper;
+  return null;
+}
+
+// Resolution order: an explicit pin overrides WHICH bot but only inside
+// territory; the directory is the primary territory signal (decision 1); the
+// helper line covers configured worktrees outside the directory pattern. A
+// stray qwts.agentApp in a normal clone still never makes the shim mint
+// (decision 3) — a pin alone is not territory.
+export function resolveSlug({ pinned, toplevel, home, helperLines }) {
+  const territory = pathSlug(toplevel, home) ?? helperSlug(helperLines);
+  if (!territory) return null;
+  return pinned || territory;
+}
+
+// Back-compat name used by the gh shim's earlier tests.
+export function worktreeSlug(helperLines, pinned) {
+  return resolveSlug({ pinned, toplevel: null, home: null, helperLines });
 }
 
 async function main() {
@@ -69,7 +91,13 @@ async function main() {
   } catch {
     /* none configured */
   }
-  const slug = worktreeSlug(helpers, pinned);
+  let toplevel = null;
+  try {
+    toplevel = git('rev-parse', '--show-toplevel');
+  } catch {
+    /* bare or odd repo — path rule cannot apply */
+  }
+  const slug = resolveSlug({ pinned, toplevel, home: homedir(), helperLines: helpers });
   if (!slug) return; // human worktree — print nothing
 
   const cachePath = join(gitDir, 'agent-bot-token.json');

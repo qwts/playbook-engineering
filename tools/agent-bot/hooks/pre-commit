@@ -25,8 +25,19 @@ if [ -n "$AGENT" ]; then
       REMOTES=$(git remote -v 2>/dev/null || true)
       case "$REMOTES" in
         *github.com*)
-          echo "agent-bot guard (ENG-0045): agents may only commit changes within ~/.<tool>/worktrees/<repo>." >&2
-          echo "This commit would be attributed to the human ('${NAME:-unset}'). Create or use your tool's worktree." >&2
+          # Inside bot territory but resolving to the human: the worktree
+          # config never landed (sandboxed harnesses cannot always write the
+          # shared git dir at setup). Name the actual remedy.
+          case "$PWD" in
+            "$HOME"/.*/worktrees/*)
+              echo "agent-bot guard (ENG-0045): this IS a bot worktree, but its identity config never landed." >&2
+              echo "Run: node ~/Code/playbook-engineering/tools/agent-bot/setup-worktree.mjs (from an unsandboxed shell), then retry." >&2
+              ;;
+            *)
+              echo "agent-bot guard (ENG-0045): agents may only commit changes within ~/.<tool>/worktrees/<repo>." >&2
+              echo "This commit would be attributed to the human ('${NAME:-unset}'). Create or use your tool's worktree." >&2
+              ;;
+          esac
           exit 1
           ;;
       esac
