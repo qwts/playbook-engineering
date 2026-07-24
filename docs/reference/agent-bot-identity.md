@@ -193,3 +193,8 @@ dialog offers `qwts` **Approve** — never offered when `qwts` authored it.
   App's installation list — add it (setup step 3).
 - The wrong `[bot]` authored a PR: the launcher exported another harness's
   `GH_AGENT_APP` — fix the launch environment, not the agent.
+- A PR appears as `qwts` with the shim installed and working: a **GitHub MCP
+  connector** in the harness made it — connectors hold the human's OAuth,
+  never an App token, and bypass `git` and `gh` entirely. Disconnect the
+  GitHub connector in every agent harness (or deny its write tools); git and
+  `gh` are the only sanctioned write paths to GitHub.
