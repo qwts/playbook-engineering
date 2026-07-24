@@ -34,6 +34,17 @@ for d in $PATH; do
 done
 IFS=$OLDIFS
 [ -z "$REAL" ] && { echo "agent-bot gh shim: real gh not found on PATH" >&2; exit 127; }
+# gh whoami: who will gh act as HERE, stated plainly. Stock gh has no such
+# subcommand, so intercepting it shadows nothing. No mint, no network for
+# the bot answer; the human answer asks GitHub (same as gh api user).
+if [ "$1" = "whoami" ]; then
+  if [ -f "$TOKEN_TOOL" ] && command -v node >/dev/null 2>&1; then
+    SLUG=$(node "$TOKEN_TOOL" --slug 2>/dev/null)
+    if [ -n "$SLUG" ]; then echo "${SLUG}[bot] — bot territory (ENG-0045)"; exit 0; fi
+  fi
+  echo "$("$REAL" api user --jq .login 2>/dev/null || echo 'unknown') — human territory, gh is stock"
+  exit 0
+fi
 if [ -z "$GH_TOKEN" ] && [ -f "$TOKEN_TOOL" ] && command -v node >/dev/null 2>&1; then
   TOKEN=$(node "$TOKEN_TOOL") || {
     echo "agent-bot: token mint failed in a bot worktree — refusing to run gh as the human" >&2

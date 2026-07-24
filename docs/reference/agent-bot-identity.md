@@ -155,16 +155,17 @@ node tools/agent-bot/install-gh-shim.mjs
 
 It writes `~/.config/agent-bot/bin/gh` and an idempotent PATH line to
 `~/.zshenv`. Outside bot territory, or with `GH_TOKEN` already set, it is a
-pure passthrough — the human's `gh` never changes. Bot territory is marked by
-the credential helper `setup-worktree.mjs` wires into worktree-scoped git
-config (`extensions.worktreeConfig`, alongside the bot `user.name`/`user.email`);
-`worktree-token.mjs` reads exactly that, so git and `gh` never disagree and a
-stray `qwts.agentApp` pin in a normal clone never makes the shim mint. Inside
-a bot worktree it mints a token, caches it in the private git dir, and
-exports it. **If the mint fails it aborts** — it never falls back to the
+pure passthrough — the human's `gh` never changes. Bot territory is the
+worktree's directory first (`~/.<tool>/worktrees/**`, ENG-0045 decision 1 —
+holds even when a sandbox blocked the worktree config from landing), else the
+credential helper `setup-worktree.mjs` writes; a stray `qwts.agentApp` pin in
+a normal clone never makes the shim mint. Inside a bot worktree it mints a
+token, caches it in the private git dir (best-effort), and exports it. **If the mint fails it aborts** — it never falls back to the
 human. Processes that never read `~/.zshenv` keep stock `gh` (fail-open); the
 [ENG-0045](../decisions/ENG-0045-agent-environments-are-bot-territory.md)
-review-requirement backstop covers that residue.
+review-requirement backstop covers that residue. `gh whoami` answers plainly
+who `gh` acts as here — the bot slug in territory, your login outside
+(`gh api user` instead *errors* for bots: no `/user` on installation tokens).
 
 ## Verifying it works
 
@@ -175,9 +176,8 @@ GH_TOKEN=$(node tools/agent-bot/mint-token.mjs) gh api installation/repositories
 lists exactly the repositories the selected App is installed on. `--paginate`
 is load-bearing: without it only the first 30 repositories return, and a repo
 missing from that page reads as "not covered" — the verification lies. A PR
-opened under `GH_TOKEN` shows that App's `[bot]` as its author, and the
-review dialog offers **Approve** to `qwts` — the option that never appears
-when `qwts` is the author.
+opened under `GH_TOKEN` shows the App's `[bot]` as author, and the review
+dialog offers `qwts` **Approve** — never offered when `qwts` authored it.
 
 ## Failure modes
 
@@ -187,8 +187,8 @@ when `qwts` is the author.
   Apps, or the key was revoked — regenerate it.
 - `expected exactly one installation`: the App is installed on more than one
   account; set `GH_APP_INSTALLATION_ID` explicitly.
-- A `gh` call unexpectedly acts as `qwts`: `GH_TOKEN` is not exported in that
-  shell, or the token is older than an hour — re-mint.
+- A `gh` call acts as `qwts` in a bot worktree: run `gh whoami`;
+  `GH_TOKEN` unexported or expired — re-mint.
 - `git push` rejected while the token is set: the target repo is not in that
   App's installation list — add it (setup step 3).
 - The wrong `[bot]` authored a PR: the launcher exported another harness's

@@ -98,6 +98,11 @@ async function main() {
     /* bare or odd repo — path rule cannot apply */
   }
   const slug = resolveSlug({ pinned, toplevel, home: homedir(), helperLines: helpers });
+  // --slug: identity only, no mint, no network — the gh shim's `whoami`.
+  if (process.argv.includes('--slug')) {
+    if (slug) process.stdout.write(`${slug}\n`);
+    return;
+  }
   if (!slug) return; // human worktree — print nothing
 
   const cachePath = join(gitDir, 'agent-bot-token.json');
