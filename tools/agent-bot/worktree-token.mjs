@@ -84,9 +84,15 @@ async function main() {
   }
 
   const grant = await mint({ slug });
-  writeFileSync(cachePath, `${JSON.stringify({ slug, token: grant.token, expires_at: grant.expires_at })}\n`, {
-    mode: 0o600,
-  });
+  try {
+    writeFileSync(cachePath, `${JSON.stringify({ slug, token: grant.token, expires_at: grant.expires_at })}\n`, {
+      mode: 0o600,
+    });
+  } catch {
+    // Best-effort: a linked worktree's git dir lives under the MAIN
+    // checkout, which sandboxed harnesses (Codex) may not allow writes to.
+    // An uncached mint still succeeds — only a failed MINT may abort.
+  }
   process.stdout.write(`${grant.token}\n`);
 }
 
