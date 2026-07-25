@@ -8,7 +8,7 @@
 // hand, so a bare checkout can run the check with no install.
 
 import { readFileSync } from 'node:fs';
-import { GOVERNED_CODEX_FILES } from './baseline-files.mjs';
+import { GOVERNED_HARNESS_FILES } from './baseline-files.mjs';
 
 export const VALID_VISIBILITY = ['public', 'private'];
 export const VALID_STATUS = ['active', 'onboarding', 'retired'];
@@ -95,7 +95,7 @@ export function validateManifest(manifest) {
           } else {
             const excluded = new Set();
             for (const path of repo.codexSync.exclude) {
-              if (!GOVERNED_CODEX_FILES.includes(path)) {
+              if (!GOVERNED_HARNESS_FILES.includes(path)) {
                 errors.push(`${where}.codexSync.exclude contains unmanaged path ${JSON.stringify(path)}`);
               } else if (excluded.has(path)) {
                 errors.push(`${where}.codexSync.exclude contains duplicate path ${JSON.stringify(path)}`);

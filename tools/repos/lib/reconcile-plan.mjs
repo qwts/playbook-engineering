@@ -8,7 +8,7 @@
 //   human    — bootstrap steps no App on a user account can perform, plus
 //              files that are deliberately per-repo (README, LICENSE)
 
-import { GOVERNED_CLAUDE_FILES, GOVERNED_CODEX_FILES } from './baseline-files.mjs';
+import { GOVERNED_HARNESS_FILES } from './baseline-files.mjs';
 
 // check name -> { source (template in this repo), target (path in the repo) }
 export const SEEDS = {
@@ -18,9 +18,7 @@ export const SEEDS = {
   // The root .codex and .claude layers are the shared source of truth for
   // governed repos — seeded as-is, so every repo runs the same agent harness
   // configuration this one is developed under.
-  ...Object.fromEntries(
-    [...GOVERNED_CODEX_FILES, ...GOVERNED_CLAUDE_FILES].map((path) => [path, { source: path, target: path }]),
-  ),
+  ...Object.fromEntries(GOVERNED_HARNESS_FILES.map((path) => [path, { source: path, target: path }])),
   // The canonical shared form itself, not a copy — one source of truth.
   'feature issue template': {
     source: '.github/ISSUE_TEMPLATE/feature.yml',

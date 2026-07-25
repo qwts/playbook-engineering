@@ -45,7 +45,8 @@ generated table below by hand.
 - `status` — `active`, `onboarding`, or `retired`.
 - `sharedCi` — whether the repo consumes the reusable docs-governance workflow
   (`.github/workflows/docs-governance.yml`) at `@v1`.
-- `codexSync` — optional exact exceptions to the managed `.codex/` baseline.
+- `codexSync` — optional exact exceptions to the managed harness baseline
+  (`.codex/` and `.claude/settings.json`; the field keeps its original name).
   Set `enabled: false` to disable synchronization for a repository, or list
   managed paths under `exclude`. Unknown and duplicate paths fail validation.
 - `delta` — the one-line variance this repo carries from the shared baseline, or
@@ -93,12 +94,15 @@ attempted. Only missing files are added — existing content is never clobbered.
 Run it from this checkout; onboard a repo by adding its manifest row, running
 `--apply`, reviewing the seed PR, then flipping the row to `active`.
 
-## Continuous Codex synchronization
+## Continuous harness synchronization
 
 The [Governed Codex sync workflow](../../.github/workflows/codex-sync.yml)
-keeps the shared [`.codex/`](../../.codex/) environment current after
-onboarding. It runs when a managed source changes on `main`, on manual
-dispatch, and weekly as a repair loop. The command is also available locally:
+keeps the shared agent-harness environment — [`.codex/`](../../.codex/) and
+[`.claude/settings.json`](../../.claude/settings.json) — current after
+onboarding. Seeding only fixes a *missing* file; this is the lane that carries
+a change to either layer into repos that already have it. It runs when a
+managed source changes on `main`, on manual dispatch, and weekly as a repair
+loop. The command is also available locally:
 
 ```bash
 node tools/repos/sync-codex.mjs             # dry-run content comparison
