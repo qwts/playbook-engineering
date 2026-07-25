@@ -195,7 +195,7 @@ function approvalFixture(overrides = {}) {
       allow_rebase_merge: true,
     },
     pull,
-    files: [{ filename: GOVERNED_CODEX_FILES[0], status: 'modified' }],
+    files: [{ filename: GOVERNED_HARNESS_FILES[0], status: 'modified' }],
   };
 }
 
