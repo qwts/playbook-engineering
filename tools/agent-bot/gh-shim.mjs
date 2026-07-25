@@ -12,15 +12,47 @@ for d in $PATH; do
 done
 IFS=$OLDIFS
 [ -z "$REAL" ] && { echo "agent-bot gh shim: real gh not found on PATH" >&2; exit 127; }
-# gh whoami: who will gh act as HERE, stated plainly. An explicit GH_TOKEN
-# outranks worktree territory, matching gh itself; otherwise bot territory is
-# local/no-network and human territory asks GitHub through stock gh.
+
+TERRITORY_SLUG=""
+AGENT_SLUG=""
+if [ -f "$TOKEN_TOOL" ] && command -v node >/dev/null 2>&1; then
+  TERRITORY_SLUG=$(node "$TOKEN_TOOL" --slug 2>/dev/null)
+  AGENT_SLUG=$(node "$TOKEN_TOOL" --agent-slug 2>/dev/null)
+fi
+
+# Agent processes may use gh only from configured bot territory. Outside it,
+# fail before stock gh can exercise the human's stored credentials. A real
+# human shell has no agent-only marker and keeps the stock passthrough.
+if [ -n "$AGENT_SLUG" ] && [ -z "$TERRITORY_SLUG" ]; then
+  echo "agent-bot: $AGENT_SLUG agent is outside bot territory — refusing stock human gh" >&2
+  echo "Create or use a linked bot worktree, then retry." >&2
+  exit 1
+fi
+
+TOKEN_LOGIN=""
+if [ -n "$GH_TOKEN" ] && [ -n "$TERRITORY_SLUG" ]; then
+  TOKEN_LOGIN=$("$REAL" api graphql -f "query={viewer{login}}" --jq .data.viewer.login 2>/dev/null) || {
+    echo "agent-bot: could not resolve explicit GH_TOKEN identity" >&2
+    exit 1
+  }
+  if [ "$TOKEN_LOGIN" != "$\{TERRITORY_SLUG}[bot]" ]; then
+    echo "agent-bot: explicit GH_TOKEN is $TOKEN_LOGIN, expected $\{TERRITORY_SLUG}[bot] — refusing identity crossover" >&2
+    exit 1
+  fi
+fi
+
+# gh whoami: who will gh act as HERE, stated plainly. In bot territory an
+# explicit GH_TOKEN must resolve to that same bot; otherwise bot territory is
+# local/no-network and true human territory asks GitHub through stock gh.
 if [ "$1" = "whoami" ]; then
   if [ -n "$GH_TOKEN" ]; then
-    LOGIN=$("$REAL" api graphql -f "query={viewer{login}}" --jq .data.viewer.login 2>/dev/null) || {
-      echo "agent-bot: could not resolve explicit GH_TOKEN identity" >&2
-      exit 1
-    }
+    LOGIN="$TOKEN_LOGIN"
+    if [ -z "$LOGIN" ]; then
+      LOGIN=$("$REAL" api graphql -f "query={viewer{login}}" --jq .data.viewer.login 2>/dev/null) || {
+        echo "agent-bot: could not resolve explicit GH_TOKEN identity" >&2
+        exit 1
+      }
+    fi
     [ -n "$LOGIN" ] || {
       echo "agent-bot: explicit GH_TOKEN returned no identity" >&2
       exit 1
@@ -28,9 +60,9 @@ if [ "$1" = "whoami" ]; then
     echo "$LOGIN — explicit GH_TOKEN"
     exit 0
   fi
-  if [ -f "$TOKEN_TOOL" ] && command -v node >/dev/null 2>&1; then
-    SLUG=$(node "$TOKEN_TOOL" --slug 2>/dev/null)
-    if [ -n "$SLUG" ]; then echo "$\{SLUG}[bot] — bot territory (ENG-0045)"; exit 0; fi
+  if [ -n "$TERRITORY_SLUG" ]; then
+    echo "$\{TERRITORY_SLUG}[bot] — bot territory (ENG-0045)"
+    exit 0
   fi
   echo "$("$REAL" api user --jq .login 2>/dev/null || echo 'unknown') — human territory, gh is stock"
   exit 0

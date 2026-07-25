@@ -155,14 +155,18 @@ node tools/agent-bot/install-gh-shim.mjs
 ```
 
 It writes `~/.config/agent-bot/bin/gh` and an idempotent PATH line to
-`~/.zshenv`. Outside bot territory, or with `GH_TOKEN` already set, it is a
-pure passthrough — the human's `gh` never changes. Bot territory is the
-worktree's directory first (`~/.<tool>/worktrees/**`, ENG-0045 decision 1 —
-holds even when a sandbox blocked the worktree config from landing), else the
-credential helper `setup-worktree.mjs` writes; a stray `qwts.agentApp` pin in
-a normal clone never makes the shim mint. Inside a bot worktree it mints a
-token, caches it in the private git dir (best-effort), and exports it. **If the mint fails it aborts** — it never falls back to the
-human. Processes that never read `~/.zshenv` keep stock `gh` (fail-open); the
+`~/.zshenv`. A true human shell outside bot territory remains a pure
+passthrough, so the human's `gh` does not change. An agent process outside bot
+territory fails closed before stock `gh` can exercise the human credential.
+Bot territory is the worktree's directory first
+(`~/.<tool>/worktrees/**`, ENG-0045 decision 1 — holds even when a sandbox
+blocked the worktree config from landing), else the credential helper
+`setup-worktree.mjs` writes; a stray `qwts.agentApp` pin in a normal clone
+never makes the shim mint. Inside a bot worktree it mints a token, caches it
+in the private git dir (best-effort), and exports it. An explicit `GH_TOKEN`
+there must resolve to the same bot or the shim refuses the identity crossover.
+**If the mint fails it aborts** — it never falls back to the human. Processes
+that never read `~/.zshenv` keep stock `gh` (fail-open); the
 [ENG-0045](../decisions/ENG-0045-agent-environments-are-bot-territory.md)
 review-requirement backstop covers that residue. `gh whoami` answers plainly
 who `gh` acts as here — an explicit `GH_TOKEN`'s GraphQL viewer first, then
@@ -191,6 +195,9 @@ dialog offers `qwts` **Approve** — never offered when `qwts` authored it.
   account; set `GH_APP_INSTALLATION_ID` explicitly.
 - A `gh` call acts as `qwts` in a bot worktree: run `gh whoami`;
   `GH_TOKEN` unexported or expired — re-mint.
+- `agent is outside bot territory`: the shim detected an agent-only process
+  marker in a primary checkout or non-repo path. Create or enter a linked bot
+  worktree; the shim deliberately refuses to delegate to stock human `gh`.
 - `git push` rejected while the token is set: the target repo is not in that
   App's installation list — add it (setup step 3).
 - The wrong `[bot]` authored a PR: the launcher exported another harness's

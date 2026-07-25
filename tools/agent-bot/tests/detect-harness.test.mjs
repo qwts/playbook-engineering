@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { detectHarness } from '../detect-harness.mjs';
+import { detectAgentHarness, detectHarness } from '../detect-harness.mjs';
 
 test('Claude Code is detected from CLAUDECODE', () => {
   assert.equal(detectHarness({ CLAUDECODE: '1' }), 'qwts-claude-agent');
@@ -33,4 +33,16 @@ test('a bare shell resolves to no harness (stays human)', () => {
 
 test('a malformed env value never throws', () => {
   assert.doesNotThrow(() => detectHarness({ __CFBundleIdentifier: undefined, AI_AGENT: 123 }));
+});
+
+test('agent-process detection accepts agent-only markers', () => {
+  assert.equal(detectAgentHarness({ CODEX_SANDBOX: 'seatbelt' }), 'qwts-codex-agent');
+  assert.equal(detectAgentHarness({ CLAUDECODE: '1' }), 'qwts-claude-agent');
+  assert.equal(detectAgentHarness({ AI_AGENT: 'cursor-agent' }), 'qwts-cursor-agent');
+});
+
+test('agent-process detection ignores editor-only terminals', () => {
+  assert.equal(detectAgentHarness({ TERM_PROGRAM: 'vscode' }), null);
+  assert.equal(detectAgentHarness({ VSCODE_CWD: '/tmp' }), null);
+  assert.equal(detectAgentHarness({ CURSOR_TRACE_ID: 'human-terminal' }), null);
 });
