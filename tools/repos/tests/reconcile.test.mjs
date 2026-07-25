@@ -5,6 +5,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { plan, bumpReviewCount, defaultRuleset, SEEDS } from '../lib/reconcile-plan.mjs';
+import { BASELINE_FILES, GOVERNED_CODEX_FILES } from '../lib/baseline-files.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -21,6 +22,7 @@ test('failed checks route to the right lane', () => {
       'review required to merge',
       'private vulnerability reporting',
       'AGENTS.md',
+      '.codex/config.toml',
       'feature issue template',
       'LICENSE',
       'app: qwts-codex-agent',
@@ -32,7 +34,7 @@ test('failed checks route to the right lane', () => {
   );
   assert.deepEqual(
     p.seeds.map((s) => s.target),
-    ['AGENTS.md', '.github/ISSUE_TEMPLATE/feature.yml'],
+    ['AGENTS.md', '.codex/config.toml', '.github/ISSUE_TEMPLATE/feature.yml'],
   );
   assert.equal(p.human.length, 2); // LICENSE decision + App install
   assert.match(p.human.join('\n'), /LICENSE/);
@@ -96,5 +98,13 @@ test('every seed source exists in this checkout', () => {
   for (const seed of Object.values(SEEDS)) {
     assert.ok(existsSync(join(ROOT, seed.source)), `${seed.source} missing`);
     assert.ok(readFileSync(join(ROOT, seed.source), 'utf8').length > 0, `${seed.source} empty`);
+  }
+});
+
+test('every governed Codex file is both drift-checked and seeded from the root layer', () => {
+  assert.ok(GOVERNED_CODEX_FILES.length > 0);
+  for (const path of GOVERNED_CODEX_FILES) {
+    assert.ok(BASELINE_FILES.includes(path), `${path} missing from drift baseline`);
+    assert.deepEqual(SEEDS[path], { source: path, target: path });
   }
 });
