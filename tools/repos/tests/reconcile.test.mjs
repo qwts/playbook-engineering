@@ -194,9 +194,14 @@ test('the protected GitHub wrapper preserves the installed agent-bot identity sh
 
   const source = readFileSync(join(ROOT, '.codex/scripts/gh.zsh'), 'utf8');
   assert.doesNotMatch(source, /export PATH="\/opt\/homebrew\/bin:\$PATH"/);
+  const shimIndex = source.indexOf('.config/agent-bot/bin/gh');
+  const pathIndex = source.indexOf('command -v gh');
+  const fallbackIndex = source.indexOf('/opt/homebrew/bin/gh');
+  assert.notEqual(shimIndex, -1, 'the agent-bot shim path must be present');
+  assert.notEqual(pathIndex, -1, 'the inherited PATH lookup must be present');
+  assert.notEqual(fallbackIndex, -1, 'the Homebrew fallback must be present');
   assert.ok(
-    source.indexOf('.config/agent-bot/bin/gh') < source.indexOf('command -v gh')
-      && source.indexOf('command -v gh') < source.indexOf('/opt/homebrew/bin/gh'),
+    shimIndex < pathIndex && pathIndex < fallbackIndex,
     'the agent-bot shim and inherited PATH must be preferred before the Homebrew fallback',
   );
 });
