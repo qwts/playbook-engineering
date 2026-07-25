@@ -45,10 +45,10 @@ generated table below by hand.
 - `status` — `active`, `onboarding`, or `retired`.
 - `sharedCi` — whether the repo consumes the reusable docs-governance workflow
   (`.github/workflows/docs-governance.yml`) at `@v1`.
-- `codexSync` — optional exact exceptions to the managed harness baseline
-  (`.codex/` and `.claude/settings.json`; the field keeps its original name).
-  Set `enabled: false` to disable synchronization for a repository, or list
-  managed paths under `exclude`. Unknown and duplicate paths fail validation.
+- `codexSync` — optional exceptions to the managed harness baseline (`.codex/`
+  and `.claude/settings.json`; the field keeps its original name). Set
+  `enabled: false` to skip a repository, or list managed paths under
+  `exclude`. Unknown and duplicate paths fail validation.
 - `delta` — the one-line variance this repo carries from the shared baseline, or
   empty for a pure consumer. Deltas are surveyed in
   [the SOP inventory](../sop/inventory.md).
@@ -92,9 +92,7 @@ Per governed repo it verifies the
 requiring at least one approving review, private vulnerability reporting, and
 the installation of every active agent App in
 [`governance/agents.json`](../../governance/agents.json)
-([ENG-0016](../decisions/ENG-0016-agent-pr-bot-identity.md),
-[ENG-0079](../decisions/ENG-0079-per-agent-identity.md) — the roster is data,
-so a new agent is checked without a code change). Repos with
+([ENG-0079](../decisions/ENG-0079-per-agent-identity.md)). Repos with
 `status: active` are expected to conform — their drift sets a non-zero exit
 code so CI can gate on it; `status: onboarding` repos report drift without
 failing, which is what makes migrating an old repo under governance a declared
@@ -113,9 +111,9 @@ Three lanes per repo, split by GitHub's permission model: **settings**
 (ruleset review count, vulnerability reporting) applied with your token —
 Apps on a user account can never hold admin; **seeds** (missing baseline
 files from [`governance/baseline/`](../../governance/baseline/), the shared
-[`.codex/`](../../.codex/) and [`.claude/`](../../.claude/) agent-harness
-environments, and the shared feature
-form) proposed as a bot-authored PR, so the seeded content is itself reviewed;
+[`.codex/`](../../.codex/) and [`.claude/`](../../.claude/) harness
+environments, and the feature form) proposed as a bot-authored PR, so the
+seeded content is itself reviewed;
 **human** steps (repo creation, App installs, README/LICENSE) printed, never
 attempted. Only missing files are added — existing content is never clobbered.
 Run it from this checkout; onboard a repo by adding its manifest row, running
@@ -126,10 +124,10 @@ Run it from this checkout; onboard a repo by adding its manifest row, running
 The [Governed Codex sync workflow](../../.github/workflows/codex-sync.yml)
 keeps the shared agent-harness environment — [`.codex/`](../../.codex/) and
 [`.claude/settings.json`](../../.claude/settings.json) — current after
-onboarding. Seeding only fixes a *missing* file; this is the lane that carries
-a change to either layer into repos that already have it. It runs when a
-managed source changes on `main`, on manual dispatch, and weekly as a repair
-loop. The command is also available locally:
+onboarding. Seeding only fixes a *missing* file; this lane carries a change to
+either layer into repos that already have it. It runs when a managed source
+changes on `main`, on dispatch, and weekly as a repair loop. Also available
+locally:
 
 ```bash
 node tools/repos/sync-codex.mjs             # dry-run content comparison
