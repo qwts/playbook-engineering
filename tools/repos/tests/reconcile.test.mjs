@@ -130,6 +130,9 @@ test('the protected Git wrapper keeps destructive pushes behind normal approval'
   for (const args of [
     ['push', '--set-upstream', 'origin', 'branch'],
     ['push', '--dry-run', 'origin', 'branch'],
+    ['push', '--atomic', '--follow-tags', 'origin', 'branch'],
+    ['push', '--push-option=ci.skip', 'origin', 'branch'],
+    ['push', '--no-force', 'origin', 'branch'],
   ]) {
     const result = run(...args);
     assert.equal(result.status, 0, result.stderr);
@@ -139,8 +142,13 @@ test('the protected Git wrapper keeps destructive pushes behind normal approval'
   for (const args of [
     ['push', '--force', 'origin', 'branch'],
     ['push', '--force-with-lease', 'origin', 'branch'],
+    ['push', '--force-w', 'origin', 'branch'],
     ['push', '--delete', 'origin', 'branch'],
+    ['push', '--dele', 'origin', 'branch'],
     ['push', '--mirror', 'origin'],
+    ['push', '--mir', 'origin'],
+    ['push', '--pru', 'origin'],
+    ['push', '--future-option', 'origin', 'branch'],
     ['push', 'origin', '+branch:branch'],
     ['push', 'origin', ':branch'],
     ['push', 'origin', 'branch:'],
@@ -154,6 +162,11 @@ test('the protected Git wrapper keeps destructive pushes behind normal approval'
   const directRule = readFileSync(join(ROOT, '.codex/rules/environment.rules'), 'utf8')
     .split('# Trust standalone, non-destructive GitHub CLI development operations.')[0];
   assert.doesNotMatch(directRule, /^\s*"push",$/mu);
+});
+
+test('the governed Codex configuration explicitly enables project hooks', () => {
+  const config = readFileSync(join(ROOT, '.codex/config.toml'), 'utf8');
+  assert.match(config, /\[features\][\s\S]*\bhooks = true\b/);
 });
 
 test('setup respects npm, pnpm, yarn, and bun lockfile selection', (t) => {
