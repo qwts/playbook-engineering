@@ -191,6 +191,27 @@ test('refresh reports a dirty main even when it is already current', () => {
   assert.equal(readFileSync(path.join(clone, 'local.txt'), 'utf8'), 'keep me\n');
 });
 
+test('refresh preserves an ignored local file that origin/main starts tracking', () => {
+  const { root, seed, remote } = fixture();
+  const clone = path.join(root, 'clone');
+  writeFileSync(path.join(seed, '.gitignore'), 'local.env\n');
+  git(seed, 'add', '.gitignore');
+  git(seed, 'commit', '-m', 'ignore local environment');
+  git(seed, 'push', 'origin', 'main');
+  git(root, 'clone', remote, clone);
+  const before = git(clone, 'rev-parse', 'HEAD').trim();
+  writeFileSync(path.join(clone, 'local.env'), 'local secret\n');
+
+  writeFileSync(path.join(seed, 'local.env'), 'upstream default\n');
+  git(seed, 'add', '--force', 'local.env');
+  git(seed, 'commit', '-m', 'track environment default');
+  git(seed, 'push', 'origin', 'main');
+
+  assert.throws(() => refreshExistingRepo(clone), /would be overwritten by merge/);
+  assert.equal(git(clone, 'rev-parse', 'HEAD').trim(), before);
+  assert.equal(readFileSync(path.join(clone, 'local.env'), 'utf8'), 'local secret\n');
+});
+
 test('refresh refuses an ahead or divergent main without rewriting it', () => {
   const { root, seed, remote } = fixture();
   const clone = path.join(root, 'clone');

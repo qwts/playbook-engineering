@@ -180,7 +180,10 @@ export function refreshExistingRepo(repoDir, { git = runGit } = {}) {
   }
 
   if (mainWorktree) {
-    git(['merge', '--ff-only', 'origin/main'], { cwd: mainWorktree.worktree });
+    git(
+      ['merge', '--ff-only', '--no-overwrite-ignore', 'origin/main'],
+      { cwd: mainWorktree.worktree },
+    );
     return `fast-forwarded main in ${mainWorktree.worktree}`;
   }
 
