@@ -172,7 +172,8 @@ export function reviewRepository(client, {
     commentReactions,
   });
   const currentRequest = currentIssueComments.some((comment) =>
-    comment.user?.login === actor &&
+    comment.user?.type === 'User' &&
+    ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(comment.author_association) &&
     /^\s*@codex\s+review\s*$/i.test(comment.body ?? ''));
   if (requestReviews && aiReview.length === 0) {
     const result = {
