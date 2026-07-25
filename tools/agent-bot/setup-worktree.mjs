@@ -36,6 +36,14 @@ function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8' }).trim();
 }
 
+export function credentialHelperCommand(helper, slug) {
+  // Git executes ! helpers through a POSIX shell, including under Git Bash.
+  // fileURLToPath returns backslashes on Windows; the shell consumes those as
+  // escapes unless the path is normalized and quoted.
+  const shellPath = helper.replaceAll('\\', '/').replaceAll("'", "'\"'\"'");
+  return `!node '${shellPath}' ${slug}`;
+}
+
 async function botUid(slug) {
   const cachePath = join(homedir(), '.config', slug, 'bot-uid');
   try {
@@ -90,7 +98,7 @@ async function main() {
     /* nothing to unset on first run */
   }
   git('config', '--worktree', '--add', 'credential.helper', '');
-  git('config', '--worktree', '--add', 'credential.helper', `!node ${helper} ${slug}`);
+  git('config', '--worktree', '--add', 'credential.helper', credentialHelperCommand(helper, slug));
 
   try {
     const origin = git('remote', 'get-url', 'origin');
