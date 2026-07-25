@@ -13,6 +13,10 @@ export const GOVERNED_CODEX_FILES = [
   '.codex/scripts/setup.sh',
 ];
 
+// The Claude Code layer is one file, and deliberately so: it carries the
+// harness hooks the git-level automation cannot reach (ENG-0016), nothing else.
+export const GOVERNED_CLAUDE_FILES = ['.claude/settings.json'];
+
 export const BASELINE_FILES = [
   'README.md',
   'LICENSE',
@@ -20,4 +24,5 @@ export const BASELINE_FILES = [
   'CONTRIBUTING.md',
   '.github/CODEOWNERS',
   ...GOVERNED_CODEX_FILES,
+  ...GOVERNED_CLAUDE_FILES,
 ];
