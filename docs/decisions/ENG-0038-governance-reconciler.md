@@ -31,9 +31,10 @@ the phase that closes them.
    - **seeds** — missing baseline files are proposed as a **bot-authored PR**
      to the target repo, never a direct push: the seeded content itself goes
      through review. Seeds: `AGENTS.md`, `CONTRIBUTING.md`, `CODEOWNERS`
-     (templates under `governance/baseline/`), and the shared feature form
-     (this repo's own `.github/ISSUE_TEMPLATE/feature.yml` — one source of
-     truth, no copy).
+     (templates under `governance/baseline/`), the shared `.codex/`
+     development environment, and the shared feature form. The latter two
+     are copied from this repo's own root files so each has one source of
+     truth.
    - **human** — printed, never attempted: repo creation and per-repo App
      installation are user-to-server-only; `README.md` and `LICENSE` are
      deliberately per-repo (repo-baseline-files SOP) and generating them

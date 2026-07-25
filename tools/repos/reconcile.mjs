@@ -14,8 +14,9 @@
 //              enable private vulnerability reporting.
 //   seeds    — missing baseline files, proposed as a bot-authored PR to the
 //              target repo (never a direct push): AGENTS.md, CONTRIBUTING.md,
-//              CODEOWNERS, and the shared feature issue form. Only missing
-//              files are added — existing content is never clobbered.
+//              CODEOWNERS, the shared .codex environment, and the shared
+//              feature issue form. Only missing files are added — existing
+//              content is never clobbered.
 //   human    — printed, never attempted: repo creation, App installations,
 //              README/LICENSE (deliberately per-repo).
 //

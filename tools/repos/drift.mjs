@@ -25,10 +25,11 @@ import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mint } from '../agent-bot/mint-token.mjs';
+import { BASELINE_FILES } from './lib/baseline-files.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const APPS = ['qwts-claude-agent', 'qwts-codex-agent', 'qwts-cursor-agent', 'qwts-vscode-agent'];
-export const BASELINE_FILES = ['README.md', 'LICENSE', 'AGENTS.md', 'CONTRIBUTING.md', '.github/CODEOWNERS'];
+export { BASELINE_FILES };
 
 export function userToken() {
   if (process.env.GH_DRIFT_TOKEN) return process.env.GH_DRIFT_TOKEN;

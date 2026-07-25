@@ -81,13 +81,13 @@ node tools/repos/reconcile.mjs --apply    # converge; --repo <name> to scope
 Three lanes per repo, split by GitHub's permission model: **settings**
 (ruleset review count, vulnerability reporting) applied with your token —
 Apps on a user account can never hold admin; **seeds** (missing baseline
-files from [`governance/baseline/`](../../governance/baseline/) plus the
-shared feature form) proposed as a bot-authored PR, so the seeded content is
-itself reviewed; **human** steps (repo creation, App installs,
-README/LICENSE) printed, never attempted. Only missing files are added —
-existing content is never clobbered. Run it from this checkout; onboard a
-repo by adding its manifest row, running `--apply`, reviewing the seed PR,
-then flipping the row to `active`.
+files from [`governance/baseline/`](../../governance/baseline/), the shared
+[`.codex/`](../../.codex/) development environment, and the shared feature
+form) proposed as a bot-authored PR, so the seeded content is itself reviewed;
+**human** steps (repo creation, App installs, README/LICENSE) printed, never
+attempted. Only missing files are added — existing content is never clobbered.
+Run it from this checkout; onboard a repo by adding its manifest row, running
+`--apply`, reviewing the seed PR, then flipping the row to `active`.
 
 ## Governed repositories
 
