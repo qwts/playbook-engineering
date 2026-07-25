@@ -85,7 +85,8 @@ Three lanes per repo, split by GitHub's permission model: **settings**
 (ruleset review count, vulnerability reporting) applied with your token —
 Apps on a user account can never hold admin; **seeds** (missing baseline
 files from [`governance/baseline/`](../../governance/baseline/), the shared
-[`.codex/`](../../.codex/) development environment, and the shared feature
+[`.codex/`](../../.codex/) and [`.claude/`](../../.claude/) agent-harness
+environments, and the shared feature
 form) proposed as a bot-authored PR, so the seeded content is itself reviewed;
 **human** steps (repo creation, App installs, README/LICENSE) printed, never
 attempted. Only missing files are added — existing content is never clobbered.

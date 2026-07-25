@@ -12,8 +12,8 @@
       },
       {
         "path": "docs/reference/agent-bot-identity.md",
-        "budget": 3000,
-        "reason": "the identity runbook covers one system whose lanes (setup, worktrees, gh shim, whoami, verification, failure modes) are only safe read together; it has been prose-tightened to the bone and splitting it would separate the impersonation hazards from their remedies"
+        "budget": 3300,
+        "reason": "the identity runbook covers one system whose lanes (setup, worktrees, the Claude Code worktree hook, gh shim, whoami, verification, failure modes) are only safe read together; it has been prose-tightened to the bone and splitting it would separate the impersonation hazards from their remedies. Raised from 3000 for the harness-hook lane, which exists precisely because the git-level lane above it cannot always fire"
       }
     ],
     "contextSets": []
