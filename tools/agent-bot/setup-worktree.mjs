@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // One-shot bot-identity setup for the current git worktree (ENG-0016).
-// Harness-agnostic: it is invoked by git's own post-checkout hook (which fires
-// on `git worktree add` no matter what created the worktree), so it needs no
-// tool-specific session mechanism. Exits 0 quietly whenever it has nothing to
-// do, and configures nothing outside the worktree it runs in.
+// Harness-agnostic: git's post-checkout hook invokes it regardless of which
+// tool created the worktree. Provider transcript adapters are inputs to the
+// vendor-neutral execution-identity contract. Exits 0 quietly whenever it has
+// nothing to do, and configures nothing outside the worktree it runs in.
 //
 //   node tools/agent-bot/setup-worktree.mjs [app-slug]
 //
@@ -34,9 +34,19 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveAgentSlug } from './resolve-agent.mjs';
+import {
+  discoverTranscript,
+  ensureAgentIdentity,
+  harnessForApp,
+  identityFieldsFromEnv,
+  stateDirectory,
+} from './agent-identity.mjs';
 
 function git(...args) {
-  return execFileSync('git', args, { encoding: 'utf8' }).trim();
+  return execFileSync('git', args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
 }
 
 export function validateAppSlug(slug) {
@@ -91,6 +101,22 @@ async function main() {
   const helper = join(dirname(fileURLToPath(import.meta.url)), 'git-credential-bot.mjs');
 
   git('config', 'extensions.worktreeConfig', 'true');
+  let currentAgentId = null;
+  try {
+    currentAgentId = git('config', '--get', 'qwts.agentId') || null;
+  } catch {
+    /* first conversation in this worktree */
+  }
+  const executionIdentity = ensureAgentIdentity({
+    currentId: currentAgentId,
+    appSlug: slug,
+    botUid: uid,
+    harness: harnessForApp(slug),
+    transcript: discoverTranscript(),
+    fields: identityFieldsFromEnv(),
+    stateDir: stateDirectory(),
+  });
+  git('config', '--worktree', 'qwts.agentId', executionIdentity.id);
   git('config', '--worktree', 'user.name', `${slug}[bot]`);
   git('config', '--worktree', 'user.email', `${uid}+${slug}[bot]@users.noreply.github.com`);
   git('config', '--worktree', 'commit.gpgsign', 'false');
@@ -110,7 +136,10 @@ async function main() {
     /* no origin remote — fine */
   }
 
-  process.stdout.write(`worktree configured for ${slug}[bot]\n`);
+  const transcriptState = executionIdentity.transcript ? 'transcript bound' : 'transcript pending';
+  process.stdout.write(
+    `worktree configured for ${slug}[bot] as ${executionIdentity.id} (${transcriptState})\n`,
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

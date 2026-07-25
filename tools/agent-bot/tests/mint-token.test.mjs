@@ -105,8 +105,14 @@ test('a slug with no config directory fails with the expected paths named', () =
 });
 
 test('no selection at all names every option in the error', () => {
+  const isolated = mkdtempSync(join(tmpdir(), 'agent-bot-'));
   assert.throws(
-    () => appConfig({ argv: ['node', 'mint-token.mjs'], env: {}, home: mkdtempSync(join(tmpdir(), 'agent-bot-')) }),
+    () => appConfig({
+      argv: ['node', 'mint-token.mjs'],
+      env: {},
+      home: isolated,
+      cwd: isolated,
+    }),
     /--app <slug>, set GH_AGENT_APP, or set GH_APP_ID/,
   );
 });

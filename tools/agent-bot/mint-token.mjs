@@ -38,7 +38,12 @@ export function buildAppJwt(appId, privateKeyPem, nowSeconds) {
   return `${signingInput}.${b64url(signature)}`;
 }
 
-export function appConfig({ argv = process.argv, env = process.env, home = homedir() } = {}) {
+export function appConfig({
+  argv = process.argv,
+  env = process.env,
+  home = homedir(),
+  cwd = process.cwd(),
+} = {}) {
   const flag = argv.indexOf('--app');
   if (flag !== -1 && !argv[flag + 1]) {
     throw new Error('--app requires a slug, e.g. --app qwts-claude-agent');
@@ -53,7 +58,7 @@ export function appConfig({ argv = process.argv, env = process.env, home = homed
       privateKeyPem: readFileSync(env.GH_APP_PRIVATE_KEY_PATH, 'utf8'),
     };
   }
-  const slug = resolveAgentSlug({ explicit: explicitSlug, env });
+  const slug = resolveAgentSlug({ explicit: explicitSlug, env, cwd });
   if (slug) {
     const dir = join(home, '.config', slug);
     try {

@@ -9,8 +9,8 @@
 #     to a *[bot]* — i.e. no bot worktree config applies here);
 #   - any remote points at GitHub (a remoteless scratch repo cannot
 #     impersonate anyone, and agents legitimately use those for tests).
-# Bot-attributed commits pass untouched. Fails open on its own errors —
-# a broken guard must never brick commits machine-wide.
+# Bot-attributed commits must also resolve an Agent ID. The guard fails closed
+# for agent processes but does not evaluate ordinary human shells.
 
 AGENT=""
 [ "$CLAUDECODE" = "1" ] && AGENT=1
@@ -20,7 +20,21 @@ if [ -z "$AGENT" ]; then env | grep -q '^CODEX_' && AGENT=1; fi
 if [ -n "$AGENT" ]; then
   NAME=$(git config user.name 2>/dev/null || true)
   case "$NAME" in
-    *"[bot]"*) : ;; # resolves to a bot — legitimate agent commit
+    *"[bot]"*)
+      # Bot attribution alone identifies only the GitHub App. ENG-0081 adds a
+      # transcript-bound execution identity, automatically minted by setup.
+      HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+      IDENTITY_TOOL="$HOOK_DIR/../agent-identity.mjs"
+      ID=""
+      if [ -f "$IDENTITY_TOOL" ] && command -v node >/dev/null 2>&1; then
+        ID=$(node "$IDENTITY_TOOL" current 2>/dev/null || true)
+      fi
+      if [ -z "$ID" ] || ! node "$IDENTITY_TOOL" show "$ID" >/dev/null 2>&1; then
+        echo "agent-bot guard (ENG-0081): bot identity has no resolvable Agent-Identity." >&2
+        echo "Run: node ~/Code/playbook-engineering/tools/agent-bot/setup-worktree.mjs, then retry." >&2
+        exit 1
+      fi
+      ;;
     *)
       REMOTES=$(git remote -v 2>/dev/null || true)
       case "$REMOTES" in

@@ -13,10 +13,12 @@ detected (`qwts-claude-agent`, `qwts-codex-agent`, `qwts-cursor-agent`,
 — `qwts-claude-fable-agent` today, one per model as they are added, since the
 environment carries the tool but never the model.
 
-Every identity is registered in [`governance/agents.json`](../../governance/agents.json),
-which is what makes it *checked*: drift verifies exactly the active roster, so
-an App missing from that file is one nothing watches. Examples below use
-`qwts-claude-agent`; every step repeats per App.
+Every identity is registered in [`governance/agents.json`](../../governance/agents.json).
+Drift verifies that roster, so an unregistered App is not watched. Examples
+use `qwts-claude-agent`; every step repeats per App.
+
+Conversation provenance is covered by
+[agent execution identity](agent-execution-identity.md) (ENG-0081).
 
 ## One-time setup (human, in the browser — repeat per App)
 
@@ -179,15 +181,18 @@ that instruction rather than silently.
 **Pinning one agent within a harness.** In the worktree:
 
 ```bash
-git config --worktree qwts.agentApp qwts-claude-fable-agent && node ~/Code/playbook-engineering/tools/agent-bot/setup-worktree.mjs
+git config --worktree qwts.agentApp qwts-claude-fable-agent
+QWTS_AGENT_TRANSCRIPT_PROVIDER=claude \
+QWTS_AGENT_TRANSCRIPT_ID=<session-id> \
+  node ~/Code/playbook-engineering/tools/agent-bot/setup-worktree.mjs
 ```
 
 `setup-worktree.mjs` reads the pin ahead of detection (`--app` and
-`GH_AGENT_APP` still outrank both) and rewrites author, committer, and
-credential helper; the `gh` shim reads its slug back from that helper, so
-PRs and comments follow with nothing to remember. The `WorktreeCreate` hook
-cannot do this for you — it runs before a session exists, so no model is known
-yet — so pin afterwards, or export `GH_AGENT_APP` in the launcher.
+`GH_AGENT_APP` still outrank both). Pin after session start, or set
+`GH_AGENT_APP` in the launcher. Manual setup must also pass the transcript
+locator documented in
+[agent execution identity](agent-execution-identity.md); a pending identity is
+not reused automatically.
 
 **Agents do not work in primary checkouts.** Per
 [ENG-0045](../decisions/ENG-0045-agent-environments-are-bot-territory.md),
