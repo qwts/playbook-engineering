@@ -3,14 +3,22 @@ import assert from 'node:assert/strict';
 
 import { GOVERNED_CODEX_FILES } from '../lib/baseline-files.mjs';
 import {
+  CODEX_REVIEW_BOT,
+  CODEX_SYNC_BOT,
   CODEX_SYNC_BRANCH,
   CODEX_SYNC_TITLE,
+  COPILOT_REVIEW_BOT,
+  assertHumanLogin,
   chooseSyncHead,
+  cleanAiReviewEvidence,
   diffManagedFiles,
   gitBlobSha,
   managedCodexPaths,
+  preferredMergeFlag,
   syncPullBody,
+  validateSyncApprovalCandidate,
 } from '../lib/codex-sync.mjs';
+import { parseArgs, reviewRepository } from '../approve-codex-sync.mjs';
 import { syncRepository } from '../sync-codex.mjs';
 
 function canonical(path, content = 'canonical\n', mode = '100644') {
@@ -160,4 +168,227 @@ test('pull body records source provenance and every managed path', () => {
   assert.match(body, /playbook-engineering\/commit\/a{40}/);
   assert.match(body, /playbook-engineering#60/);
   for (const path of GOVERNED_CODEX_FILES) assert.match(body, new RegExp(path.replaceAll('.', '\\.')));
+});
+
+function approvalFixture(overrides = {}) {
+  const fullName = 'qwts/target';
+  const pull = {
+    number: 7,
+    title: CODEX_SYNC_TITLE,
+    body: `Source: https://github.com/qwts/playbook-engineering/commit/${'a'.repeat(40)}`,
+    html_url: 'https://github.com/qwts/target/pull/7',
+    draft: false,
+    auto_merge: null,
+    user: { login: `${CODEX_SYNC_BOT}[bot]`, type: 'Bot' },
+    head: { ref: CODEX_SYNC_BRANCH, sha: 'head-sha', repo: { full_name: fullName } },
+    base: { ref: 'main', repo: { full_name: fullName } },
+    ...overrides,
+  };
+  return {
+    owner: 'qwts',
+    entry: { name: 'target' },
+    metadata: {
+      full_name: fullName,
+      default_branch: 'main',
+      allow_merge_commit: true,
+      allow_squash_merge: true,
+      allow_rebase_merge: true,
+    },
+    pull,
+    files: [{ filename: GOVERNED_CODEX_FILES[0], status: 'modified' }],
+  };
+}
+
+test('approval validation accepts only the exact bot-owned managed sync shape', () => {
+  const fixture = approvalFixture();
+  assert.deepEqual(validateSyncApprovalCandidate(fixture), []);
+
+  const errors = validateSyncApprovalCandidate({
+    ...fixture,
+    pull: {
+      ...fixture.pull,
+      user: { login: 'human', type: 'User' },
+    },
+    files: [{ filename: 'src/application.mjs', status: 'modified' }],
+  });
+  assert.ok(errors.some((error) => error.includes(`author must be ${CODEX_SYNC_BOT}[bot]`)));
+  assert.ok(errors.some((error) => error.includes('unmanaged changed path')));
+});
+
+test('human identity and repository merge method selection fail closed', () => {
+  assert.equal(assertHumanLogin('qwts'), 'qwts');
+  assert.throws(() => assertHumanLogin(`${CODEX_SYNC_BOT}[bot]`), /requires a human/);
+  assert.equal(preferredMergeFlag({ allow_merge_commit: true }), '--merge');
+  assert.equal(preferredMergeFlag({ allow_squash_merge: true }), '--squash');
+  assert.equal(preferredMergeFlag({ allow_rebase_merge: true }), '--rebase');
+  assert.throws(() => preferredMergeFlag({ full_name: 'qwts/target' }), /no repository merge method/);
+});
+
+test('clean AI review evidence is current-head and finding-free', () => {
+  const headCommittedAt = '2026-07-25T10:00:00Z';
+  assert.deepEqual(
+    cleanAiReviewEvidence({
+      headSha: 'head-sha',
+      headCommittedAt,
+      issueReactions: [{
+        content: '+1',
+        created_at: '2026-07-25T10:01:00Z',
+        user: { login: CODEX_REVIEW_BOT },
+      }],
+    }).map((evidence) => evidence.provider),
+    ['codex'],
+  );
+  assert.deepEqual(
+    cleanAiReviewEvidence({
+      headSha: 'head-sha',
+      headCommittedAt,
+      commentReactions: [{
+        content: '+1',
+        created_at: '2026-07-25T10:01:00Z',
+        parentBody: '@codex fix the tests',
+        user: { login: CODEX_REVIEW_BOT },
+      }],
+    }),
+    [],
+  );
+
+  const copilotReview = {
+    id: 42,
+    state: 'COMMENTED',
+    commit_id: 'head-sha',
+    submitted_at: '2026-07-25T10:01:00Z',
+    user: { login: COPILOT_REVIEW_BOT },
+  };
+  assert.deepEqual(
+    cleanAiReviewEvidence({
+      headSha: 'head-sha',
+      headCommittedAt,
+      reviews: [copilotReview],
+    }).map((evidence) => evidence.provider),
+    ['copilot'],
+  );
+  assert.deepEqual(
+    cleanAiReviewEvidence({
+      headSha: 'head-sha',
+      headCommittedAt,
+      reviews: [copilotReview],
+      reviewComments: [{ pull_request_review_id: copilotReview.id }],
+      issueReactions: [{
+        content: '+1',
+        created_at: '2026-07-25T09:59:00Z',
+        user: { login: CODEX_REVIEW_BOT },
+      }],
+    }),
+    [],
+  );
+});
+
+test('approval helper arguments keep dry-run and explicit apply distinct', () => {
+  assert.deepEqual(
+    parseArgs(['--repo', 'overlook', '--json']),
+    { apply: false, json: true, repo: 'overlook', help: false },
+  );
+  assert.equal(parseArgs(['--apply']).apply, true);
+  assert.throws(() => parseArgs(['--repo']), /requires a repository name/);
+  assert.throws(() => parseArgs(['--unknown']), /unknown argument/);
+});
+
+test('apply approves and arms only a validated synchronization pull request', () => {
+  const fixture = approvalFixture();
+  const copilotReview = {
+    id: 42,
+    state: 'COMMENTED',
+    commit_id: fixture.pull.head.sha,
+    submitted_at: '2026-07-25T10:01:00Z',
+    user: { login: COPILOT_REVIEW_BOT },
+  };
+  const runs = [];
+  const client = {
+    json(args) {
+      const path = args[1];
+      if (path === '/repos/qwts/target') return fixture.metadata;
+      if (path === '/repos/qwts/target/pulls/7') return fixture.pull;
+      if (path === '/repos/qwts/target/commits/head-sha') {
+        return { commit: { committer: { date: '2026-07-25T10:00:00Z' } } };
+      }
+      throw new Error(`unexpected json request: ${args.join(' ')}`);
+    },
+    pages(path) {
+      if (path.includes('pulls?state=open')) return [fixture.pull];
+      if (path.endsWith('/files?per_page=100')) return fixture.files;
+      if (path.endsWith('/reviews?per_page=100')) return [copilotReview];
+      if (path.endsWith('/comments?per_page=100')) return [];
+      if (path.endsWith('/reactions?per_page=100')) return [];
+      throw new Error(`unexpected paged request: ${path}`);
+    },
+    run(args) {
+      runs.push(args);
+    },
+  };
+
+  const result = reviewRepository(client, {
+    owner: fixture.owner,
+    entry: fixture.entry,
+    actor: 'qwts',
+    apply: true,
+  });
+  assert.equal(result.status, 'applied');
+  assert.deepEqual(runs.map((args) => args.slice(0, 2)), [
+    ['pr', 'review'],
+    ['pr', 'merge'],
+  ]);
+  assert.ok(runs[0].includes('--approve'));
+  assert.ok(runs[1].includes('--auto'));
+  assert.ok(runs[1].includes('--merge'));
+});
+
+test('an existing current approval and auto-merge request make apply idempotent', () => {
+  const fixture = approvalFixture({
+    auto_merge: { merge_method: 'merge' },
+  });
+  const copilotReview = {
+    id: 42,
+    state: 'COMMENTED',
+    commit_id: fixture.pull.head.sha,
+    submitted_at: '2026-07-25T10:01:00Z',
+    user: { login: COPILOT_REVIEW_BOT },
+  };
+  const runs = [];
+  const client = {
+    json(args) {
+      if (args[1] === '/repos/qwts/target') return fixture.metadata;
+      if (args[1] === '/repos/qwts/target/commits/head-sha') {
+        return { commit: { committer: { date: '2026-07-25T10:00:00Z' } } };
+      }
+      return fixture.pull;
+    },
+    pages(path) {
+      if (path.includes('pulls?state=open')) return [fixture.pull];
+      if (path.endsWith('/files?per_page=100')) return fixture.files;
+      if (path.endsWith('/reviews?per_page=100')) {
+        return [
+          copilotReview,
+          {
+            user: { login: 'qwts' },
+            state: 'APPROVED',
+            commit_id: fixture.pull.head.sha,
+          },
+        ];
+      }
+      if (path.endsWith('/comments?per_page=100')) return [];
+      if (path.endsWith('/reactions?per_page=100')) return [];
+      throw new Error(`unexpected paged request: ${path}`);
+    },
+    run(args) {
+      runs.push(args);
+    },
+  };
+
+  reviewRepository(client, {
+    owner: fixture.owner,
+    entry: fixture.entry,
+    actor: 'qwts',
+    apply: true,
+  });
+  assert.deepEqual(runs, []);
 });

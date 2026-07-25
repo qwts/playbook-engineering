@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Software engineering planning and documentation",
   "scripts": {
+    "codex:approve": "node tools/repos/approve-codex-sync.mjs",
     "lint:markdown": "markdownlint docs/ AGENTS.md",
     "lint:markdown:fix": "markdownlint docs/ AGENTS.md --fix",
     "docs:gov": "node tools/docs-gov/docs-gov.mjs",
