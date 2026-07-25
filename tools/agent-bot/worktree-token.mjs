@@ -6,7 +6,8 @@
 //
 // Exit contract (the shim depends on it):
 //   0 + token on stdout  -> bot worktree, token ready
-//   0 + empty stdout     -> not a bot worktree; caller proceeds as the human
+//   0 + empty stdout     -> not a bot worktree; the shim separately decides
+//                           whether this is a human shell or a blocked agent
 //   non-zero             -> bot worktree but the mint FAILED; caller must
 //                           abort rather than fall back to the human
 //
@@ -22,7 +23,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { mint } from './mint-token.mjs';
-import { HARNESSES } from './detect-harness.mjs';
+import { detectAgentHarness, HARNESSES } from './detect-harness.mjs';
 
 function git(...args) {
   // stdio pipes throughout: execFileSync otherwise passes git's stderr
@@ -70,6 +71,15 @@ export function worktreeSlug(helperLines, pinned) {
 }
 
 async function main() {
+  // Agent-process detection is intentionally independent of the current
+  // repository. The gh shim uses it to fail closed before a stock human
+  // credential can be exercised from a primary checkout or non-repo path.
+  if (process.argv.includes('--agent-slug')) {
+    const agentSlug = detectAgentHarness(process.env);
+    if (agentSlug) process.stdout.write(`${agentSlug}\n`);
+    return;
+  }
+
   let gitDir;
   try {
     gitDir = git('rev-parse', '--absolute-git-dir');
