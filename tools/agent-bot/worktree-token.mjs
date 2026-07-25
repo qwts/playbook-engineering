@@ -47,7 +47,7 @@ export function pathSlug(toplevel, home) {
 // path rule cannot see (an explicitly configured worktree elsewhere).
 export function helperSlug(helperLines) {
   for (const line of (helperLines ?? '').split('\n').reverse()) {
-    const m = line.match(/git-credential-bot\.mjs\s+(\S+)\s*$/);
+    const m = line.match(/git-credential-bot\.mjs'?\s+(\S+)\s*$/);
     if (m) return m[1];
   }
   return null;

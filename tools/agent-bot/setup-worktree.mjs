@@ -36,6 +36,21 @@ function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8' }).trim();
 }
 
+export function validateAppSlug(slug) {
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(slug)) {
+    throw new Error(`invalid GitHub App slug: ${JSON.stringify(slug)}`);
+  }
+  return slug;
+}
+
+export function credentialHelperCommand(helper, slug) {
+  // Git executes ! helpers through a POSIX shell, including under Git Bash.
+  // fileURLToPath returns backslashes on Windows; the shell consumes those as
+  // escapes unless the path is normalized and quoted.
+  const shellPath = helper.replaceAll('\\', '/').replaceAll("'", "'\"'\"'");
+  return `!node '${shellPath}' ${validateAppSlug(slug)}`;
+}
+
 async function botUid(slug) {
   const cachePath = join(homedir(), '.config', slug, 'bot-uid');
   try {
@@ -64,9 +79,9 @@ function slugFromGitConfig() {
 async function main() {
   // Explicit override wins; otherwise detect the IDE from its own environment
   // so the bot matches the tool with no per-tool setup.
-  const slug =
+  const resolvedSlug =
     process.argv[2] ?? process.env.GH_AGENT_APP ?? slugFromGitConfig() ?? detectHarness();
-  if (!slug) return; // no identity resolved for this checkout — nothing to do
+  if (!resolvedSlug) return; // no identity resolved for this checkout — nothing to do
 
   let gitDir; let commonDir;
   try {
@@ -77,6 +92,7 @@ async function main() {
   }
   if (gitDir === commonDir) return; // primary checkout, not an agent worktree
 
+  const slug = validateAppSlug(resolvedSlug);
   const uid = await botUid(slug);
   const helper = join(dirname(fileURLToPath(import.meta.url)), 'git-credential-bot.mjs');
 
@@ -90,7 +106,7 @@ async function main() {
     /* nothing to unset on first run */
   }
   git('config', '--worktree', '--add', 'credential.helper', '');
-  git('config', '--worktree', '--add', 'credential.helper', `!node ${helper} ${slug}`);
+  git('config', '--worktree', '--add', 'credential.helper', credentialHelperCommand(helper, slug));
 
   try {
     const origin = git('remote', 'get-url', 'origin');
