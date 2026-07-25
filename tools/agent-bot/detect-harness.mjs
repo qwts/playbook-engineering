@@ -45,4 +45,28 @@ export function detectHarness(env = process.env) {
   return null;
 }
 
+// Deliberately narrower than detectHarness: these markers identify an agent
+// process, not merely a human terminal opened inside an editor. Security
+// guards use this resolver when allowing stock human credentials would cross
+// the agent/human identity boundary.
+export function detectAgentHarness(env = process.env) {
+  const explicit = typeof env.GH_AGENT_APP === 'string' ? env.GH_AGENT_APP : '';
+  if (/^qwts-(?:claude|codex|cursor|vscode)-agent$/.test(explicit)) return explicit;
+
+  const aiAgent = typeof env.AI_AGENT === 'string' ? env.AI_AGENT.toLowerCase() : '';
+  if (
+    env.CLAUDECODE === '1' ||
+    (typeof env.CLAUDE_CODE_ENTRYPOINT === 'string' && env.CLAUDE_CODE_ENTRYPOINT !== '') ||
+    aiAgent.includes('claude')
+  ) {
+    return 'qwts-claude-agent';
+  }
+  if (Object.keys(env).some((key) => key.startsWith('CODEX_')) || aiAgent.includes('codex')) {
+    return 'qwts-codex-agent';
+  }
+  if (aiAgent.includes('cursor')) return 'qwts-cursor-agent';
+  if (aiAgent.includes('vscode')) return 'qwts-vscode-agent';
+  return null;
+}
+
 export { HARNESSES };

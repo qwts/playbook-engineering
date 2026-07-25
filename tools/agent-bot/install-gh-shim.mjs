@@ -5,13 +5,13 @@
 //
 //   node tools/agent-bot/install-gh-shim.mjs
 //
-// Shim behavior: outside bot territory (or with GH_TOKEN already set) it is a
-// pure passthrough to the real gh — the human's gh use never changes. Inside
-// a bot worktree it resolves the bot from the worktree's own config, mints a
-// cached token, and exports GH_TOKEN. If the mint fails it ABORTS: it never
-// falls back to the human. New shells pick up the PATH line; processes that
-// never read ~/.zshenv keep stock gh (fail-open — ENG-0045 decision 4 is the
-// backstop).
+// Shim behavior: a true human shell outside bot territory is a pure
+// passthrough to the real gh. An agent process outside bot territory aborts
+// before stock gh can exercise the human credential. Inside a bot worktree it
+// resolves the bot from the worktree's own config, mints a cached token, and
+// exports GH_TOKEN. If the mint fails it ABORTS: it never falls back to the
+// human. New shells pick up the PATH line; processes that never read ~/.zshenv
+// still keep stock gh, so launchers must preserve the shim path.
 
 import { mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
