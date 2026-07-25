@@ -69,11 +69,16 @@ export function desktopConfigPath(home = homedir(), platform = process.platform,
 
 // Default is ENG-0045 bot territory — `~/.claude/worktrees` — which is also
 // what the gh shim and the pre-commit guard recognize.
+//
+// Always absolute: Claude Code rejects a relative path outright, and neither
+// source of an override is guaranteed to give one. A `~` or a relative value
+// anchors at the home directory, the only base a user preference can mean.
 export function worktreeRoot({ home = homedir(), desktopConfig = null, env = process.env } = {}) {
-  if (env.AGENT_WORKTREE_ROOT) return env.AGENT_WORKTREE_ROOT;
+  const absolute = (value) => resolve(home, value.replace(/^~(?=$|[/\\])/, home));
+  if (env.AGENT_WORKTREE_ROOT) return absolute(env.AGENT_WORKTREE_ROOT);
   try {
     const custom = JSON.parse(desktopConfig).preferences?.chillingSlothLocation?.customPath;
-    if (typeof custom === 'string' && custom !== '') return custom;
+    if (typeof custom === 'string' && custom !== '') return absolute(custom);
   } catch {
     /* no readable desktop config — the territory default stands */
   }
