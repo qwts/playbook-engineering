@@ -169,6 +169,38 @@ test('the governed Codex configuration explicitly enables project hooks', () => 
   assert.match(config, /\[features\][\s\S]*\bhooks = true\b/);
 });
 
+test('the protected GitHub wrapper preserves the installed agent-bot identity shim', {
+  skip: !existsSync('/bin/zsh'),
+}, (t) => {
+  const temp = mkdtempSync(join(tmpdir(), 'codex-gh-wrapper-'));
+  t.after(() => rmSync(temp, { recursive: true, force: true }));
+  const home = join(temp, 'home');
+  const shimDir = join(home, '.config', 'agent-bot', 'bin');
+  const zdot = join(temp, 'zdot');
+  mkdirSync(shimDir, { recursive: true });
+  mkdirSync(zdot);
+  const fakeShim = join(shimDir, 'gh');
+  writeFileSync(fakeShim, '#!/bin/sh\nprintf "agent-bot:%s\\n" "$*"\n');
+  chmodSync(fakeShim, 0o755);
+  writeFileSync(join(zdot, '.zshenv'), 'export PATH="/opt/homebrew/bin:$PATH"\n');
+
+  const result = spawnSync('/bin/zsh', [join(ROOT, '.codex/scripts/gh.zsh'), '--version'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin', ZDOTDIR: zdot },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'agent-bot:--version');
+
+  const source = readFileSync(join(ROOT, '.codex/scripts/gh.zsh'), 'utf8');
+  assert.doesNotMatch(source, /export PATH="\/opt\/homebrew\/bin:\$PATH"/);
+  assert.ok(
+    source.indexOf('.config/agent-bot/bin/gh') < source.indexOf('command -v gh')
+      && source.indexOf('command -v gh') < source.indexOf('/opt/homebrew/bin/gh'),
+    'the agent-bot shim and inherited PATH must be preferred before the Homebrew fallback',
+  );
+});
+
 test('setup respects npm, pnpm, yarn, and bun lockfile selection', (t) => {
   const fixtures = [
     { manager: 'npm', packageManager: null, lockfile: 'package-lock.json', expected: 'ci --no-audit --no-fund' },
