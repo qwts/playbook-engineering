@@ -13,9 +13,11 @@ after(() => rmSync(root, { recursive: true, force: true }));
 function runShim({
   slug = '',
   agentSlug = '',
+  agentEnv = {},
   token = '',
   tokenLogin = 'explicit-token-owner',
   args = ['whoami'],
+  tokenToolAvailable = true,
 } = {}) {
   const shimDir = join(root, `shim-${Math.random()}`);
   const realDir = join(root, `real-${Math.random()}`);
@@ -23,11 +25,13 @@ function runShim({
   mkdirSync(realDir);
 
   const tokenTool = join(root, `token-${Math.random()}.mjs`);
-  writeFileSync(
-    tokenTool,
-    `if (process.argv.includes('--slug')) process.stdout.write(${JSON.stringify(slug)});
+  if (tokenToolAvailable) {
+    writeFileSync(
+      tokenTool,
+      `if (process.argv.includes('--slug')) process.stdout.write(${JSON.stringify(slug)});
 if (process.argv.includes('--agent-slug')) process.stdout.write(${JSON.stringify(agentSlug)});`,
-  );
+    );
+  }
 
   const shim = join(shimDir, 'gh');
   writeFileSync(shim, buildGhShim(tokenTool));
@@ -44,15 +48,19 @@ exit 64
   );
   chmodSync(real, 0o755);
 
+  const cleanEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith('CODEX_')),
+  );
   return spawnSync('sh', [shim, ...args], {
     encoding: 'utf8',
     env: {
-      ...process.env,
+      ...cleanEnv,
       AI_AGENT: '',
       CLAUDECODE: '',
       CLAUDE_CODE_ENTRYPOINT: '',
       GH_TOKEN: token,
       PATH: [shimDir, realDir, process.env.PATH].filter(Boolean).join(delimiter),
+      ...agentEnv,
     },
   });
 }
@@ -101,4 +109,14 @@ test('an agent outside bot territory cannot query or write through stock gh', ()
     assert.equal(result.status, 1);
     assert.match(result.stderr, /outside bot territory.*refusing stock human gh/);
   }
+});
+
+test('an agent fails closed when the installed token-helper path is stale', () => {
+  const result = runShim({
+    agentEnv: { CODEX_SANDBOX: 'seatbelt' },
+    args: ['issue', 'create', '--title', 'forbidden'],
+    tokenToolAvailable: false,
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /token helper or Node is unavailable.*refusing stock human gh/);
 });

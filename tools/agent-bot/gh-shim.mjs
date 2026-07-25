@@ -13,18 +13,57 @@ done
 IFS=$OLDIFS
 [ -z "$REAL" ] && { echo "agent-bot gh shim: real gh not found on PATH" >&2; exit 127; }
 
+AGENT_CONTEXT=""
+[ "$CLAUDECODE" = "1" ] && AGENT_CONTEXT=1
+[ -n "$CLAUDE_CODE_ENTRYPOINT" ] && AGENT_CONTEXT=1
+[ -n "$AI_AGENT" ] && AGENT_CONTEXT=1
+case "$GH_AGENT_APP" in
+  qwts-claude-agent|qwts-codex-agent|qwts-cursor-agent|qwts-vscode-agent)
+    AGENT_CONTEXT=1
+    ;;
+esac
+if [ -z "$AGENT_CONTEXT" ]; then
+  env | grep -q '^CODEX_' && AGENT_CONTEXT=1
+fi
+
+TERRITORY_HINT=""
+case "$PWD" in
+  "$HOME"/.claude/worktrees/*|"$HOME"/.codex/worktrees/*|\
+  "$HOME"/.cursor/worktrees/*|"$HOME"/.vscode/worktrees/*)
+    TERRITORY_HINT=1
+    ;;
+esac
+if [ -z "$TERRITORY_HINT" ] && command -v git >/dev/null 2>&1; then
+  HELPERS=$(git config --get-all credential.helper 2>/dev/null || true)
+  case "$HELPERS" in
+    *git-credential-bot.mjs*) TERRITORY_HINT=1 ;;
+  esac
+fi
+
 TERRITORY_SLUG=""
 AGENT_SLUG=""
-if [ -f "$TOKEN_TOOL" ] && command -v node >/dev/null 2>&1; then
-  TERRITORY_SLUG=$(node "$TOKEN_TOOL" --slug 2>/dev/null)
-  AGENT_SLUG=$(node "$TOKEN_TOOL" --agent-slug 2>/dev/null)
+if [ ! -f "$TOKEN_TOOL" ] || ! command -v node >/dev/null 2>&1; then
+  if [ -n "$AGENT_CONTEXT$TERRITORY_HINT" ]; then
+    echo "agent-bot: token helper or Node is unavailable — refusing stock human gh" >&2
+    exit 1
+  fi
+else
+  TERRITORY_SLUG=$(node "$TOKEN_TOOL" --slug 2>/dev/null) || {
+    echo "agent-bot: territory detection failed — refusing stock human gh" >&2
+    exit 1
+  }
+  AGENT_SLUG=$(node "$TOKEN_TOOL" --agent-slug 2>/dev/null) || {
+    echo "agent-bot: agent detection failed — refusing stock human gh" >&2
+    exit 1
+  }
+  [ -n "$AGENT_SLUG" ] && AGENT_CONTEXT=1
 fi
 
 # Agent processes may use gh only from configured bot territory. Outside it,
 # fail before stock gh can exercise the human's stored credentials. A real
 # human shell has no agent-only marker and keeps the stock passthrough.
-if [ -n "$AGENT_SLUG" ] && [ -z "$TERRITORY_SLUG" ]; then
-  echo "agent-bot: $AGENT_SLUG agent is outside bot territory — refusing stock human gh" >&2
+if [ -n "$AGENT_CONTEXT" ] && [ -z "$TERRITORY_SLUG" ]; then
+  echo "agent-bot: $\{AGENT_SLUG:-detected agent} is outside bot territory — refusing stock human gh" >&2
   echo "Create or use a linked bot worktree, then retry." >&2
   exit 1
 fi
