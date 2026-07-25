@@ -286,11 +286,109 @@ test('clean AI review evidence is current-head and finding-free', () => {
 test('approval helper arguments keep dry-run and explicit apply distinct', () => {
   assert.deepEqual(
     parseArgs(['--repo', 'overlook', '--json']),
-    { apply: false, json: true, repo: 'overlook', help: false },
+    {
+      apply: false,
+      requestReviews: false,
+      json: true,
+      repo: 'overlook',
+      help: false,
+    },
   );
   assert.equal(parseArgs(['--apply']).apply, true);
+  assert.equal(parseArgs(['--request-reviews']).requestReviews, true);
+  assert.throws(
+    () => parseArgs(['--request-reviews', '--apply']),
+    /separate phases/,
+  );
   assert.throws(() => parseArgs(['--repo']), /requires a repository name/);
   assert.throws(() => parseArgs(['--unknown']), /unknown argument/);
+});
+
+test('human review-request mode posts once for the current head', () => {
+  const fixture = approvalFixture();
+  const runs = [];
+  const client = {
+    json(args) {
+      const path = args[1];
+      if (path === '/repos/qwts/target') return fixture.metadata;
+      if (path === '/repos/qwts/target/pulls/7') return fixture.pull;
+      if (path === '/repos/qwts/target/commits/head-sha') {
+        return { commit: { committer: { date: '2026-07-25T10:00:00Z' } } };
+      }
+      throw new Error(`unexpected json request: ${args.join(' ')}`);
+    },
+    pages(path) {
+      if (path.includes('pulls?state=open')) return [fixture.pull];
+      if (path.endsWith('/files?per_page=100')) return fixture.files;
+      if (path.endsWith('/reviews?per_page=100')) return [];
+      if (path.endsWith('/comments?per_page=100')) return [];
+      if (path.endsWith('/reactions?per_page=100')) return [];
+      throw new Error(`unexpected paged request: ${path}`);
+    },
+    run(args) {
+      runs.push(args);
+    },
+  };
+
+  const result = reviewRepository(client, {
+    owner: fixture.owner,
+    entry: fixture.entry,
+    actor: 'qwts',
+    apply: false,
+    requestReviews: true,
+  });
+  assert.equal(result.status, 'review-requested');
+  assert.deepEqual(runs, [[
+    'pr',
+    'comment',
+    '7',
+    '--repo',
+    'qwts/target',
+    '--body',
+    '@codex review',
+  ]]);
+});
+
+test('human review-request mode does not duplicate a current-head request', () => {
+  const fixture = approvalFixture();
+  const runs = [];
+  const currentRequest = {
+    id: 99,
+    created_at: '2026-07-25T10:01:00Z',
+    user: { login: 'qwts' },
+    body: '@codex review',
+  };
+  const client = {
+    json(args) {
+      if (args[1] === '/repos/qwts/target') return fixture.metadata;
+      if (args[1] === '/repos/qwts/target/commits/head-sha') {
+        return { commit: { committer: { date: '2026-07-25T10:00:00Z' } } };
+      }
+      return fixture.pull;
+    },
+    pages(path) {
+      if (path.includes('pulls?state=open')) return [fixture.pull];
+      if (path.endsWith('/files?per_page=100')) return fixture.files;
+      if (path.includes('/issues/7/comments')) return [currentRequest];
+      if (path.endsWith('/reviews?per_page=100')) return [];
+      if (path.endsWith('/comments?per_page=100')) return [];
+      if (path.endsWith('/reactions?per_page=100')) return [];
+      throw new Error(`unexpected paged request: ${path}`);
+    },
+    run(args) {
+      runs.push(args);
+    },
+  };
+
+  const result = reviewRepository(client, {
+    owner: fixture.owner,
+    entry: fixture.entry,
+    actor: 'qwts',
+    apply: false,
+    requestReviews: true,
+  });
+  assert.equal(result.status, 'review-pending');
+  assert.deepEqual(runs, []);
 });
 
 test('apply approves and arms only a validated synchronization pull request', () => {
