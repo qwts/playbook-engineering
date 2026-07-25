@@ -38,7 +38,8 @@ lookup key backed by structured private data.
    to setup. Launchers use the vendor-neutral
    `QWTS_AGENT_TRANSCRIPT_PROVIDER` and `QWTS_AGENT_TRANSCRIPT_ID` contract.
    An unsupported provider may mint a visibly pending record, but cannot
-   finalize until a locator is bound.
+   finalize until a locator is bound. Setup never reuses a pending record
+   implicitly; the operator must supply the locator or explicitly accept reuse.
 5. **Delegation mints, never copies.** A child sharing a worktree receives its
    own Agent ID and records the parent. `QWTS_AGENT_ID` lets that child override
    the worktree's root ID without changing Git or GitHub identity.
@@ -75,6 +76,12 @@ conversation of that actor*.
   has no valid registry record.
 - Codex and Claude bind automatically. Other harnesses remain explicitly
   pending until their launchers supply a transcript locator.
+- Hook enforcement is cooperative attribution hygiene, not an adversarial
+  security boundary: `--no-verify` and missing agent markers can bypass it.
+  Making registry resolution mandatory in the token-minter chokepoint is
+  deliberately deferred to a separate decision.
+- `status: active` means the record is not finalized; it makes no claim that a
+  process or provider session is currently alive.
 - The registry is workstation-local. Cross-machine synchronization would expose
   private transcript locators and requires a separate privacy and custody
   decision.

@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
+  linkSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -159,11 +160,21 @@ function identityPath(root, id) {
 
 function writeNewIdentity(root, record) {
   ensureStateDirectory(root);
-  writeFileSync(identityPath(root, record.id), `${JSON.stringify(record, null, 2)}\n`, {
+  const target = identityPath(root, record.id);
+  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, {
     encoding: 'utf8',
     flag: 'wx',
     mode: 0o600,
   });
+  try {
+    // A hard link publishes the fully-written record atomically while keeping
+    // allocation exclusive: linkSync fails with EEXIST if another allocator
+    // already claimed this Agent ID.
+    linkSync(temporary, target);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
 }
 
 function replaceIdentity(root, record) {
@@ -192,11 +203,17 @@ function withLock(lock, label, operation) {
       if (error.code !== 'EEXIST') throw error;
       try {
         if (Date.now() - statSync(lock).mtimeMs > 30_000) {
-          rmSync(lock, { recursive: true, force: true });
+          const stale = `${lock}.stale.${process.pid}.${randomUUID()}`;
+          // Rename is the compare-and-swap: exactly one waiter can move the
+          // observed stale lock. Removing by its unique name cannot delete a
+          // fresh lock another waiter acquired at the original path.
+          renameSync(lock, stale);
+          rmSync(stale, { recursive: true, force: true });
           continue;
         }
-      } catch {
-        /* another writer released it between checks */
+      } catch (lockError) {
+        if (lockError.code !== 'ENOENT') throw lockError;
+        /* another writer released or took over the observed lock */
       }
       sleep(10);
     }
@@ -304,7 +321,15 @@ function findTranscriptIdentity(appSlug, transcript, stateDir) {
     if (!name.endsWith('.json')) continue;
     const id = name.slice(0, -5);
     if (!ID_PATTERN.test(id)) continue;
-    const record = readAgentIdentity(id, { stateDir });
+    let record;
+    try {
+      record = readAgentIdentity(id, { stateDir });
+    } catch (error) {
+      // Records are audit data, not an availability gate. A crash artifact,
+      // manual corruption, or older schema must not brick every future setup.
+      console.warn(`agent-identity: ignoring invalid registry record ${id}: ${error.message}`);
+      continue;
+    }
     if (record.github.appSlug === appSlug && sameTranscript(record.transcript, transcript)) {
       return record;
     }
@@ -377,6 +402,7 @@ export function ensureAgentIdentity({
   transcript = discoverTranscript(),
   fields = identityFieldsFromEnv(),
   subjects = [],
+  reusePending = false,
   stateDir = stateDirectory(),
   now = () => new Date(),
   idFactory,
@@ -386,9 +412,12 @@ export function ensureAgentIdentity({
     if (currentId) {
       const current = readAgentIdentity(currentId, { stateDir });
       if (current.github.appSlug === appSlug) {
-        if (!transcript || sameTranscript(current.transcript, transcript)) identity = current;
-        else if (!current.transcript) {
-          identity = bindAgentTranscript(current.id, transcript, { stateDir, now });
+        if (transcript && sameTranscript(current.transcript, transcript)) identity = current;
+        else if (transcript && !current.transcript) {
+          identity = findTranscriptIdentity(appSlug, transcript, stateDir)
+            ?? bindAgentTranscript(current.id, transcript, { stateDir, now });
+        } else if (!transcript && reusePending && !current.transcript) {
+          identity = current;
         }
         // A different provider conversation reused the worktree: preserve the
         // old immutable record and resolve or mint its execution identity.
@@ -443,8 +472,8 @@ function parseCli(argv) {
       positional.push(token);
       continue;
     }
-    if (token === '--json') {
-      flags.set('json', ['true']);
+    if (token === '--json' || token === '--reuse-pending') {
+      flags.set(token.slice(2), ['true']);
       continue;
     }
     const value = tokens[++index];
@@ -498,6 +527,7 @@ async function main() {
           parentId: args.one('parent') ?? identityFieldsFromEnv().parentId,
         },
         subjects: args.flags.get('subject') ?? [],
+        reusePending: args.flags.has('reuse-pending'),
         stateDir,
       });
       gitConfig(['config', 'extensions.worktreeConfig', 'true']);

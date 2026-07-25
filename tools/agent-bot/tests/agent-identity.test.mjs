@@ -8,6 +8,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -115,6 +116,35 @@ test('mints a private transcript-bound record with a credential provider but no 
   assert.equal(statSync(stateDir).mode & 0o777, 0o700);
 });
 
+test('a corrupt audit record is warned about but cannot brick new identity setup', () => {
+  const stateDir = state();
+  writeFileSync(path.join(stateDir, `${id(99)}.json`), '{"half-written":');
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(message);
+  try {
+    const record = ensureAgentIdentity(mintOptions(stateDir, {
+      transcript: { provider: 'codex', id: 'healthy-thread' },
+      idFactory: () => id(1),
+    }));
+    assert.equal(record.transcript.id, 'healthy-thread');
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /ignoring invalid registry record/);
+});
+
+test('initial publication is exclusive and leaves no partial target or temp file', () => {
+  const stateDir = state();
+  mintAgentIdentity(mintOptions(stateDir));
+  assert.throws(
+    () => mintAgentIdentity(mintOptions(stateDir)),
+    /could not allocate a unique Agent ID/,
+  );
+  assert.deepEqual(readdirSync(stateDir), [`${id(1)}.json`]);
+});
+
 test('reuses one identity within a transcript, binds a pending record, and rotates on conversation change', () => {
   const stateDir = state();
   let next = 1;
@@ -138,12 +168,27 @@ test('reuses one identity within a transcript, binds a pending record, and rotat
     transcript: null,
     idFactory,
   }));
+  const nextPending = ensureAgentIdentity(mintOptions(stateDir, {
+    currentId: pending.id,
+    transcript: null,
+    idFactory,
+  }));
+  assert.notEqual(nextPending.id, pending.id);
+  const explicitlyReused = ensureAgentIdentity(mintOptions(stateDir, {
+    currentId: nextPending.id,
+    transcript: null,
+    reusePending: true,
+    idFactory,
+  }));
+  assert.equal(explicitlyReused.id, nextPending.id);
+
   const bound = ensureAgentIdentity(mintOptions(stateDir, {
     currentId: pending.id,
+    transcript: { provider: 'codex', id: 'thread-pending' },
     idFactory,
   }));
   assert.equal(bound.id, pending.id);
-  assert.equal(bound.transcript.id, 'thread-1');
+  assert.equal(bound.transcript.id, 'thread-pending');
 
   const nextConversation = ensureAgentIdentity(mintOptions(stateDir, {
     currentId: first.id,
@@ -208,6 +253,9 @@ test('evidence is deduplicated and finalization can seal a transcript digest', (
 test('concurrent evidence writers do not lose one another', async () => {
   const stateDir = state();
   const record = mintAgentIdentity(mintOptions(stateDir));
+  const staleLock = path.join(stateDir, `${record.id}.json.lock`);
+  mkdirSync(staleLock);
+  utimesSync(staleLock, new Date(0), new Date(0));
   const cli = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     '..',

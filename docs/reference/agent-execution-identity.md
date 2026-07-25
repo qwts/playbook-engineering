@@ -16,9 +16,11 @@ worktree config as `qwts.agentId`.
 - Other launchers set `QWTS_AGENT_TRANSCRIPT_PROVIDER` and
   `QWTS_AGENT_TRANSCRIPT_ID`.
 
-Repeated setup in the same provider conversation is idempotent, including
+Repeated bound setup in the same provider conversation is idempotent, including
 across worktrees on one workstation. Reusing a worktree for another transcript
 or repinning it to another App preserves the old record and mints a new one.
+A transcript-pending record is not reused automatically because setup cannot
+prove two invocations belong to the same conversation.
 
 The machine-wide `prepare-commit-msg` hook appends:
 
@@ -68,6 +70,10 @@ npm run agent:identity -- bind <agent-id> \
   --transcript provider-transcript-id
 ```
 
+If an operator truly wants two setup invocations to share one pending record,
+`ensure --reuse-pending` makes that ambiguity explicit. Prefer binding the
+provider locator.
+
 Record audit subjects and non-secret artifacts explicitly:
 
 ```bash
@@ -100,6 +106,15 @@ The identity record contains the App slug, bot UID, and the name
 Authentication still happens through the existing credential helper and
 `gh` shim using short-lived installation tokens. Transcript content and
 recorded subjects remain untrusted audit data and cannot authorize an action.
+
+The hooks are cooperative attribution controls, not an adversarial security
+boundary: `git commit --no-verify` and a process without agent markers can
+bypass them. Enforcing registry resolution inside token minting would create a
+structural chokepoint and requires a separate decision.
+
+`status: active` means only that the record has not been finalized. The local
+registry does not measure process or provider-session liveness, so dashboards
+must not interpret it as presence.
 
 ## Failure modes
 
