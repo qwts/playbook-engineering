@@ -349,7 +349,7 @@ test('human review-request mode posts once for the current head', () => {
   ]]);
 });
 
-test('human review-request mode deduplicates across authorized human actors', () => {
+test('human review-request mode deduplicates across humans with write permission', () => {
   const fixture = approvalFixture();
   const runs = [];
   const currentRequest = {
@@ -364,6 +364,9 @@ test('human review-request mode deduplicates across authorized human actors', ()
       if (args[1] === '/repos/qwts/target') return fixture.metadata;
       if (args[1] === '/repos/qwts/target/commits/head-sha') {
         return { commit: { committer: { date: '2026-07-25T10:00:00Z' } } };
+      }
+      if (args[1] === '/repos/qwts/target/collaborators/other-reviewer/permission') {
+        return { permission: 'write' };
       }
       return fixture.pull;
     },
@@ -392,7 +395,7 @@ test('human review-request mode deduplicates across authorized human actors', ()
   assert.deepEqual(runs, []);
 });
 
-test('review-request mode ignores bot and untrusted-human trigger lookalikes', () => {
+test('review-request mode ignores bot and read-only-human trigger lookalikes', () => {
   const fixture = approvalFixture();
   const runs = [];
   const comments = [
@@ -407,7 +410,7 @@ test('review-request mode ignores bot and untrusted-human trigger lookalikes', (
       id: 99,
       created_at: '2026-07-25T10:02:00Z',
       user: { login: 'external-user', type: 'User' },
-      author_association: 'NONE',
+      author_association: 'MEMBER',
       body: '@codex review',
     },
   ];
@@ -416,6 +419,9 @@ test('review-request mode ignores bot and untrusted-human trigger lookalikes', (
       if (args[1] === '/repos/qwts/target') return fixture.metadata;
       if (args[1] === '/repos/qwts/target/commits/head-sha') {
         return { commit: { committer: { date: '2026-07-25T10:00:00Z' } } };
+      }
+      if (args[1] === '/repos/qwts/target/collaborators/external-user/permission') {
+        return { permission: 'read' };
       }
       return fixture.pull;
     },

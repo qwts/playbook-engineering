@@ -23,6 +23,7 @@ import {
 } from './lib/codex-sync.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const REVIEW_REQUEST_PERMISSIONS = new Set(['admin', 'maintain', 'write', 'push']);
 
 export class GhClient {
   constructor(exec = execFileSync) {
@@ -94,6 +95,17 @@ export function viewerLogin(client) {
     'query=query { viewer { login } }',
   ]);
   return result.data?.viewer?.login ?? null;
+}
+
+export function canRequestCodexReview(client, fullName, login) {
+  const access = client.json([
+    'api',
+    `/repos/${fullName}/collaborators/${encodeURIComponent(login)}/permission`,
+  ]);
+  return REVIEW_REQUEST_PERMISSIONS.has(access.permission) ||
+    access.user?.permissions?.push === true ||
+    access.user?.permissions?.maintain === true ||
+    access.user?.permissions?.admin === true;
 }
 
 export function reviewRepository(client, {
@@ -171,10 +183,11 @@ export function reviewRepository(client, {
     issueReactions,
     commentReactions,
   });
-  const currentRequest = currentIssueComments.some((comment) =>
-    comment.user?.type === 'User' &&
-    ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(comment.author_association) &&
-    /^\s*@codex\s+review\s*$/i.test(comment.body ?? ''));
+  const currentRequest = currentIssueComments
+    .filter((comment) =>
+      comment.user?.type === 'User' &&
+      /^\s*@codex\s+review\s*$/i.test(comment.body ?? ''))
+    .some((comment) => canRequestCodexReview(client, fullName, comment.user.login));
   if (requestReviews && aiReview.length === 0) {
     const result = {
       name: repo,
