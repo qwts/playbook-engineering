@@ -5,16 +5,25 @@ How agents author commits and PRs as their own `[bot]` identity instead of
 [branch/PR/review SOP](../sop/branch-pr-review.md) requires is possible at all.
 Decision and rationale: [ENG-0016](../decisions/ENG-0016-agent-pr-bot-identity.md).
 
-There is **one GitHub App per agent harness**, so authorship in history tells
-you which harness produced a change: `qwts-claude-agent`, `qwts-codex-agent`,
-`qwts-cursor-agent`, `qwts-vscode-agent`. The examples below use
+There is **one GitHub App per agent**, so authorship in history tells you which
+agent produced a change. Identity resolves in two levels
+([ENG-0079](../decisions/ENG-0079-per-agent-identity.md)): the **harness** is
+detected (`qwts-claude-agent`, `qwts-codex-agent`, `qwts-cursor-agent`,
+`qwts-vscode-agent`), and a **pin refines it to one agent within that harness**
+— `qwts-claude-fable-agent` today, one per model as they are added, since the
+environment carries the tool but never the model.
+
+Every identity is registered in [`governance/agents.json`](../../governance/agents.json),
+which is what makes it *checked*: drift verifies exactly the active roster, so
+an App missing from that file is one nothing watches. Examples below use
 `qwts-claude-agent`; every step repeats per App.
 
 ## One-time setup (human, in the browser — repeat per App)
 
 1. GitHub → Settings → Developer settings → GitHub Apps → **New GitHub App**.
-   - **Name:** the harness slug, e.g. `qwts-claude-agent` — this becomes the
-     `[bot]` author name.
+   - **Name:** the agent's slug — the harness for a default identity
+     (`qwts-claude-agent`) or one agent within it (`qwts-claude-fable-agent`).
+     This becomes the `[bot]` author name `git log` shows.
    - **Homepage URL:** any real URL; this playbook repo's URL is fine.
    - **Webhook:** uncheck *Active* — no webhook is needed.
    - **Repository permissions:** Contents *Read and write*; Pull requests
@@ -34,9 +43,14 @@ you which harness produced a change: `qwts-claude-agent`, `qwts-codex-agent`,
    ```
 
 3. **Install App** (left sidebar) → install on `qwts` → *Only select
-   repositories* → the repos this harness works in. Extend the selection when
-   a new repo joins; tokens only ever reach the selected list.
-4. Nothing else. Identity is auto-detected per IDE (see
+   repositories* → **every active and onboarding repo in the manifest** —
+   what drift verifies; a subset fails there. Extend it as repos join; tokens
+   only ever reach the selected list.
+4. **Register it** in [`governance/agents.json`](../../governance/agents.json)
+   (slug, harness, `status: active`). Until that lands, drift does not verify
+   the App is installed anywhere, and the first symptom of a missed install is
+   a push failing mid-task on a repo nobody added.
+5. Nothing else. Identity is auto-detected per IDE (see
    [Automating worktrees](#automating-worktrees-tool-agnostic));
    `GH_AGENT_APP` is only an override. No `gh auth setup-git` — bot pushes
    go through the per-worktree credential helper, and the human's own push
@@ -161,6 +175,19 @@ stops a `qwts` commit. The command resolves this checkout at
 ([ENG-0004](../decisions/ENG-0004-centralize-shared-cicd.md): one copy, no
 per-repo duplicates) or `PLAYBOOK_HOME`; with neither, creation fails with
 that instruction rather than silently.
+
+**Pinning one agent within a harness.** In the worktree:
+
+```bash
+git config --worktree qwts.agentApp qwts-claude-fable-agent && node ~/Code/playbook-engineering/tools/agent-bot/setup-worktree.mjs
+```
+
+`setup-worktree.mjs` reads the pin ahead of detection (`--app` and
+`GH_AGENT_APP` still outrank both) and rewrites author, committer, and
+credential helper; the `gh` shim reads its slug back from that helper, so
+PRs and comments follow with nothing to remember. The `WorktreeCreate` hook
+cannot do this for you — it runs before a session exists, so no model is known
+yet — so pin afterwards, or export `GH_AGENT_APP` in the launcher.
 
 **Agents do not work in primary checkouts.** Per
 [ENG-0045](../decisions/ENG-0045-agent-environments-are-bot-territory.md),

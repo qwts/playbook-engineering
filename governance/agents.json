@@ -1,0 +1,35 @@
+{
+  "account": "qwts",
+  "agents": [
+    {
+      "slug": "qwts-claude-agent",
+      "harness": "claude-code",
+      "status": "active",
+      "note": "The harness-level identity: what an unpinned Claude Code worktree resolves to."
+    },
+    {
+      "slug": "qwts-claude-fable-agent",
+      "harness": "claude-code",
+      "status": "active",
+      "note": "Fable, pinned per worktree with qwts.agentApp."
+    },
+    {
+      "slug": "qwts-codex-agent",
+      "harness": "codex",
+      "status": "active",
+      "note": ""
+    },
+    {
+      "slug": "qwts-cursor-agent",
+      "harness": "cursor",
+      "status": "active",
+      "note": ""
+    },
+    {
+      "slug": "qwts-vscode-agent",
+      "harness": "vscode",
+      "status": "active",
+      "note": ""
+    }
+  ]
+}
