@@ -82,6 +82,20 @@ test('explicit GH_APP_ID/GH_APP_PRIVATE_KEY_PATH pair still works', () => {
   assert.equal(config.privateKeyPem, pem);
 });
 
+test('explicit GH_APP_ID/GH_APP_PRIVATE_KEY accepts a CI secret directly', () => {
+  const config = appConfig({
+    argv: ['node', 'mint-token.mjs'],
+    env: {
+      GH_APP_ID: '22222',
+      GH_APP_PRIVATE_KEY: pem,
+      CODEX_SYNC_REPO: 'overlook',
+    },
+    home: mkdtempSync(join(tmpdir(), 'agent-bot-')),
+  });
+  assert.equal(config.appId, '22222');
+  assert.equal(config.privateKeyPem, pem);
+});
+
 test('a slug with no config directory fails with the expected paths named', () => {
   const home = mkdtempSync(join(tmpdir(), 'agent-bot-'));
   assert.throws(

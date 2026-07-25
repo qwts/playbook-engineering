@@ -6,6 +6,10 @@
       "visibility": "public",
       "status": "active",
       "sharedCi": true,
+      "codexSync": {
+        "enabled": false,
+        "exclude": []
+      },
       "delta": "",
       "note": "This repository — source of the governance it describes."
     },

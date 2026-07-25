@@ -1,0 +1,49 @@
+# Synchronize the centrally managed .codex environment to every active
+# governed repository through qwts-codex-agent-authored pull requests.
+name: Governed Codex sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.codex/**'
+      - '.github/workflows/codex-sync.yml'
+      - 'governance/repos.json'
+      - 'tools/agent-bot/mint-token.mjs'
+      - 'tools/repos/lib/baseline-files.mjs'
+      - 'tools/repos/lib/codex-sync.mjs'
+      - 'tools/repos/lib/manifest.mjs'
+      - 'tools/repos/sync-codex.mjs'
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Optional active governed repository to synchronize
+        required: false
+        type: string
+  schedule:
+    # Weekly repair run after the Monday fleet inventory.
+    - cron: '30 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: governed-codex-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Synchronize managed Codex files
+        env:
+          CODEX_SYNC_REPO: ${{ inputs.repo }}
+          GH_APP_ID: ${{ secrets.CODEX_AGENT_APP_ID }}
+          GH_APP_PRIVATE_KEY: ${{ secrets.CODEX_AGENT_PRIVATE_KEY }}
+        run: node tools/repos/sync-codex.mjs --apply --json

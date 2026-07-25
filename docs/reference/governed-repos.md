@@ -45,6 +45,9 @@ generated table below by hand.
 - `status` — `active`, `onboarding`, or `retired`.
 - `sharedCi` — whether the repo consumes the reusable docs-governance workflow
   (`.github/workflows/docs-governance.yml`) at `@v1`.
+- `codexSync` — optional exact exceptions to the managed `.codex/` baseline.
+  Set `enabled: false` to disable synchronization for a repository, or list
+  managed paths under `exclude`. Unknown and duplicate paths fail validation.
 - `delta` — the one-line variance this repo carries from the shared baseline, or
   empty for a pure consumer. Deltas are surveyed in
   [the SOP inventory](../sop/inventory.md).
@@ -89,6 +92,39 @@ attempted. Only missing files are added — existing content is never clobbered.
 Run it from this checkout; onboard a repo by adding its manifest row, running
 `--apply`, reviewing the seed PR, then flipping the row to `active`.
 
+## Continuous Codex synchronization
+
+The [Governed Codex sync workflow](../../.github/workflows/codex-sync.yml)
+keeps the shared [`.codex/`](../../.codex/) environment current after
+onboarding. It runs when a managed source changes on `main`, on manual
+dispatch, and weekly as a repair loop. The command is also available locally:
+
+```bash
+node tools/repos/sync-codex.mjs             # dry-run content comparison
+node tools/repos/sync-codex.mjs --apply     # open or update downstream PRs
+node tools/repos/sync-codex.mjs --repo NAME # scope either mode
+```
+
+The synchronization compares Git blob hashes and executable modes for every
+managed file in each active target. Drift is proposed through the stable
+`governance/codex-sync` branch and a `qwts-codex-agent`-authored pull request;
+the target default branch is never written directly and downstream review and
+CI remain mandatory. An existing open sync PR is updated rather than
+duplicated. The source repository is marked `codexSync.enabled: false` because
+its root files are canonical.
+
+The workflow requires two repository secrets:
+
+- `CODEX_AGENT_APP_ID` — the numeric App ID for `qwts-codex-agent`.
+- `CODEX_AGENT_PRIVATE_KEY` — that App's PEM private key.
+
+It mints a short-lived installation token at runtime and verifies that
+GraphQL reports the exact viewer `qwts-codex-agent[bot]` before any write. A
+missing secret, human token, or token for another App fails closed. The
+workflow checkout uses
+`persist-credentials: false`, and its built-in `GITHUB_TOKEN` has read-only
+contents permission.
+
 ## Governed repositories
 
 <!-- BEGIN GENERATED governed-repos -->
@@ -96,14 +132,14 @@ Run it from this checkout; onboard a repo by adding its manifest row, running
 
 *Generated table — to change it, edit `governance/repos.json` and run `node tools/repos/repos.mjs --write`.*
 
-| Repo | Visibility | Status | Shared CI | Delta from baseline |
-| --- | --- | --- | --- | --- |
-| `playbook-engineering` | public | active | yes | — |
-| `overlook` | public | active | no | Version-consistency gate in CI. |
-| `image-trail` | public | active | no | Coverage floor 71% lines / 80% branches; acceptance coverage-map update for UI/content changes. |
-| `cartograph` | public | active | no | Branch prefixes feat/ fix/ chore/ docs/; issue-before-branch; Rust gate (fmt, clippy -D warnings, test); spec/traceability artifacts in the same PR. |
-| `bookmarkit` | public | active | no | — |
-| `quorum` | public | active | no | — |
-| `agent-bot-identity` | public | onboarding | no | — |
-| `codex-rules-editor` | public | onboarding | no | — |
+| Repo | Visibility | Status | Shared CI | Codex sync | Delta from baseline |
+| --- | --- | --- | --- | --- | --- |
+| `playbook-engineering` | public | active | yes | disabled | — |
+| `overlook` | public | active | no | managed | Version-consistency gate in CI. |
+| `image-trail` | public | active | no | managed | Coverage floor 71% lines / 80% branches; acceptance coverage-map update for UI/content changes. |
+| `cartograph` | public | active | no | managed | Branch prefixes feat/ fix/ chore/ docs/; issue-before-branch; Rust gate (fmt, clippy -D warnings, test); spec/traceability artifacts in the same PR. |
+| `bookmarkit` | public | active | no | managed | — |
+| `quorum` | public | active | no | managed | — |
+| `agent-bot-identity` | public | onboarding | no | managed | — |
+| `codex-rules-editor` | public | onboarding | no | managed | — |
 <!-- END GENERATED governed-repos -->

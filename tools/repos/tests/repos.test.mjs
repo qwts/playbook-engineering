@@ -78,6 +78,27 @@ test('rejects repos that is not an array', () => {
   assert.ok(validateManifest({ account: 'qwts', repos: {} }).some((e) => e.includes('array')));
 });
 
+test('accepts explicit managed Codex exclusions', () => {
+  const m = validManifest();
+  m.repos[1].codexSync = {
+    enabled: true,
+    exclude: ['.codex/config.toml'],
+  };
+  assert.deepEqual(validateManifest(m), []);
+});
+
+test('rejects invalid managed Codex exclusions', () => {
+  const m = validManifest();
+  m.repos[1].codexSync = {
+    enabled: 'yes',
+    exclude: ['README.md', '.codex/config.toml', '.codex/config.toml'],
+  };
+  const errors = validateManifest(m);
+  assert.ok(errors.some((error) => error.includes('enabled')));
+  assert.ok(errors.some((error) => error.includes('unmanaged path')));
+  assert.ok(errors.some((error) => error.includes('duplicate path')));
+});
+
 // --- rendering ----------------------------------------------------------
 
 test('renderTable is deterministic for identical input', () => {
@@ -100,6 +121,12 @@ test('renderTable escapes backslashes before pipes, so \\| cannot smuggle a raw 
 test('renderTable shows an em dash for an empty delta', () => {
   // playbook-engineering has an empty delta in the fixture -> em dash cell.
   assert.match(renderTable(validManifest()), /playbook-engineering.*\| — \|/);
+});
+
+test('renderTable shows managed Codex exceptions', () => {
+  const m = validManifest();
+  m.repos[1].codexSync = { exclude: ['.codex/config.toml'] };
+  assert.match(renderTable(m), /managed except `\.codex\/config\.toml`/);
 });
 
 test('extractBlock round-trips what renderBlock writes', () => {
