@@ -55,7 +55,11 @@ export function parseHookInput(text) {
   }
   const baseRepo = payload?.cwd;
   if (typeof baseRepo !== 'string' || baseRepo === '') throw new Error('hook input carried no cwd');
-  return { baseRepo, name: validateWorktreeName(payload?.name) };
+  const sessionId = payload?.session_id;
+  if (typeof sessionId !== 'string' || sessionId === '' || /[\u0000-\u001f\u007f]/.test(sessionId)) {
+    throw new Error('hook input carried no valid session_id');
+  }
+  return { baseRepo, name: validateWorktreeName(payload?.name), sessionId };
 }
 
 // Where the desktop app records a relocated worktree directory. Reading it
@@ -134,7 +138,7 @@ function resolveBaseRef(repo) {
 }
 
 async function main() {
-  const { baseRepo, name } = parseHookInput(readStdin());
+  const { baseRepo, name, sessionId } = parseHookInput(readStdin());
 
   // A linked worktree's common dir points at the primary checkout: worktrees
   // are always placed by the repository, never by whichever copy asked.
@@ -165,7 +169,16 @@ async function main() {
   // guard already blocks human-attributed commits in bot territory, so a loud
   // warning here plus that guard beats leaving the agent with no workspace.
   try {
-    execFileSync(process.execPath, [SETUP], { cwd: path, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    execFileSync(process.execPath, [SETUP], {
+      cwd: path,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        QWTS_AGENT_TRANSCRIPT_PROVIDER: 'claude',
+        QWTS_AGENT_TRANSCRIPT_ID: sessionId,
+      },
+    });
   } catch (err) {
     process.stderr.write(`bot identity not applied to ${path}: ${err.message}\n`);
   }

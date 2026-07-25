@@ -13,10 +13,12 @@ detected (`qwts-claude-agent`, `qwts-codex-agent`, `qwts-cursor-agent`,
 — `qwts-claude-fable-agent` today, one per model as they are added, since the
 environment carries the tool but never the model.
 
-Every identity is registered in [`governance/agents.json`](../../governance/agents.json),
-which is what makes it *checked*: drift verifies exactly the active roster, so
-an App missing from that file is one nothing watches. Examples below use
-`qwts-claude-agent`; every step repeats per App.
+Every identity is registered in [`governance/agents.json`](../../governance/agents.json).
+Drift verifies that roster, so an unregistered App is not watched. Examples
+use `qwts-claude-agent`; every step repeats per App.
+
+Conversation provenance is covered by
+[agent execution identity](agent-execution-identity.md) (ENG-0081).
 
 ## One-time setup (human, in the browser — repeat per App)
 

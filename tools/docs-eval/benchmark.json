@@ -97,6 +97,12 @@
       "split": "validation",
       "question": "What did ENG-0009 decide about the documentation evaluation loop (Phase 2)?",
       "mustMatch": ["(defer|separate|go/no-go)", "(not worth|evidence|never blocks|deterministic gate)"]
+    },
+    {
+      "id": "agent-execution-provenance",
+      "split": "train",
+      "question": "Given an Agent-Identity trailer on a bot commit, how do you resolve the producing conversation, and does its identity record contain GitHub credentials?",
+      "mustMatch": ["agent:identity.*show|show.*agent", "transcript", "(never|no|does not).*credential|worktree-token"]
     }
   ]
 }
