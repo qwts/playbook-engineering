@@ -54,6 +54,30 @@ generated table below by hand.
   [the SOP inventory](../sop/inventory.md).
 - `note` — optional free-text context.
 
+## Local clone bootstrap
+
+Clone or refresh every active and onboarding repository under `~/Code` with:
+
+```bash
+npm run repos:bootstrap
+```
+
+The helper creates `~/Code`, clones missing manifest repositories, verifies each
+existing `origin`, fetches and prunes remote references and stale worktree
+metadata, then fast-forwards `main`. A checked-out `main` is updated in its
+linked worktree; otherwise only the local branch ref moves.
+
+Safety is fail-closed per repository: a non-repository path, unexpected origin,
+missing `origin/main`, dirty `main` worktree, or locally ahead/divergent `main`
+is reported and left untouched while the remaining repositories continue. The
+helper never resets, cleans, stashes, deletes worktrees, or discards branches.
+Scope a run or choose another clone root with:
+
+```bash
+npm run repos:bootstrap -- --repo overlook
+npm run repos:bootstrap -- --code-dir /path/to/Code
+```
+
 ## Drift detection
 
 The manifest is checked against **live GitHub**, not just against this repo's
