@@ -13,14 +13,23 @@
 //   git config qwts.agentApp    — the pin, worktree first, then the checkout
 //   detectHarness(env)          — the tool that is running
 //
-// Every step is optional and every failure is quiet: no pin, no config, or no
-// git at all just falls through to detection, which is what a plain human
-// checkout should do.
+// Each step is optional: no pin and no harness markers just means no identity,
+// which is what a plain human checkout should resolve to. What is *not*
+// optional is the difference between a pin that is absent and a pin that could
+// not be read — see pinnedSlug.
 
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { detectHarness } from './detect-harness.mjs';
 
+// Unset and unverifiable are different answers, and only one of them may fall
+// through to detection. A malformed config, an ambiguous pin (two values), or
+// a config we lack permission to read all mean *the pin could not be checked*
+// — and falling back there produces exactly the split identity this module
+// exists to prevent: commits authored as the pinned agent, tokens minted for
+// the harness. Those fail closed. Only `git config` exit 1, the key genuinely
+// not being set, returns null.
 export function pinnedSlug(cwd = process.cwd()) {
   try {
     // --get honors worktree config when extensions.worktreeConfig is on, so a
@@ -28,11 +37,25 @@ export function pinnedSlug(cwd = process.cwd()) {
     const value = execFileSync('git', ['config', '--get', 'qwts.agentApp'], {
       cwd,
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     }).trim();
     return value === '' ? null : value;
-  } catch {
-    return null; // unset, or not a git directory at all
+  } catch (error) {
+    if (error.status === 1) return null; // the ordinary case: no pin here
+
+    if (error.code === 'ENOENT') {
+      // A directory that does not exist is the caller's bug; git being absent
+      // means no pin mechanism exists on this machine at all, which is an
+      // honest null rather than an unreadable pin.
+      if (!existsSync(cwd)) throw new Error(`cannot resolve an agent for a directory that does not exist: ${cwd}`);
+      return null;
+    }
+
+    const detail = (error.stderr ?? '').toString().trim() || `git config exited ${error.status ?? 'abnormally'}`;
+    throw new Error(
+      `could not read the qwts.agentApp pin in ${cwd}: ${detail}. ` +
+        'Refusing to fall back to harness detection — an unverifiable pin is not an absent one.',
+    );
   }
 }
 

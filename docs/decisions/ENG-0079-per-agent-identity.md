@@ -31,23 +31,29 @@ drift report stays green until a push fails mid-task.
 
 1. **Identity is per agent, not per harness.** One GitHub App per agent that
    authors work — including two agents in the same harness.
-2. **Resolution is two-level: the harness detects, the pin refines.** The
+2. **An unverifiable pin is not an absent one.** Resolution falls through to
+   detection only when the pin is genuinely unset. A config that cannot be
+   read — malformed, permission-denied, otherwise failing — fails closed,
+   because falling back there mints a token for the harness while the worktree
+   commits as the pinned agent, and identity that disagrees with itself is
+   worse than identity that is missing.
+3. **Resolution is two-level: the harness detects, the pin refines.** The
    environment and the worktree's territory answer *which tool is running*,
    which they can always know. The pin `git config --worktree qwts.agentApp
    <slug>` answers *which agent inside that tool*, which the environment cannot
    know without being taught a model name it has no reason to carry. Explicit
    `--app` and `GH_AGENT_APP` outrank both, unchanged.
-3. **The roster is data.** [`governance/agents.json`](../../governance/agents.json)
+4. **The roster is data.** [`governance/agents.json`](../../governance/agents.json)
    lists every identity with its harness and status. Drift verifies exactly the
    active roster, so registering an agent is what makes it checked, and a
    retired agent keeps its row — offboarding, not deletion, matching the repo
    manifest.
-4. **This amends, and does not rewrite, ENG-0016 and ENG-0045.** ENG-0016's
+5. **This amends, and does not rewrite, ENG-0016 and ENG-0045.** ENG-0016's
    "one App per harness" and ENG-0045's "the directory dictates the App" remain
    correct at the level they describe: the directory still dictates the
    *harness*, and territory still decides whether a worktree is bot territory
    at all. What changes is that the harness is no longer the whole identity.
-5. **The `WorktreeCreate` hook stays harness-level.** It runs before a session
+6. **The `WorktreeCreate` hook stays harness-level.** It runs before a session
    exists, so no model is known; it resolves the harness and the agent is
    pinned afterwards, or exported by the launcher.
 
