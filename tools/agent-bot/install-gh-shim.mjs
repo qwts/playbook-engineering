@@ -17,32 +17,12 @@ import { mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs'
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildGhShim } from './gh-shim.mjs';
 
 const toolsDir = dirname(fileURLToPath(import.meta.url));
 const tokenTool = join(toolsDir, 'worktree-token.mjs');
 
-const SHIM = `#!/bin/sh
-# gh shim — agent bot identity (ENG-0045). Managed by
-# ${join(toolsDir, 'install-gh-shim.mjs')}; do not edit in place.
-TOKEN_TOOL="${tokenTool}"
-SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-REAL=""
-OLDIFS=$IFS; IFS=:
-for d in $PATH; do
-  [ "$d" = "$SELF_DIR" ] && continue
-  if [ -x "$d/gh" ]; then REAL="$d/gh"; break; fi
-done
-IFS=$OLDIFS
-[ -z "$REAL" ] && { echo "agent-bot gh shim: real gh not found on PATH" >&2; exit 127; }
-if [ -z "$GH_TOKEN" ] && [ -f "$TOKEN_TOOL" ] && command -v node >/dev/null 2>&1; then
-  TOKEN=$(node "$TOKEN_TOOL") || {
-    echo "agent-bot: token mint failed in a bot worktree — refusing to run gh as the human" >&2
-    exit 1
-  }
-  if [ -n "$TOKEN" ]; then GH_TOKEN="$TOKEN"; export GH_TOKEN; fi
-fi
-exec "$REAL" "$@"
-`;
+const SHIM = buildGhShim(tokenTool);
 
 const binDir = join(homedir(), '.config', 'agent-bot', 'bin');
 mkdirSync(binDir, { recursive: true });
