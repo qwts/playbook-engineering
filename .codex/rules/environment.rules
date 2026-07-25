@@ -30,7 +30,6 @@ prefix_rule(
             "mv",
             "notes",
             "pull",
-            "push",
             "range-diff",
             "rebase",
             "reflog",
@@ -56,12 +55,13 @@ prefix_rule(
     match = [
         "git status --short --branch",
         "git commit -m example",
-        "git push --set-upstream origin example",
+        "git fetch origin",
         "git reset --hard HEAD",
     ],
     not_match = [
         "git -c alias.x='!sh -c id' x",
         "git config alias.x '!sh -c id'",
+        "git push --force origin example",
         "git x",
     ],
 )
@@ -246,8 +246,8 @@ prefix_rule(
     ],
 )
 
-# Node-backed repository hooks may need nvm on PATH. Allow only the protected
-# zsh wrapper that loads nvm when the repo pins Node, then dispatches Git.
+# Node-backed repository hooks may need nvm on PATH. The protected wrapper also
+# rejects destructive push forms so those commands retain normal approval.
 prefix_rule(
     pattern = ["/bin/zsh", ".codex/scripts/git-with-nvm.zsh"],
     decision = "allow",
@@ -259,6 +259,7 @@ prefix_rule(
     ],
     not_match = [
         "/bin/zsh -lc 'git status'",
+        "/bin/zsh .codex/scripts/git-with-nvm.zsh push --force origin example",
         "/bin/zsh .codex/scripts/nvm.zsh use",
     ],
 )

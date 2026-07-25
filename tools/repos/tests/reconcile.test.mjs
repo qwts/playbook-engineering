@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -107,4 +109,104 @@ test('every governed Codex file is both drift-checked and seeded from the root l
     assert.ok(BASELINE_FILES.includes(path), `${path} missing from drift baseline`);
     assert.deepEqual(SEEDS[path], { source: path, target: path });
   }
+});
+
+test('the protected Git wrapper keeps destructive pushes behind normal approval', {
+  skip: !existsSync('/bin/zsh'),
+}, (t) => {
+  const temp = mkdtempSync(join(tmpdir(), 'codex-git-wrapper-'));
+  t.after(() => rmSync(temp, { recursive: true, force: true }));
+  const fakeGit = join(temp, 'git');
+  writeFileSync(fakeGit, '#!/bin/sh\nprintf "%s\\n" "$*"\n');
+  chmodSync(fakeGit, 0o755);
+
+  const run = (...args) =>
+    spawnSync('/bin/zsh', [join(ROOT, '.codex/scripts/git-with-nvm.zsh'), ...args], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${temp}:${process.env.PATH}`, NVM_DIR: join(temp, 'missing-nvm') },
+    });
+
+  for (const args of [
+    ['push', '--set-upstream', 'origin', 'branch'],
+    ['push', '--dry-run', 'origin', 'branch'],
+  ]) {
+    const result = run(...args);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^push /);
+  }
+
+  for (const args of [
+    ['push', '--force', 'origin', 'branch'],
+    ['push', '--force-with-lease', 'origin', 'branch'],
+    ['push', '--delete', 'origin', 'branch'],
+    ['push', '--mirror', 'origin'],
+    ['push', 'origin', '+branch:branch'],
+    ['push', 'origin', ':branch'],
+    ['push', 'origin', 'branch:'],
+    ['push', '-uf', 'origin', 'branch'],
+  ]) {
+    const result = run(...args);
+    assert.equal(result.status, 64, `${args.join(' ')} unexpectedly passed`);
+    assert.match(result.stderr, /requires normal Codex approval/);
+  }
+
+  const directRule = readFileSync(join(ROOT, '.codex/rules/environment.rules'), 'utf8')
+    .split('# Trust standalone, non-destructive GitHub CLI development operations.')[0];
+  assert.doesNotMatch(directRule, /^\s*"push",$/mu);
+});
+
+test('setup respects npm, pnpm, yarn, and bun lockfile selection', (t) => {
+  const fixtures = [
+    { manager: 'npm', packageManager: null, lockfile: 'package-lock.json', expected: 'ci --no-audit --no-fund' },
+    { manager: 'pnpm', packageManager: null, lockfile: 'pnpm-lock.yaml', expected: 'install --frozen-lockfile' },
+    { manager: 'yarn', packageManager: 'yarn@4.9.0', lockfile: 'yarn.lock', expected: 'install --immutable' },
+    { manager: 'bun', packageManager: 'bun@1.2.0', lockfile: 'bun.lock', expected: 'install --frozen-lockfile' },
+  ];
+
+  for (const fixture of fixtures) {
+    const temp = mkdtempSync(join(tmpdir(), `codex-setup-${fixture.manager}-`));
+    t.after(() => rmSync(temp, { recursive: true, force: true }));
+    const bin = join(temp, 'bin');
+    const home = join(temp, 'home');
+    const log = join(temp, 'manager.log');
+    mkdirSync(bin);
+    mkdirSync(home);
+    writeFileSync(
+      join(temp, 'package.json'),
+      `${JSON.stringify({
+        name: `fixture-${fixture.manager}`,
+        private: true,
+        scripts: {},
+        ...(fixture.packageManager ? { packageManager: fixture.packageManager } : {}),
+      })}\n`,
+    );
+    writeFileSync(join(temp, fixture.lockfile), '');
+    if (fixture.manager === 'yarn') writeFileSync(join(temp, '.yarnrc.yml'), 'nodeLinker: node-modules\n');
+
+    const fakeManager = join(bin, fixture.manager);
+    writeFileSync(
+      fakeManager,
+      '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 1.0.0; exit 0; fi\nprintf "%s\\n" "$*" >> "$PM_LOG"\n',
+    );
+    chmodSync(fakeManager, 0o755);
+    const fakeGh = join(bin, 'gh');
+    writeFileSync(fakeGh, '#!/bin/sh\necho "gh version test"\n');
+    chmodSync(fakeGh, 0o755);
+
+    const result = spawnSync('bash', [join(ROOT, '.codex/scripts/setup.sh')], {
+      cwd: temp,
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, PM_LOG: log },
+    });
+    assert.equal(result.status, 0, `${fixture.manager}: ${result.stderr}\n${result.stdout}`);
+    assert.equal(readFileSync(log, 'utf8').trim(), fixture.expected);
+  }
+});
+
+test('setup selects Node per worktree without changing the global nvm default', () => {
+  const source = readFileSync(join(ROOT, '.codex/scripts/setup.sh'), 'utf8');
+  assert.doesNotMatch(source, /nvm alias default/);
+  assert.match(source, /codex_repo_root=.*git rev-parse --show-toplevel/);
+  assert.match(source, /nvm use .*codex_repo_root.*\.nvmrc/);
 });

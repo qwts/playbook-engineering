@@ -11,13 +11,34 @@ case "$git_subcommand" in
     ;;
 esac
 
+if [[ "$git_subcommand" == "push" ]]; then
+  for argument in "${@:2}"; do
+    case "$argument" in
+      --delete | --force | --force=* | --force-with-lease | --force-with-lease=* | --force-if-includes | --mirror | --prune | +* | :* | *:)
+        print -u2 -- "Destructive git push requires normal Codex approval: $argument"
+        exit 64
+        ;;
+      -o=* | --push-option=*) ;;
+      --*) ;;
+      -*)
+        short_flags="${argument#-}"
+        if [[ "$short_flags" == *[fd]* ]]; then
+          print -u2 -- "Destructive git push requires normal Codex approval: $argument"
+          exit 64
+        fi
+        ;;
+    esac
+  done
+fi
+
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 
 # Git is useful in every governed repository. Load a repository-pinned Node
 # version when available, but do not make Git depend on Node or nvm.
-if [[ -f ".nvmrc" && -s "$NVM_DIR/nvm.sh" ]]; then
+readonly repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if [[ -f "$repo_root/.nvmrc" && -s "$NVM_DIR/nvm.sh" ]]; then
   source "$NVM_DIR/nvm.sh"
-  nvm use >/dev/null
+  nvm use "$(cat "$repo_root/.nvmrc")" >/dev/null
 fi
 
 exec git "$@"
