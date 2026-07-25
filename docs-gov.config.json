@@ -12,8 +12,8 @@
       },
       {
         "path": "docs/reference/agent-bot-identity.md",
-        "budget": 3300,
-        "reason": "the identity runbook covers one system whose lanes (setup, worktrees, the Claude Code worktree hook, gh shim, whoami, verification, failure modes) are only safe read together; it has been prose-tightened to the bone and splitting it would separate the impersonation hazards from their remedies. Raised from 3000 for the harness-hook lane, which exists precisely because the git-level lane above it cannot always fire"
+        "budget": 3600,
+        "reason": "the identity runbook covers one system whose lanes (setup, worktrees, the Claude Code worktree hook, per-agent pinning, gh shim, whoami, verification, failure modes) are only safe read together; splitting it would separate the impersonation hazards from their remedies. Second raise in one day — 3000 for the harness-hook lane, then 3600 for per-agent identity (ENG-0079), each after tightening the new prose rather than instead of it. That cadence is the argument for a split, not against one: the next lane that lands here should move the operational half (App creation, mint, shim, verification, failure modes) into its own runbook and leave the identity model behind, rather than raise this a third time"
       }
     ],
     "contextSets": []

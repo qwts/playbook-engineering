@@ -90,8 +90,11 @@ node tools/repos/drift.mjs
 Per governed repo it verifies the
 [baseline files](../sop/repo-baseline-files.md), a default-branch rule
 requiring at least one approving review, private vulnerability reporting, and
-all four agent-App installations
-([ENG-0016](../decisions/ENG-0016-agent-pr-bot-identity.md)). Repos with
+the installation of every active agent App in
+[`governance/agents.json`](../../governance/agents.json)
+([ENG-0016](../decisions/ENG-0016-agent-pr-bot-identity.md),
+[ENG-0079](../decisions/ENG-0079-per-agent-identity.md) — the roster is data,
+so a new agent is checked without a code change). Repos with
 `status: active` are expected to conform — their drift sets a non-zero exit
 code so CI can gate on it; `status: onboarding` repos report drift without
 failing, which is what makes migrating an old repo under governance a declared

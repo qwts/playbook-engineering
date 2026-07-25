@@ -26,10 +26,22 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mint } from '../agent-bot/mint-token.mjs';
 import { BASELINE_FILES } from './lib/baseline-files.mjs';
+import { activeAgentSlugs, loadAgents, validateAgents } from './lib/agents.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-export const APPS = ['qwts-claude-agent', 'qwts-codex-agent', 'qwts-cursor-agent', 'qwts-vscode-agent'];
 export { BASELINE_FILES };
+
+// The Apps to verify come from the roster, not from a constant here: an
+// identity added to governance/agents.json is checked with no code change,
+// and one that is never registered is one nothing watches (ENG-0079).
+export function apps(root = ROOT) {
+  const roster = loadAgents(join(root, 'governance', 'agents.json'));
+  const errors = validateAgents(roster);
+  if (errors.length > 0) {
+    throw new Error(`governance/agents.json is invalid:\n  - ${errors.join('\n  - ')}`);
+  }
+  return activeAgentSlugs(roster);
+}
 
 export function userToken() {
   if (process.env.GH_DRIFT_TOKEN) return process.env.GH_DRIFT_TOKEN;
@@ -55,9 +67,9 @@ export async function api(path, token) {
 }
 
 // One installation-repository listing per App; every repo check reads the set.
-export async function appCoverage() {
+export async function appCoverage(slugs = apps()) {
   const coverage = {};
-  for (const slug of APPS) {
+  for (const slug of slugs) {
     const { token } = await mint({ slug });
     const names = new Set();
     for (let page = 1; ; page += 1) {
@@ -79,6 +91,7 @@ async function reviewRequired(owner, name, branch, token) {
 }
 
 export async function checkRepo(owner, entry, coverage, token) {
+  // The coverage map's own keys are the roster: one entry per App listed.
   const checks = {};
   const meta = await api(`/repos/${owner}/${entry.name}`, token);
   if (!meta) return { name: entry.name, status: entry.status, error: 'repo not found or not visible' };
@@ -92,7 +105,7 @@ export async function checkRepo(owner, entry, coverage, token) {
   checks['review required to merge'] = await reviewRequired(owner, entry.name, meta.default_branch, token);
   const pvr = await api(`/repos/${owner}/${entry.name}/private-vulnerability-reporting`, token);
   checks['private vulnerability reporting'] = pvr?.enabled === true;
-  for (const slug of APPS) checks[`app: ${slug}`] = coverage[slug].has(entry.name);
+  for (const slug of Object.keys(coverage)) checks[`app: ${slug}`] = coverage[slug].has(entry.name);
 
   const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([k]) => k);
   return { name: entry.name, status: entry.status, checks, failed };

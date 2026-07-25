@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -141,11 +141,14 @@ test('spliceBlock throws when the markers are absent', () => {
 
 // --- CLI ----------------------------------------------------------------
 
-function scaffold(manifest) {
+function scaffold(manifest, roster = { account: 'qwts', agents: [] }) {
   const root = mkdtempSync(path.join(tmpdir(), 'repos-'));
   mkdirSync(path.join(root, 'governance'), { recursive: true });
   mkdirSync(path.join(root, 'docs', 'reference'), { recursive: true });
   writeFileSync(path.join(root, 'governance', 'repos.json'), JSON.stringify(manifest, null, 2));
+  // The check gates the agent roster as well as the manifest (ENG-0079), so a
+  // scaffolded root carries one.
+  writeFileSync(path.join(root, 'governance', 'agents.json'), JSON.stringify(roster, null, 2));
   writeFileSync(
     path.join(root, 'docs', 'reference', 'governed-repos.md'),
     `# Governed repositories\n\n${BEGIN_MARKER}\n${END_MARKER}\n`,
@@ -200,6 +203,19 @@ test('relative --manifest/--doc resolve against --root, not the cwd', () => {
   ]);
   assert.equal(check.exitCode, 0);
   assert.match(check.output, /in sync/);
+});
+
+test('check fails when the agent roster is missing or malformed', () => {
+  const root = scaffold({ account: 'qwts', repos: [] });
+  writeFileSync(path.join(root, 'governance', 'agents.json'), JSON.stringify({ account: 'qwts', agents: [{}] }));
+  const malformed = runCli(root);
+  assert.equal(malformed.exitCode, 1);
+  assert.match(malformed.output, /agents\[0\]\.slug must be a GitHub App slug/);
+
+  rmSync(path.join(root, 'governance', 'agents.json'));
+  const missing = runCli(root);
+  assert.equal(missing.exitCode, 1, 'a roster that vanished must fail the gate, not shrink what drift checks');
+  assert.match(missing.output, /agent roster not found/);
 });
 
 test('check fails with exit 1 on an invalid manifest', () => {

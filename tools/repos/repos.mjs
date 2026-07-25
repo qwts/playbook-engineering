@@ -23,6 +23,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { loadManifest, validateManifest, renderBlock, extractBlock, spliceBlock } from './lib/manifest.mjs';
+import { loadAgents, validateAgents } from './lib/agents.mjs';
 
 function parseArgs(argv) {
   const args = { root: process.cwd(), manifest: null, doc: null, write: false };
@@ -51,6 +52,7 @@ function parseArgs(argv) {
   // lets them.
   args.manifest = path.resolve(args.root, args.manifest ?? path.join('governance', 'repos.json'));
   args.doc = path.resolve(args.root, args.doc ?? path.join('docs', 'reference', 'governed-repos.md'));
+  args.agents = path.resolve(args.root, path.join('governance', 'agents.json'));
   return args;
 }
 
@@ -75,6 +77,21 @@ function main() {
   if (errors.length > 0) {
     console.error(`Manifest ${path.relative(args.root, args.manifest)} has ${errors.length} problem(s):`);
     for (const message of errors) console.error(`  - ${message}`);
+    process.exit(1);
+  }
+
+  // The agent roster rides the same gate: drift decides which App
+  // installations to verify from it, so a malformed roster must fail here
+  // rather than quietly shrinking what gets checked (ENG-0079).
+  try {
+    const rosterErrors = validateAgents(loadAgents(args.agents));
+    if (rosterErrors.length > 0) {
+      console.error(`Roster ${path.relative(args.root, args.agents)} has ${rosterErrors.length} problem(s):`);
+      for (const message of rosterErrors) console.error(`  - ${message}`);
+      process.exit(1);
+    }
+  } catch (error) {
+    console.error(error.message);
     process.exit(1);
   }
 
