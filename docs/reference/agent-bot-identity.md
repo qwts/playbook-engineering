@@ -63,9 +63,10 @@ The `tools/agent-bot/` paths here are relative to this repository; from any
 centralized per [ENG-0004](../decisions/ENG-0004-centralize-shared-cicd.md),
 no per-repo copies.
 
-The tool reads `GH_AGENT_APP` (or `--app <slug>`, or a
-`GH_APP_ID`/`GH_APP_PRIVATE_KEY_PATH` pair for CI) and finds credentials
-under `~/.config/<slug>/`.
+The tool reads `GH_AGENT_APP` (or `--app <slug>`, or `GH_APP_ID` with either
+`GH_APP_PRIVATE_KEY` or `GH_APP_PRIVATE_KEY_PATH` for CI) and finds local
+credentials under `~/.config/<slug>/`. The direct private-key value is intended
+for a masked multiline Actions secret; local keys remain files with mode 600.
 
 - `gh` gives `GH_TOKEN` precedence over the stored `qwts` login, so
   `gh pr create` (and every other call) now acts as the bot. The PR's author

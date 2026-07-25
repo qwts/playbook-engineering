@@ -8,6 +8,7 @@
 // hand, so a bare checkout can run the check with no install.
 
 import { readFileSync } from 'node:fs';
+import { GOVERNED_CODEX_FILES } from './baseline-files.mjs';
 
 export const VALID_VISIBILITY = ['public', 'private'];
 export const VALID_STATUS = ['active', 'onboarding', 'retired'];
@@ -81,6 +82,30 @@ export function validateManifest(manifest) {
     if (repo.note !== undefined && typeof repo.note !== 'string') {
       errors.push(`${where}.note must be a string when present`);
     }
+    if (repo.codexSync !== undefined) {
+      if (repo.codexSync === null || typeof repo.codexSync !== 'object' || Array.isArray(repo.codexSync)) {
+        errors.push(`${where}.codexSync must be an object when present`);
+      } else {
+        if (repo.codexSync.enabled !== undefined && typeof repo.codexSync.enabled !== 'boolean') {
+          errors.push(`${where}.codexSync.enabled must be a boolean when present`);
+        }
+        if (repo.codexSync.exclude !== undefined) {
+          if (!Array.isArray(repo.codexSync.exclude)) {
+            errors.push(`${where}.codexSync.exclude must be an array when present`);
+          } else {
+            const excluded = new Set();
+            for (const path of repo.codexSync.exclude) {
+              if (!GOVERNED_CODEX_FILES.includes(path)) {
+                errors.push(`${where}.codexSync.exclude contains unmanaged path ${JSON.stringify(path)}`);
+              } else if (excluded.has(path)) {
+                errors.push(`${where}.codexSync.exclude contains duplicate path ${JSON.stringify(path)}`);
+              }
+              excluded.add(path);
+            }
+          }
+        }
+      }
+    }
   });
   return errors;
 }
@@ -102,12 +127,18 @@ function escapeCell(text) {
 // drift check depends on identical output for identical input).
 export function renderTable(manifest) {
   const header =
-    '| Repo | Visibility | Status | Shared CI | Delta from baseline |\n' +
-    '| --- | --- | --- | --- | --- |';
+    '| Repo | Visibility | Status | Shared CI | Codex sync | Delta from baseline |\n' +
+    '| --- | --- | --- | --- | --- | --- |';
   const rows = manifest.repos.map((repo) => {
     const delta = escapeCell(repo.delta) || '—';
     const sharedCi = repo.sharedCi ? 'yes' : 'no';
-    return `| \`${escapeCell(repo.name)}\` | ${repo.visibility} | ${repo.status} | ${sharedCi} | ${delta} |`;
+    const excluded = repo.codexSync?.exclude ?? [];
+    const codexSync = repo.codexSync?.enabled === false
+      ? 'disabled'
+      : excluded.length
+        ? `managed except ${excluded.map((path) => `\`${escapeCell(path)}\``).join(', ')}`
+        : 'managed';
+    return `| \`${escapeCell(repo.name)}\` | ${repo.visibility} | ${repo.status} | ${sharedCi} | ${codexSync} | ${delta} |`;
   });
   return [header, ...rows].join('\n');
 }

@@ -6,7 +6,7 @@
 // App selection (first match wins):
 //   --app <slug>             — read ~/.config/<slug>/{app-id,private-key.pem}
 //   GH_AGENT_APP=<slug>      — same lookup, set once per launcher environment
-//   GH_APP_ID + GH_APP_PRIVATE_KEY_PATH — explicit pair (CI, overrides)
+//   GH_APP_ID + GH_APP_PRIVATE_KEY or GH_APP_PRIVATE_KEY_PATH — CI/overrides
 // Env:  GH_APP_INSTALLATION_ID — only needed when the App has >1 installation
 // Flag: --json                — print { token, expires_at, installation_id }
 
@@ -41,7 +41,17 @@ export function appConfig({ argv = process.argv, env = process.env, home = homed
   if (flag !== -1 && !argv[flag + 1]) {
     throw new Error('--app requires a slug, e.g. --app qwts-claude-agent');
   }
-  const slug = (flag !== -1 ? argv[flag + 1] : env.GH_AGENT_APP) ?? detectHarness(env);
+  const explicitSlug = flag !== -1 ? argv[flag + 1] : env.GH_AGENT_APP;
+  if (!explicitSlug && env.GH_APP_ID && env.GH_APP_PRIVATE_KEY) {
+    return { appId: env.GH_APP_ID, privateKeyPem: env.GH_APP_PRIVATE_KEY };
+  }
+  if (!explicitSlug && env.GH_APP_ID && env.GH_APP_PRIVATE_KEY_PATH) {
+    return {
+      appId: env.GH_APP_ID,
+      privateKeyPem: readFileSync(env.GH_APP_PRIVATE_KEY_PATH, 'utf8'),
+    };
+  }
+  const slug = explicitSlug ?? detectHarness(env);
   if (slug) {
     const dir = join(home, '.config', slug);
     try {
@@ -53,10 +63,7 @@ export function appConfig({ argv = process.argv, env = process.env, home = homed
       throw new Error(`no app config for "${slug}" — expected ${dir}/app-id and ${dir}/private-key.pem`);
     }
   }
-  if (env.GH_APP_ID && env.GH_APP_PRIVATE_KEY_PATH) {
-    return { appId: env.GH_APP_ID, privateKeyPem: readFileSync(env.GH_APP_PRIVATE_KEY_PATH, 'utf8') };
-  }
-  throw new Error('pass --app <slug>, set GH_AGENT_APP, or set GH_APP_ID and GH_APP_PRIVATE_KEY_PATH — see docs/reference/agent-bot-identity.md');
+  throw new Error('pass --app <slug>, set GH_AGENT_APP, or set GH_APP_ID with GH_APP_PRIVATE_KEY or GH_APP_PRIVATE_KEY_PATH — see docs/reference/agent-bot-identity.md');
 }
 
 async function gh(method, path, jwt) {
