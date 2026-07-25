@@ -21,8 +21,9 @@ an App missing from that file is one nothing watches. Examples below use
 ## One-time setup (human, in the browser — repeat per App)
 
 1. GitHub → Settings → Developer settings → GitHub Apps → **New GitHub App**.
-   - **Name:** the harness slug, e.g. `qwts-claude-agent` — this becomes the
-     `[bot]` author name.
+   - **Name:** the agent's slug — the harness for a default identity
+     (`qwts-claude-agent`) or one agent within it (`qwts-claude-fable-agent`).
+     This becomes the `[bot]` author name `git log` shows.
    - **Homepage URL:** any real URL; this playbook repo's URL is fine.
    - **Webhook:** uncheck *Active* — no webhook is needed.
    - **Repository permissions:** Contents *Read and write*; Pull requests
@@ -42,8 +43,9 @@ an App missing from that file is one nothing watches. Examples below use
    ```
 
 3. **Install App** (left sidebar) → install on `qwts` → *Only select
-   repositories* → the repos this agent works in. Extend the selection when
-   a new repo joins; tokens only ever reach the selected list.
+   repositories* → **every active and onboarding repo in the manifest** —
+   what drift verifies; a subset fails there. Extend it as repos join; tokens
+   only ever reach the selected list.
 4. **Register it** in [`governance/agents.json`](../../governance/agents.json)
    (slug, harness, `status: active`). Until that lands, drift does not verify
    the App is installed anywhere, and the first symptom of a missed install is

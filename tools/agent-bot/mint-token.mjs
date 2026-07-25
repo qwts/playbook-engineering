@@ -6,6 +6,8 @@
 // App selection (first match wins):
 //   --app <slug>             — read ~/.config/<slug>/{app-id,private-key.pem}
 //   GH_AGENT_APP=<slug>      — same lookup, set once per launcher environment
+//   git config qwts.agentApp — the worktree's pin (ENG-0079), so a token is
+//                              minted for the agent the commits are authored as
 //   GH_APP_ID + GH_APP_PRIVATE_KEY or GH_APP_PRIVATE_KEY_PATH — CI/overrides
 // Env:  GH_APP_INSTALLATION_ID — only needed when the App has >1 installation
 // Flag: --json                — print { token, expires_at, installation_id }
@@ -16,7 +18,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import process from 'node:process';
-import { detectHarness } from './detect-harness.mjs';
+import { resolveAgentSlug } from './resolve-agent.mjs';
 
 const API = 'https://api.github.com';
 
@@ -51,7 +53,7 @@ export function appConfig({ argv = process.argv, env = process.env, home = homed
       privateKeyPem: readFileSync(env.GH_APP_PRIVATE_KEY_PATH, 'utf8'),
     };
   }
-  const slug = explicitSlug ?? detectHarness(env);
+  const slug = resolveAgentSlug({ explicit: explicitSlug, env });
   if (slug) {
     const dir = join(home, '.config', slug);
     try {

@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 
 export const VALID_AGENT_STATUS = ['active', 'retired'];
 const AGENT_FIELDS = new Set(['slug', 'harness', 'status', 'note']);
+const ROSTER_FIELDS = new Set(['account', 'agents']);
 
 export function loadAgents(agentsPath) {
   let raw;
@@ -33,6 +34,10 @@ export function validateAgents(roster) {
   const errors = [];
   if (roster === null || typeof roster !== 'object' || Array.isArray(roster)) {
     return ['agent roster must be a JSON object'];
+  }
+  for (const field of Object.keys(roster)) {
+    // A typo'd top-level key is how a roster silently means less than it says.
+    if (!ROSTER_FIELDS.has(field)) errors.push(`roster has unknown field ${JSON.stringify(field)}`);
   }
   if (typeof roster.account !== 'string' || roster.account.trim() === '') {
     errors.push('account must be a non-empty string');

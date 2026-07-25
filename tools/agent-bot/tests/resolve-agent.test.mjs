@@ -1,0 +1,68 @@
+import { after, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { pinnedSlug, resolveAgentSlug } from '../resolve-agent.mjs';
+
+const root = mkdtempSync(join(tmpdir(), 'resolve-agent-'));
+after(() => rmSync(root, { recursive: true, force: true }));
+
+function repo(name, pin) {
+  const dir = join(root, name);
+  execFileSync('git', ['init', '--quiet', dir]);
+  if (pin) execFileSync('git', ['config', 'qwts.agentApp', pin], { cwd: dir });
+  return dir;
+}
+
+const CLAUDE = { CLAUDECODE: '1' };
+
+test('the pin refines what detection resolved', () => {
+  const pinned = repo('pinned', 'qwts-claude-fable-agent');
+  assert.equal(pinnedSlug(pinned), 'qwts-claude-fable-agent');
+  assert.equal(resolveAgentSlug({ env: CLAUDE, cwd: pinned }), 'qwts-claude-fable-agent');
+});
+
+test('detection stands when nothing is pinned', () => {
+  const plain = repo('plain');
+  assert.equal(pinnedSlug(plain), null);
+  assert.equal(resolveAgentSlug({ env: CLAUDE, cwd: plain }), 'qwts-claude-agent');
+});
+
+test('an explicit slug outranks the environment, which outranks the pin', () => {
+  const pinned = repo('order', 'qwts-claude-fable-agent');
+  assert.equal(
+    resolveAgentSlug({ explicit: 'qwts-cursor-agent', env: { ...CLAUDE, GH_AGENT_APP: 'qwts-codex-agent' }, cwd: pinned }),
+    'qwts-cursor-agent',
+  );
+  assert.equal(
+    resolveAgentSlug({ env: { ...CLAUDE, GH_AGENT_APP: 'qwts-codex-agent' }, cwd: pinned }),
+    'qwts-codex-agent',
+  );
+});
+
+test('a directory that is not a repository resolves quietly rather than throwing', () => {
+  assert.equal(pinnedSlug(root), null);
+  assert.equal(resolveAgentSlug({ env: {}, cwd: root }), null, 'no harness, no pin, no identity — not an error');
+});
+
+test('every consumer that mints or commits shares this resolver', async () => {
+  // The bug this file exists to prevent: a pinned worktree that commits as its
+  // pinned agent and opens its PR as the harness, because the minters resolved
+  // identity their own way. Import-level check, so a future consumer that
+  // rolls its own chain shows up here rather than in production attribution.
+  const sources = await Promise.all(
+    ['../setup-worktree.mjs', '../mint-token.mjs', '../../repos/reconcile.mjs'].map(async (path) => ({
+      path,
+      text: await import('node:fs').then((fs) =>
+        fs.readFileSync(new URL(path, import.meta.url), 'utf8'),
+      ),
+    })),
+  );
+  for (const { path, text } of sources) {
+    assert.match(text, /resolve-agent\.mjs/, `${path} resolves identity through the shared order`);
+    assert.doesNotMatch(text, /detectHarness\(/, `${path} does not call detection directly`);
+  }
+});

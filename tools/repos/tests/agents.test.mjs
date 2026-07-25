@@ -45,6 +45,7 @@ test('malformed rosters fail rather than silently shrinking what is checked', ()
   assert.match(validateAgents(roster({ ...ok, typo: true }))[0] ?? '', /unknown field "typo"/);
   assert.match(validateAgents({ account: '', agents: [] })[0] ?? '', /account must be/);
   assert.match(validateAgents({ account: 'qwts' })[0] ?? '', /agents must be an array/);
+  assert.match(validateAgents({ account: 'qwts', agents: [], extra: 1 })[0] ?? '', /roster has unknown field "extra"/);
 });
 
 test('every registered agent is documented in the identity runbook', () => {

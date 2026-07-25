@@ -6,7 +6,8 @@
 //   - a default-branch rule requiring at least one approving review
 //     (rulesets or classic branch protection)
 //   - private vulnerability reporting enabled
-//   - all four agent-App installations (ENG-0016)
+//   - installation of every active agent App in governance/agents.json
+//     (ENG-0016, ENG-0079 — the roster is data, so the count is not fixed)
 //
 // Repos with status "active" are expected to conform — their drift sets the
 // exit code, so CI can gate on it. Status "onboarding" repos report drift

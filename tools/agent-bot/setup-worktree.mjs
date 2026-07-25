@@ -14,6 +14,9 @@
 //   git config qwts.agentApp qwts-codex-agent      (per checkout)
 //   git config --global qwts.agentApp qwts-...      (machine default)
 //
+// Resolution itself lives in resolve-agent.mjs, shared with the token minters
+// so a pinned worktree commits and pushes as the same agent (ENG-0079).
+//
 // What it does, all scoped via extensions.worktreeConfig:
 //   - author/committer identity = <slug>[bot] with the bot's noreply email
 //   - commit signing off (the human's key would show Unverified on bot commits)
@@ -30,7 +33,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { detectHarness } from './detect-harness.mjs';
+import { resolveAgentSlug } from './resolve-agent.mjs';
 
 function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8' }).trim();
@@ -68,19 +71,10 @@ async function botUid(slug) {
   return uid;
 }
 
-function slugFromGitConfig() {
-  try {
-    return git('config', '--get', 'qwts.agentApp') || null;
-  } catch {
-    return null; // unset — git exits non-zero
-  }
-}
-
 async function main() {
   // Explicit override wins; otherwise detect the IDE from its own environment
   // so the bot matches the tool with no per-tool setup.
-  const resolvedSlug =
-    process.argv[2] ?? process.env.GH_AGENT_APP ?? slugFromGitConfig() ?? detectHarness();
+  const resolvedSlug = resolveAgentSlug({ explicit: process.argv[2] });
   if (!resolvedSlug) return; // no identity resolved for this checkout — nothing to do
 
   let gitDir; let commonDir;
