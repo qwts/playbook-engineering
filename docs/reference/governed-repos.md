@@ -113,6 +113,28 @@ CI remain mandatory. An existing open sync PR is updated rather than
 duplicated. The source repository is marked `codexSync.enabled: false` because
 its root files are canonical.
 
+After the source change is reviewed and merged, approve the generated pull
+requests from a normal human checkout:
+
+```bash
+npm run codex:approve                         # dry-run and validate every PR
+npm run codex:approve -- --apply              # approve and arm auto-merge
+npm run codex:approve -- --repo image-trail   # scope either mode
+```
+
+The helper uses the current local `gh` session and never selects, stores, or
+mints a personal token. Apply mode refuses bot identities. Before approval it
+requires the exact `qwts-codex-agent` author, stable synchronization branch,
+target default branch, source provenance, and managed-file-only diff. It also
+requires clean AI-review evidence after the current head commit: a 👍 from
+[Codex code review](https://learn.chatgpt.com/docs/third-party/github), or a
+current-head [Copilot code review](https://docs.github.com/en/copilot/how-tos/copilot-on-github/use-copilot-agents/copilot-code-review)
+with no inline findings. A new push makes older evidence stale until the
+updated head is reviewed. This keeps human approval explicit while removing
+the repetitive per-repository commands. Do not place a personal access token
+in the synchronization workflow; an unattended action would exercise a human
+identity without a fresh human decision.
+
 The workflow requires two repository secrets:
 
 - `CODEX_AGENT_APP_ID` — the numeric App ID for `qwts-codex-agent`.
