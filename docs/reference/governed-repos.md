@@ -45,7 +45,8 @@ generated table below by hand.
 - `status` — `active`, `onboarding`, or `retired`.
 - `sharedCi` — whether the repo consumes the reusable docs-governance workflow
   (`.github/workflows/docs-governance.yml`) at `@v1`.
-- `codexSync` — optional exact exceptions to the managed `.codex/` baseline.
+- `codexSync` — optional exact exceptions to the managed harness baseline
+  (`.codex/` and `.claude/settings.json`; the field keeps its original name).
   Set `enabled: false` to disable synchronization for a repository, or list
   managed paths under `exclude`. Unknown and duplicate paths fail validation.
 - `delta` — the one-line variance this repo carries from the shared baseline, or
@@ -85,19 +86,23 @@ Three lanes per repo, split by GitHub's permission model: **settings**
 (ruleset review count, vulnerability reporting) applied with your token —
 Apps on a user account can never hold admin; **seeds** (missing baseline
 files from [`governance/baseline/`](../../governance/baseline/), the shared
-[`.codex/`](../../.codex/) development environment, and the shared feature
+[`.codex/`](../../.codex/) and [`.claude/`](../../.claude/) agent-harness
+environments, and the shared feature
 form) proposed as a bot-authored PR, so the seeded content is itself reviewed;
 **human** steps (repo creation, App installs, README/LICENSE) printed, never
 attempted. Only missing files are added — existing content is never clobbered.
 Run it from this checkout; onboard a repo by adding its manifest row, running
 `--apply`, reviewing the seed PR, then flipping the row to `active`.
 
-## Continuous Codex synchronization
+## Continuous harness synchronization
 
 The [Governed Codex sync workflow](../../.github/workflows/codex-sync.yml)
-keeps the shared [`.codex/`](../../.codex/) environment current after
-onboarding. It runs when a managed source changes on `main`, on manual
-dispatch, and weekly as a repair loop. The command is also available locally:
+keeps the shared agent-harness environment — [`.codex/`](../../.codex/) and
+[`.claude/settings.json`](../../.claude/settings.json) — current after
+onboarding. Seeding only fixes a *missing* file; this is the lane that carries
+a change to either layer into repos that already have it. It runs when a
+managed source changes on `main`, on manual dispatch, and weekly as a repair
+loop. The command is also available locally:
 
 ```bash
 node tools/repos/sync-codex.mjs             # dry-run content comparison
@@ -118,15 +123,20 @@ requests from a normal human checkout:
 
 ```bash
 npm run codex:approve                         # dry-run and validate every PR
+npm run codex:approve -- --request-reviews   # ask Codex as the current human
+npm run codex:approve                         # wait for clean review evidence
 npm run codex:approve -- --apply              # approve and arm auto-merge
-npm run codex:approve -- --repo image-trail   # scope either mode
+npm run codex:approve -- --repo image-trail   # scope any mode
 ```
 
 The helper uses the current local `gh` session and never selects, stores, or
-mints a personal token. Apply mode refuses bot identities. Before approval it
-requires the exact `qwts-codex-agent` author, stable synchronization branch,
-target default branch, source provenance, and managed-file-only diff. It also
-requires clean AI-review evidence after the current head commit: a 👍 from
+mints a personal token. Review-request and apply modes refuse bot identities.
+Request mode posts the exact `@codex review` trigger only after validating the
+pull request, and does not duplicate a pending current-head request. Before
+approval the helper requires the exact `qwts-codex-agent` author, stable
+synchronization branch, target default branch, source provenance, and
+managed-file-only diff. It also requires clean AI-review evidence after the
+current head commit: a 👍 from
 [Codex code review](https://learn.chatgpt.com/docs/third-party/github), or a
 current-head [Copilot code review](https://docs.github.com/en/copilot/how-tos/copilot-on-github/use-copilot-agents/copilot-code-review)
 with no inline findings. A new push makes older evidence stale until the

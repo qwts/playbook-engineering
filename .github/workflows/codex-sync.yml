@@ -1,5 +1,6 @@
-# Synchronize the centrally managed .codex environment to every active
-# governed repository through qwts-codex-agent-authored pull requests.
+# Synchronize the centrally managed agent-harness environment (.codex/ and
+# .claude/settings.json) to every active governed repository through
+# qwts-codex-agent-authored pull requests.
 name: Governed Codex sync
 
 on:
@@ -7,6 +8,7 @@ on:
     branches: [main]
     paths:
       - '.codex/**'
+      - '.claude/settings.json'
       - '.github/workflows/codex-sync.yml'
       - 'governance/repos.json'
       - 'tools/agent-bot/mint-token.mjs'
@@ -41,7 +43,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      - name: Synchronize managed Codex files
+      - name: Synchronize managed harness files
         env:
           CODEX_SYNC_REPO: ${{ inputs.repo }}
           GH_APP_ID: ${{ secrets.CODEX_AGENT_APP_ID }}

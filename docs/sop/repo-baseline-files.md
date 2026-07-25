@@ -14,6 +14,7 @@ inherit by default, vary by explicit delta.
 | `.github/CODEOWNERS` | Minimum: `* @qwts` plus explicit `/.github/` ownership. |
 | Feature issue template | The shared [feature-lifecycle](feature-lifecycle.md) form ([ENG-0007](../decisions/ENG-0007-feature-lifecycle-convention.md)); repos may add fields, not drop sections. |
 | `.codex/` | Shared project environment, command rules, and setup/cleanup scripts from this repository; existing repo-specific files are preserved as explicit deltas. |
+| `.claude/settings.json` | Shared Claude Code harness config from this repository — currently the `WorktreeCreate` hook that lands the bot identity ([ENG-0016](../decisions/ENG-0016-agent-pr-bot-identity.md)). Machine-local overrides belong in the gitignored `.claude/settings.local.json`, never here. |
 
 ## Required when applicable
 
@@ -42,3 +43,4 @@ secret scanning + push protection and Dependabot security updates **on**
 - 2026-07-22 — initial version, from the basic-docs audit following PR #8.
 - 2026-07-22 — point the feature-template row at the new [feature-lifecycle SOP](feature-lifecycle.md) (playbook#9).
 - 2026-07-25 — add the shared `.codex/` project environment to the reconciled baseline.
+- 2026-07-25 — add the shared `.claude/settings.json` harness config to the reconciled baseline.

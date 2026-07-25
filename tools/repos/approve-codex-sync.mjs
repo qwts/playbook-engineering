@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Human-invoked review helper for governed Codex synchronization pull requests.
 //
-//   node tools/repos/approve-codex-sync.mjs [--apply] [--repo <name>] [--json]
+//   node tools/repos/approve-codex-sync.mjs [--request-reviews | --apply]
+//     [--repo <name>] [--json]
 //
-// Dry-run is the default. Apply refuses bot identities, validates every pull
-// request before acting, submits the human approval, and arms auto-merge.
+// Dry-run is the default. Human-only request mode asks Codex to review each
+// validated current head. Apply requires clean review evidence, submits the
+// human approval, and arms auto-merge.
 
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';
@@ -54,10 +56,17 @@ export class GhClient {
 }
 
 export function parseArgs(argv) {
-  const options = { apply: false, json: false, repo: null, help: false };
+  const options = {
+    apply: false,
+    requestReviews: false,
+    json: false,
+    repo: null,
+    help: false,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--apply') options.apply = true;
+    else if (argument === '--request-reviews') options.requestReviews = true;
     else if (argument === '--json') options.json = true;
     else if (argument === '--help' || argument === '-h') options.help = true;
     else if (argument === '--repo') {
@@ -70,6 +79,9 @@ export function parseArgs(argv) {
   }
   if (options.repo && !/^[\w.-]+$/.test(options.repo)) {
     throw new Error(`invalid repository name: ${options.repo}`);
+  }
+  if (options.apply && options.requestReviews) {
+    throw new Error('--apply and --request-reviews are separate phases');
   }
   return options;
 }
@@ -89,6 +101,7 @@ export function reviewRepository(client, {
   entry,
   actor,
   apply,
+  requestReviews = false,
 }) {
   const repo = entry.name;
   const fullName = `${owner}/${repo}`;
@@ -158,6 +171,30 @@ export function reviewRepository(client, {
     issueReactions,
     commentReactions,
   });
+  const currentRequest = currentIssueComments.some((comment) =>
+    comment.user?.login === actor &&
+    /^\s*@codex\s+review\s*$/i.test(comment.body ?? ''));
+  if (requestReviews && aiReview.length === 0) {
+    const result = {
+      name: repo,
+      status: currentRequest ? 'review-pending' : 'review-requested',
+      pull: pull.html_url,
+      number: pull.number,
+      changed: files.map((file) => file.filename),
+    };
+    if (!currentRequest) {
+      client.run([
+        'pr',
+        'comment',
+        String(pull.number),
+        '--repo',
+        fullName,
+        '--body',
+        '@codex review',
+      ]);
+    }
+    return result;
+  }
   if (aiReview.length === 0) {
     return {
       name: repo,
@@ -165,6 +202,16 @@ export function reviewRepository(client, {
       pull: pull.html_url,
       changed: files.map((file) => file.filename),
       errors: ['no clean current-head Codex or Copilot review evidence'],
+    };
+  }
+  if (requestReviews) {
+    return {
+      name: repo,
+      status: 'review-current',
+      pull: pull.html_url,
+      number: pull.number,
+      changed: files.map((file) => file.filename),
+      aiReview,
     };
   }
 
@@ -214,10 +261,12 @@ export function reviewRepository(client, {
 
 function usage() {
   return [
-    'Usage: node tools/repos/approve-codex-sync.mjs [--apply] [--repo NAME] [--json]',
+    'Usage: node tools/repos/approve-codex-sync.mjs',
+    '  [--request-reviews | --apply] [--repo NAME] [--json]',
     '',
-    'Dry-run is the default. --apply requires a human gh identity, approves only',
-    'validated qwts-codex-agent synchronization PRs, and arms auto-merge.',
+    'Dry-run is the default. --request-reviews and --apply require a human gh',
+    'identity. Request mode asks Codex to review validated current heads; apply',
+    'requires clean review evidence, approves, and arms auto-merge.',
   ].join('\n');
 }
 
@@ -239,7 +288,7 @@ function main() {
 
   const client = new GhClient();
   const actor = viewerLogin(client);
-  if (options.apply) assertHumanLogin(actor);
+  if (options.apply || options.requestReviews) assertHumanLogin(actor);
   const results = entries.map((entry) => {
     try {
       return reviewRepository(client, {
@@ -247,6 +296,7 @@ function main() {
         entry,
         actor,
         apply: options.apply,
+        requestReviews: options.requestReviews,
       });
     } catch (error) {
       return {
@@ -262,7 +312,12 @@ function main() {
   }
 
   if (options.json) {
-    process.stdout.write(`${JSON.stringify({ actor, apply: options.apply, results }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({
+      actor,
+      apply: options.apply,
+      requestReviews: options.requestReviews,
+      results,
+    }, null, 2)}\n`);
     return;
   }
   process.stdout.write(`GitHub identity: ${actor ?? 'unknown'}\n`);
@@ -271,9 +326,9 @@ function main() {
     const errors = result.errors?.length ? ` — ${result.errors.join('; ')}` : '';
     process.stdout.write(`${result.name}: ${result.status}${pull}${errors}\n`);
   }
-  if (!options.apply) {
+  if (!options.apply && !options.requestReviews) {
     process.stdout.write(
-      '\ndry run — inspect the plan, then run from your human checkout with --apply\n',
+      '\ndry run — inspect the plan, then request reviews or apply from your human checkout\n',
     );
   }
 }

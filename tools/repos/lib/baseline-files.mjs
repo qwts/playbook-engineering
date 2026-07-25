@@ -13,11 +13,22 @@ export const GOVERNED_CODEX_FILES = [
   '.codex/scripts/setup.sh',
 ];
 
+// The Claude Code layer is one file, and deliberately so: it carries the
+// harness hooks the git-level automation cannot reach (ENG-0016), nothing else.
+export const GOVERNED_CLAUDE_FILES = ['.claude/settings.json'];
+
+// What the fleet sync keeps current downstream: both harness layers, so a
+// change here reaches every governed repo instead of only the next repo to be
+// onboarded. The manifest field that scopes it stays `codexSync` — renaming it
+// would orphan the manifests, and the sync branch and title are what an open
+// downstream PR is matched on.
+export const GOVERNED_HARNESS_FILES = [...GOVERNED_CODEX_FILES, ...GOVERNED_CLAUDE_FILES];
+
 export const BASELINE_FILES = [
   'README.md',
   'LICENSE',
   'AGENTS.md',
   'CONTRIBUTING.md',
   '.github/CODEOWNERS',
-  ...GOVERNED_CODEX_FILES,
+  ...GOVERNED_HARNESS_FILES,
 ];

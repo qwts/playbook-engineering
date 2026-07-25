@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { GOVERNED_CODEX_FILES } from '../lib/baseline-files.mjs';
+import { GOVERNED_HARNESS_FILES } from '../lib/baseline-files.mjs';
 import {
   CODEX_REVIEW_BOT,
   CODEX_SYNC_BOT,
@@ -45,9 +45,9 @@ test('managed diff detects missing, changed, and mode-only drift', () => {
 });
 
 test('manifest exclusions remove files from the managed set', () => {
-  const excluded = GOVERNED_CODEX_FILES[2];
+  const excluded = GOVERNED_HARNESS_FILES[2];
   const paths = managedCodexPaths({ codexSync: { exclude: [excluded] } });
-  assert.equal(paths.length, GOVERNED_CODEX_FILES.length - 1);
+  assert.equal(paths.length, GOVERNED_HARNESS_FILES.length - 1);
   assert.ok(!paths.includes(excluded));
   assert.deepEqual(managedCodexPaths({ codexSync: { enabled: false } }), []);
 });
@@ -109,10 +109,10 @@ test('an orphaned bot sync branch can be recovered after a partial failure', () 
 });
 
 test('a current existing pull request is a no-write synchronization result', async () => {
-  const path = GOVERNED_CODEX_FILES[0];
+  const path = GOVERNED_HARNESS_FILES[0];
   const source = canonical(path);
   const files = new Map([[path, source]]);
-  const exclude = GOVERNED_CODEX_FILES.filter((candidate) => candidate !== path);
+  const exclude = GOVERNED_HARNESS_FILES.filter((candidate) => candidate !== path);
   const writes = [];
   const calls = [];
   const client = {
@@ -163,11 +163,11 @@ test('pull body records source provenance and every managed path', () => {
   const body = syncPullBody({
     owner: 'qwts',
     sourceSha: 'a'.repeat(40),
-    paths: GOVERNED_CODEX_FILES,
+    paths: GOVERNED_HARNESS_FILES,
   });
   assert.match(body, /playbook-engineering\/commit\/a{40}/);
   assert.match(body, /playbook-engineering#60/);
-  for (const path of GOVERNED_CODEX_FILES) assert.match(body, new RegExp(path.replaceAll('.', '\\.')));
+  for (const path of GOVERNED_HARNESS_FILES) assert.match(body, new RegExp(path.replaceAll('.', '\\.')));
 });
 
 function approvalFixture(overrides = {}) {
@@ -195,7 +195,7 @@ function approvalFixture(overrides = {}) {
       allow_rebase_merge: true,
     },
     pull,
-    files: [{ filename: GOVERNED_CODEX_FILES[0], status: 'modified' }],
+    files: [{ filename: GOVERNED_HARNESS_FILES[0], status: 'modified' }],
   };
 }
 
@@ -286,11 +286,109 @@ test('clean AI review evidence is current-head and finding-free', () => {
 test('approval helper arguments keep dry-run and explicit apply distinct', () => {
   assert.deepEqual(
     parseArgs(['--repo', 'overlook', '--json']),
-    { apply: false, json: true, repo: 'overlook', help: false },
+    {
+      apply: false,
+      requestReviews: false,
+      json: true,
+      repo: 'overlook',
+      help: false,
+    },
   );
   assert.equal(parseArgs(['--apply']).apply, true);
+  assert.equal(parseArgs(['--request-reviews']).requestReviews, true);
+  assert.throws(
+    () => parseArgs(['--request-reviews', '--apply']),
+    /separate phases/,
+  );
   assert.throws(() => parseArgs(['--repo']), /requires a repository name/);
   assert.throws(() => parseArgs(['--unknown']), /unknown argument/);
+});
+
+test('human review-request mode posts once for the current head', () => {
+  const fixture = approvalFixture();
+  const runs = [];
+  const client = {
+    json(args) {
+      const path = args[1];
+      if (path === '/repos/qwts/target') return fixture.metadata;
+      if (path === '/repos/qwts/target/pulls/7') return fixture.pull;
+      if (path === '/repos/qwts/target/commits/head-sha') {
+        return { commit: { committer: { date: '2026-07-25T10:00:00Z' } } };
+      }
+      throw new Error(`unexpected json request: ${args.join(' ')}`);
+    },
+    pages(path) {
+      if (path.includes('pulls?state=open')) return [fixture.pull];
+      if (path.endsWith('/files?per_page=100')) return fixture.files;
+      if (path.endsWith('/reviews?per_page=100')) return [];
+      if (path.endsWith('/comments?per_page=100')) return [];
+      if (path.endsWith('/reactions?per_page=100')) return [];
+      throw new Error(`unexpected paged request: ${path}`);
+    },
+    run(args) {
+      runs.push(args);
+    },
+  };
+
+  const result = reviewRepository(client, {
+    owner: fixture.owner,
+    entry: fixture.entry,
+    actor: 'qwts',
+    apply: false,
+    requestReviews: true,
+  });
+  assert.equal(result.status, 'review-requested');
+  assert.deepEqual(runs, [[
+    'pr',
+    'comment',
+    '7',
+    '--repo',
+    'qwts/target',
+    '--body',
+    '@codex review',
+  ]]);
+});
+
+test('human review-request mode does not duplicate a current-head request', () => {
+  const fixture = approvalFixture();
+  const runs = [];
+  const currentRequest = {
+    id: 99,
+    created_at: '2026-07-25T10:01:00Z',
+    user: { login: 'qwts' },
+    body: '@codex review',
+  };
+  const client = {
+    json(args) {
+      if (args[1] === '/repos/qwts/target') return fixture.metadata;
+      if (args[1] === '/repos/qwts/target/commits/head-sha') {
+        return { commit: { committer: { date: '2026-07-25T10:00:00Z' } } };
+      }
+      return fixture.pull;
+    },
+    pages(path) {
+      if (path.includes('pulls?state=open')) return [fixture.pull];
+      if (path.endsWith('/files?per_page=100')) return fixture.files;
+      if (path.includes('/issues/7/comments')) return [currentRequest];
+      if (path.endsWith('/reviews?per_page=100')) return [];
+      if (path.endsWith('/comments?per_page=100')) return [];
+      if (path.endsWith('/reactions?per_page=100')) return [];
+      throw new Error(`unexpected paged request: ${path}`);
+    },
+    run(args) {
+      runs.push(args);
+    },
+  };
+
+  const result = reviewRepository(client, {
+    owner: fixture.owner,
+    entry: fixture.entry,
+    actor: 'qwts',
+    apply: false,
+    requestReviews: true,
+  });
+  assert.equal(result.status, 'review-pending');
+  assert.deepEqual(runs, []);
 });
 
 test('apply approves and arms only a validated synchronization pull request', () => {
