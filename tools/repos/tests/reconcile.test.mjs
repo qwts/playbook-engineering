@@ -7,7 +7,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { plan, bumpReviewCount, defaultRuleset, SEEDS } from '../lib/reconcile-plan.mjs';
-import { BASELINE_FILES, GOVERNED_CODEX_FILES } from '../lib/baseline-files.mjs';
+import { BASELINE_FILES, GOVERNED_CODEX_FILES, GOVERNED_HARNESS_FILES } from '../lib/baseline-files.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -103,9 +103,9 @@ test('every seed source exists in this checkout', () => {
   }
 });
 
-test('every governed Codex file is both drift-checked and seeded from the root layer', () => {
-  assert.ok(GOVERNED_CODEX_FILES.length > 0);
-  for (const path of GOVERNED_CODEX_FILES) {
+test('every governed harness file is both drift-checked and seeded from the root layer', () => {
+  assert.ok(GOVERNED_HARNESS_FILES.length > GOVERNED_CODEX_FILES.length, 'the Claude layer is governed too');
+  for (const path of GOVERNED_HARNESS_FILES) {
     assert.ok(BASELINE_FILES.includes(path), `${path} missing from drift baseline`);
     assert.deepEqual(SEEDS[path], { source: path, target: path });
   }

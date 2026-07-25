@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { GOVERNED_CODEX_FILES } from '../lib/baseline-files.mjs';
+import { GOVERNED_HARNESS_FILES } from '../lib/baseline-files.mjs';
 import {
   CODEX_REVIEW_BOT,
   CODEX_SYNC_BOT,
@@ -45,9 +45,9 @@ test('managed diff detects missing, changed, and mode-only drift', () => {
 });
 
 test('manifest exclusions remove files from the managed set', () => {
-  const excluded = GOVERNED_CODEX_FILES[2];
+  const excluded = GOVERNED_HARNESS_FILES[2];
   const paths = managedCodexPaths({ codexSync: { exclude: [excluded] } });
-  assert.equal(paths.length, GOVERNED_CODEX_FILES.length - 1);
+  assert.equal(paths.length, GOVERNED_HARNESS_FILES.length - 1);
   assert.ok(!paths.includes(excluded));
   assert.deepEqual(managedCodexPaths({ codexSync: { enabled: false } }), []);
 });
@@ -109,10 +109,10 @@ test('an orphaned bot sync branch can be recovered after a partial failure', () 
 });
 
 test('a current existing pull request is a no-write synchronization result', async () => {
-  const path = GOVERNED_CODEX_FILES[0];
+  const path = GOVERNED_HARNESS_FILES[0];
   const source = canonical(path);
   const files = new Map([[path, source]]);
-  const exclude = GOVERNED_CODEX_FILES.filter((candidate) => candidate !== path);
+  const exclude = GOVERNED_HARNESS_FILES.filter((candidate) => candidate !== path);
   const writes = [];
   const calls = [];
   const client = {
@@ -163,11 +163,11 @@ test('pull body records source provenance and every managed path', () => {
   const body = syncPullBody({
     owner: 'qwts',
     sourceSha: 'a'.repeat(40),
-    paths: GOVERNED_CODEX_FILES,
+    paths: GOVERNED_HARNESS_FILES,
   });
   assert.match(body, /playbook-engineering\/commit\/a{40}/);
   assert.match(body, /playbook-engineering#60/);
-  for (const path of GOVERNED_CODEX_FILES) assert.match(body, new RegExp(path.replaceAll('.', '\\.')));
+  for (const path of GOVERNED_HARNESS_FILES) assert.match(body, new RegExp(path.replaceAll('.', '\\.')));
 });
 
 function approvalFixture(overrides = {}) {
@@ -195,7 +195,7 @@ function approvalFixture(overrides = {}) {
       allow_rebase_merge: true,
     },
     pull,
-    files: [{ filename: GOVERNED_CODEX_FILES[0], status: 'modified' }],
+    files: [{ filename: GOVERNED_HARNESS_FILES[0], status: 'modified' }],
   };
 }
 

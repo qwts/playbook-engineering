@@ -1,12 +1,12 @@
-// Pure contracts for fleet synchronization of the centrally managed .codex
-// files. Network orchestration lives in ../sync-codex.mjs; this module keeps
+// Pure contracts for fleet synchronization of the centrally managed agent
+// harness files (.codex/ and .claude/). Network orchestration lives in ../sync-codex.mjs; this module keeps
 // content comparison, manifest selection, and stable-branch decisions
 // deterministic and unit-testable.
 
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { GOVERNED_CODEX_FILES } from './baseline-files.mjs';
+import { GOVERNED_HARNESS_FILES } from './baseline-files.mjs';
 
 export const CODEX_SYNC_BRANCH = 'governance/codex-sync';
 export const CODEX_SYNC_BOT = 'qwts-codex-agent';
@@ -24,7 +24,7 @@ export function gitBlobSha(content) {
     .digest('hex');
 }
 
-export function loadCanonicalFiles(root, paths = GOVERNED_CODEX_FILES) {
+export function loadCanonicalFiles(root, paths = GOVERNED_HARNESS_FILES) {
   return new Map(paths.map((path) => {
     const absolute = join(root, path);
     const content = readFileSync(absolute);
@@ -38,7 +38,7 @@ export function loadCanonicalFiles(root, paths = GOVERNED_CODEX_FILES) {
   }));
 }
 
-export function managedCodexPaths(entry, paths = GOVERNED_CODEX_FILES) {
+export function managedCodexPaths(entry, paths = GOVERNED_HARNESS_FILES) {
   if (entry.codexSync?.enabled === false) return [];
   const excluded = new Set(entry.codexSync?.exclude ?? []);
   return paths.filter((path) => !excluded.has(path));
@@ -86,7 +86,7 @@ export function syncPullBody({ owner, sourceSha, paths }) {
   const sourceUrl = `https://github.com/${owner}/${CODEX_SOURCE_REPO}/commit/${sourceSha}`;
   const managed = paths.map((path) => `- \`${path}\``).join('\n');
   return [
-    `Synchronizes the centrally managed \`.codex/\` environment from [\`${sourceSha.slice(0, 12)}\`](${sourceUrl}).`,
+    `Synchronizes the centrally managed agent-harness environment (\`.codex/\`, \`.claude/\`) from [\`${sourceSha.slice(0, 12)}\`](${sourceUrl}).`,
     '',
     'Managed files:',
     '',
