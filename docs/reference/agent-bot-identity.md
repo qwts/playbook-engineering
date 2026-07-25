@@ -164,8 +164,9 @@ token, caches it in the private git dir (best-effort), and exports it. **If the 
 human. Processes that never read `~/.zshenv` keep stock `gh` (fail-open); the
 [ENG-0045](../decisions/ENG-0045-agent-environments-are-bot-territory.md)
 review-requirement backstop covers that residue. `gh whoami` answers plainly
-who `gh` acts as here — the bot slug in territory, your login outside
-(`gh api user` instead *errors* for bots: no `/user` on installation tokens).
+who `gh` acts as here — an explicit `GH_TOKEN`'s GraphQL viewer first, then
+the bot slug in territory, or your login outside (`gh api user` instead
+*errors* for bots: no `/user` on installation tokens).
 
 ## Verifying it works
 
