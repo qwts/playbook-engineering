@@ -132,11 +132,12 @@ npm run codex:approve -- --repo image-trail   # scope any mode
 The helper uses the current local `gh` session and never selects, stores, or
 mints a personal token. Review-request and apply modes refuse bot identities.
 Request mode posts the exact `@codex review` trigger only after validating the
-pull request, and does not duplicate a pending current-head request. Before
-approval the helper requires the exact `qwts-codex-agent` author, stable
-synchronization branch, target default branch, source provenance, and
-managed-file-only diff. It also requires clean AI-review evidence after the
-current head commit: a 👍 from
+pull request, and does not duplicate a pending current-head request from any
+human with write, maintain, or admin repository permission. Before approval
+the helper requires the exact `qwts-codex-agent` author, stable synchronization
+branch, target default branch, source provenance, and managed-file-only diff.
+It also requires clean AI-review evidence after the current head commit: a 👍
+from
 [Codex code review](https://learn.chatgpt.com/docs/third-party/github), or a
 current-head [Copilot code review](https://docs.github.com/en/copilot/how-tos/copilot-on-github/use-copilot-agents/copilot-code-review)
 with no inline findings. A new push makes older evidence stale until the

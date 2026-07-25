@@ -349,13 +349,14 @@ test('human review-request mode posts once for the current head', () => {
   ]]);
 });
 
-test('human review-request mode does not duplicate a current-head request', () => {
+test('human review-request mode deduplicates across humans with write permission', () => {
   const fixture = approvalFixture();
   const runs = [];
   const currentRequest = {
     id: 99,
     created_at: '2026-07-25T10:01:00Z',
-    user: { login: 'qwts' },
+    user: { login: 'other-reviewer', type: 'User' },
+    author_association: 'COLLABORATOR',
     body: '@codex review',
   };
   const client = {
@@ -363,6 +364,9 @@ test('human review-request mode does not duplicate a current-head request', () =
       if (args[1] === '/repos/qwts/target') return fixture.metadata;
       if (args[1] === '/repos/qwts/target/commits/head-sha') {
         return { commit: { committer: { date: '2026-07-25T10:00:00Z' } } };
+      }
+      if (args[1] === '/repos/qwts/target/collaborators/other-reviewer/permission') {
+        return { permission: 'write' };
       }
       return fixture.pull;
     },
@@ -389,6 +393,61 @@ test('human review-request mode does not duplicate a current-head request', () =
   });
   assert.equal(result.status, 'review-pending');
   assert.deepEqual(runs, []);
+});
+
+test('review-request mode ignores bot and read-only-human trigger lookalikes', () => {
+  const fixture = approvalFixture();
+  const runs = [];
+  const comments = [
+    {
+      id: 98,
+      created_at: '2026-07-25T10:01:00Z',
+      user: { login: 'review-bot[bot]', type: 'Bot' },
+      author_association: 'NONE',
+      body: '@codex review',
+    },
+    {
+      id: 99,
+      created_at: '2026-07-25T10:02:00Z',
+      user: { login: 'external-user', type: 'User' },
+      author_association: 'MEMBER',
+      body: '@codex review',
+    },
+  ];
+  const client = {
+    json(args) {
+      if (args[1] === '/repos/qwts/target') return fixture.metadata;
+      if (args[1] === '/repos/qwts/target/commits/head-sha') {
+        return { commit: { committer: { date: '2026-07-25T10:00:00Z' } } };
+      }
+      if (args[1] === '/repos/qwts/target/collaborators/external-user/permission') {
+        return { permission: 'read' };
+      }
+      return fixture.pull;
+    },
+    pages(path) {
+      if (path.includes('pulls?state=open')) return [fixture.pull];
+      if (path.endsWith('/files?per_page=100')) return fixture.files;
+      if (path.includes('/issues/7/comments')) return comments;
+      if (path.endsWith('/reviews?per_page=100')) return [];
+      if (path.endsWith('/comments?per_page=100')) return [];
+      if (path.endsWith('/reactions?per_page=100')) return [];
+      throw new Error(`unexpected paged request: ${path}`);
+    },
+    run(args) {
+      runs.push(args);
+    },
+  };
+
+  const result = reviewRepository(client, {
+    owner: fixture.owner,
+    entry: fixture.entry,
+    actor: 'qwts',
+    apply: false,
+    requestReviews: true,
+  });
+  assert.equal(result.status, 'review-requested');
+  assert.equal(runs.length, 1);
 });
 
 test('apply approves and arms only a validated synchronization pull request', () => {
