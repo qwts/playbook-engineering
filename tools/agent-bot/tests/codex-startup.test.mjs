@@ -124,19 +124,21 @@ test('Codex startup repairs a worktree created before harness markers exist', ()
   );
 });
 
-test('Codex startup fails visibly rather than minting a transcript-pending identity', () => {
-  const { app, env, worktree } = fixture();
+test('Codex startup accepts a transcript-pending identity before the task exists', () => {
+  const { app, env, stateDir, worktree } = fixture();
   const result = spawnSync('bash', [STARTUP], {
     cwd: worktree,
     env: { ...env, GH_AGENT_APP: app },
     encoding: 'utf8',
   });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /no Codex transcript locator is available/);
-  assert.throws(
-    () => execFileSync('git', ['config', '--get', 'qwts.agentId'], { cwd: worktree, env }),
-    /Command failed/,
-  );
+  assert.equal(result.status, 0, result.stderr);
+  const id = execFileSync('git', ['config', '--worktree', '--get', 'qwts.agentId'], {
+    cwd: worktree,
+    env,
+    encoding: 'utf8',
+  }).trim();
+  assert.equal(readAgentIdentity(id, { stateDir }).transcript, null);
+  assert.match(result.stdout, /transcript pending/);
 });
 
 test('Codex startup cannot be satisfied by identity values outside worktree scope', () => {

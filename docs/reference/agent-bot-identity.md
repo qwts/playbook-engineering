@@ -144,9 +144,9 @@ repo-local `core.hooksPath` (husky: `.husky/_`) shadows the global path — and
 worktree add` there runs **no hook at all**. And a harness that creates its
 worktree from a sandbox may be unable to write the *shared* git dir the
 `config.worktree` lives in: the checkout succeeds, the identity does not land.
-A missed hook used to surface only at pre-commit. Codex now makes a conclusive
-[startup retry](../../.codex/scripts/ensure-identity.sh) after its thread ID
-exists. Manual repair remains idempotent:
+Codex [retries](../../.codex/scripts/ensure-identity.sh) during local setup,
+which may precede any task locator; identity checks remain conclusive while
+transcript metadata may stay pending. Manual repair remains idempotent:
 `node tools/agent-bot/setup-worktree.mjs`.
 
 ## The Claude Code worktree hook (when git's hook is out of reach)

@@ -19,14 +19,15 @@ worktree config as `qwts.agentId`.
 Git's `post-checkout` hook remains the earliest best-effort setup point, but a
 Codex worktree can be created before that hook receives any `CODEX_*` marker.
 The shared Codex environment therefore runs
-[`ensure-identity.sh`](../../.codex/scripts/ensure-identity.sh) after
-`CODEX_THREAD_ID` exists. That retry is conclusive: startup fails if identity
-setup does not produce one Agent ID, a matching App pin and Git author, and a
-credential helper for the same App. Setup also pins `core.hooksPath` to the
-hooks shipped beside the identity tool, avoiding a stale canonical-checkout
-path that would silently omit the commit trailer. A displaced custom path is
-preserved and explicitly chained across Git's client hooks, including
-Husky-managed checks.
+[`ensure-identity.sh`](../../.codex/scripts/ensure-identity.sh) during local
+environment setup. That retry can precede the task and its `CODEX_THREAD_ID`,
+so it is conclusive about the universal identity boundary — one Agent ID, a
+matching App pin and Git author, and a credential helper for the same App —
+without making optional provider transcript metadata an availability gate.
+Setup also pins `core.hooksPath` to the hooks shipped beside the identity tool,
+avoiding a stale canonical-checkout path that would silently omit the commit
+trailer. A displaced custom path is preserved and explicitly chained across
+Git's client hooks, including Husky-managed checks.
 
 `setup-worktree.mjs` persists whichever App won ENG-0079 resolution as
 `qwts.agentApp`. An explicit per-model App such as
