@@ -11,6 +11,11 @@
         "reason": "walkthrough of the full playbook flow; splitting it would break the single narrative it exists to provide"
       },
       {
+        "path": "docs/reference/governed-repos.md",
+        "budget": 3000,
+        "reason": "the generated fleet table grows by one row per onboarded repo, so this doc gets monotonically longer for reasons prose tightening cannot offset — a budget tuned to the current repo count turns every future onboarding PR into a docs-gov failure. 3000 buys roughly ten repos of headroom. What should absorb the next breach is a split, not another raise: the operational lanes here (bootstrap, drift, reconcile, and especially the codex-sync runbook) are a runbook that accreted onto a reference page, and moving them out would leave this doc as what it claims to be — the manifest's human-readable view"
+      },
+      {
         "path": "docs/reference/agent-bot-identity.md",
         "budget": 3600,
         "reason": "the identity runbook covers one system whose lanes (setup, worktrees, the Claude Code worktree hook, per-agent pinning, gh shim, whoami, verification, failure modes) are only safe read together; splitting it would separate the impersonation hazards from their remedies. Second raise in one day — 3000 for the harness-hook lane, then 3600 for per-agent identity (ENG-0079), each after tightening the new prose rather than instead of it. That cadence is the argument for a split, not against one: the next lane that lands here should move the operational half (App creation, mint, shim, verification, failure modes) into its own runbook and leave the identity model behind, rather than raise this a third time"
