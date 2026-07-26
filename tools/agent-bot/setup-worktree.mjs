@@ -61,8 +61,12 @@ export function credentialHelperCommand(helper, slug) {
   // Git executes ! helpers through a POSIX shell, including under Git Bash.
   // fileURLToPath returns backslashes on Windows; the shell consumes those as
   // escapes unless the path is normalized and quoted.
-  const shellPath = helper.replaceAll('\\', '/').replaceAll("'", "'\"'\"'");
+  const shellPath = normalizeGitBashPath(helper).replaceAll("'", "'\"'\"'");
   return `!node '${shellPath}' ${validateAppSlug(slug)}`;
+}
+
+export function normalizeGitBashPath(value) {
+  return value.replaceAll('\\', '/');
 }
 
 async function botUid(slug) {
@@ -101,12 +105,18 @@ async function main() {
   const uid = await botUid(slug);
   const agentBotDir = dirname(fileURLToPath(import.meta.url));
   const helper = join(agentBotDir, 'git-credential-bot.mjs');
-  const hooks = join(agentBotDir, 'hooks');
+  const hooks = normalizeGitBashPath(join(agentBotDir, 'hooks'));
+  let previousHooks = null;
+  try {
+    previousHooks = normalizeGitBashPath(git('config', '--path', '--get', 'core.hooksPath')) || null;
+  } catch {
+    /* no hooks path was configured */
+  }
 
   git('config', 'extensions.worktreeConfig', 'true');
   let currentAgentId = null;
   try {
-    currentAgentId = git('config', '--get', 'qwts.agentId') || null;
+    currentAgentId = git('config', '--worktree', '--get', 'qwts.agentId') || null;
   } catch {
     /* first conversation in this worktree */
   }
@@ -124,6 +134,9 @@ async function main() {
   git('config', '--worktree', 'user.name', `${slug}[bot]`);
   git('config', '--worktree', 'user.email', `${uid}+${slug}[bot]@users.noreply.github.com`);
   git('config', '--worktree', 'commit.gpgsign', 'false');
+  if (previousHooks && previousHooks !== hooks) {
+    git('config', '--worktree', 'qwts.chainedHooksPath', previousHooks);
+  }
   git('config', '--worktree', 'core.hooksPath', hooks);
   try {
     git('config', '--worktree', '--unset-all', 'credential.helper');

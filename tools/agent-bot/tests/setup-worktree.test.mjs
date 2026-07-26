@@ -1,7 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { credentialHelperCommand, validateAppSlug } from '../setup-worktree.mjs';
+import {
+  credentialHelperCommand,
+  normalizeGitBashPath,
+  validateAppSlug,
+} from '../setup-worktree.mjs';
 import { helperSlug } from '../worktree-token.mjs';
 
 test('accepts shell-safe GitHub App slugs', () => {
@@ -26,6 +30,15 @@ test('normalizes and quotes a Windows credential-helper path for Git Bash', () =
     "!node 'C:/Users/Agent User/Code/playbook-engineering/tools/agent-bot/git-credential-bot.mjs' qwts-codex-agent",
   );
   assert.equal(helperSlug(command), 'qwts-codex-agent');
+});
+
+test('normalizes Windows hook paths for Git Bash', () => {
+  assert.equal(
+    normalizeGitBashPath(
+      String.raw`C:\Users\Agent User\Code\playbook-engineering\tools\agent-bot\hooks`,
+    ),
+    'C:/Users/Agent User/Code/playbook-engineering/tools/agent-bot/hooks',
+  );
 });
 
 test('preserves Unix credential-helper paths, including spaces and apostrophes', () => {

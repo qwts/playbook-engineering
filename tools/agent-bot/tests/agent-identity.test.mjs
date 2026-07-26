@@ -344,6 +344,7 @@ test('setup-worktree binds CODEX_THREAD_ID and rotates when a new conversation r
   const repo = path.join(root, 'repo');
   const worktree = path.join(root, 'worktree');
   const stateDir = path.join(root, 'state');
+  const globalConfig = path.join(root, 'gitconfig');
   const app = 'qwts-codex-agent';
   mkdirSync(path.join(home, '.config', app), { recursive: true });
   writeFileSync(path.join(home, '.config', app, 'bot-uid'), '308462948\n');
@@ -355,12 +356,17 @@ test('setup-worktree binds CODEX_THREAD_ID and rotates when a new conversation r
   execFileSync('git', ['add', 'README.md'], { cwd: repo });
   execFileSync('git', ['commit', '--quiet', '-m', 'initial'], { cwd: repo });
 
-  const cleanEnv = { ...process.env };
+  writeFileSync(globalConfig, `[qwts]\n\tagentId = ${id(99)}\n`);
+  const cleanEnv = { ...process.env, GIT_CONFIG_GLOBAL: globalConfig };
   for (const key of Object.keys(cleanEnv)) {
     if (/^(CODEX|CLAUDE|AI_AGENT|QWTS_AGENT)/.test(key)) delete cleanEnv[key];
   }
   execFileSync('git', ['worktree', 'add', '--quiet', '-b', 'topic', worktree], {
     cwd: repo,
+    env: cleanEnv,
+  });
+  execFileSync('git', ['config', 'core.hooksPath', '.husky/_'], {
+    cwd: worktree,
     env: cleanEnv,
   });
 
@@ -383,11 +389,14 @@ test('setup-worktree binds CODEX_THREAD_ID and rotates when a new conversation r
   runSetup('thread-1');
   const firstId = execFileSync('git', ['config', '--get', 'qwts.agentId'], {
     cwd: worktree,
+    env: cleanEnv,
     encoding: 'utf8',
   }).trim();
+  assert.notEqual(firstId, id(99), 'a global Agent ID cannot impersonate this worktree');
   assert.equal(
     execFileSync('git', ['config', '--worktree', '--get', 'qwts.agentApp'], {
       cwd: worktree,
+      env: cleanEnv,
       encoding: 'utf8',
     }).trim(),
     app,
@@ -396,22 +405,49 @@ test('setup-worktree binds CODEX_THREAD_ID and rotates when a new conversation r
   assert.equal(
     execFileSync('git', ['config', '--worktree', '--get', 'core.hooksPath'], {
       cwd: worktree,
+      env: cleanEnv,
       encoding: 'utf8',
     }).trim(),
     path.join(path.dirname(setup), 'hooks'),
   );
+  assert.equal(
+    execFileSync('git', ['config', '--worktree', '--get', 'qwts.chainedHooksPath'], {
+      cwd: worktree,
+      env: cleanEnv,
+      encoding: 'utf8',
+    }).trim(),
+    '.husky/_',
+  );
   assert.equal(readAgentIdentity(firstId, { stateDir }).transcript.id, 'thread-1');
-  assert.match(execFileSync('git', ['config', 'user.email'], { cwd: worktree, encoding: 'utf8' }), /308462948/);
+  assert.match(execFileSync('git', ['config', 'user.email'], {
+    cwd: worktree,
+    env: cleanEnv,
+    encoding: 'utf8',
+  }), /308462948/);
 
   runSetup('thread-1');
   assert.equal(
-    execFileSync('git', ['config', '--get', 'qwts.agentId'], { cwd: worktree, encoding: 'utf8' }).trim(),
+    execFileSync('git', ['config', '--get', 'qwts.agentId'], {
+      cwd: worktree,
+      env: cleanEnv,
+      encoding: 'utf8',
+    }).trim(),
     firstId,
+  );
+  assert.equal(
+    execFileSync('git', ['config', '--worktree', '--get', 'qwts.chainedHooksPath'], {
+      cwd: worktree,
+      env: cleanEnv,
+      encoding: 'utf8',
+    }).trim(),
+    '.husky/_',
+    'idempotent setup retains the displaced repository hooks path',
   );
 
   runSetup('thread-2');
   const secondId = execFileSync('git', ['config', '--get', 'qwts.agentId'], {
     cwd: worktree,
+    env: cleanEnv,
     encoding: 'utf8',
   }).trim();
   assert.notEqual(secondId, firstId);

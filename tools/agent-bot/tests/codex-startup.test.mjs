@@ -138,3 +138,37 @@ test('Codex startup fails visibly rather than minting a transcript-pending ident
     /Command failed/,
   );
 });
+
+test('Codex startup cannot be satisfied by identity values outside worktree scope', () => {
+  const { app, env, worktree } = fixture();
+  const fakePlaybook = path.join(path.dirname(worktree), 'fake-playbook');
+  const fakeHooks = path.join(fakePlaybook, 'tools', 'agent-bot', 'hooks');
+  mkdirSync(fakeHooks, { recursive: true });
+  writeFileSync(
+    path.join(fakePlaybook, 'tools', 'agent-bot', 'setup-worktree.mjs'),
+    'process.exit(0);\n',
+  );
+  writeFileSync(path.join(fakeHooks, 'prepare-commit-msg'), '#!/bin/sh\nexit 0\n', {
+    mode: 0o755,
+  });
+  execFileSync('git', ['config', '--global', 'qwts.agentId', 'agent_global-spoof'], { env });
+  execFileSync('git', ['config', '--global', 'qwts.agentApp', app], { env });
+  execFileSync('git', ['config', '--global', 'user.name', `${app}[bot]`], { env });
+  execFileSync('git', ['config', '--global', 'credential.helper', `!node helper.mjs ${app}`], {
+    env,
+  });
+  execFileSync('git', ['config', '--global', 'core.hooksPath', fakeHooks], { env });
+
+  const result = spawnSync('bash', [STARTUP], {
+    cwd: worktree,
+    env: {
+      ...env,
+      PLAYBOOK_HOME: fakePlaybook,
+      CODEX_THREAD_ID: 'thread-sol-spoof',
+      GH_AGENT_APP: app,
+    },
+    encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /setup completed without a qwts\.agentId/);
+});

@@ -39,11 +39,11 @@ setup="$playbook_root/tools/agent-bot/setup-worktree.mjs"
 
 node "$setup"
 
-agent_id="$(git config --get qwts.agentId 2>/dev/null || true)"
-agent_app="$(git config --get qwts.agentApp 2>/dev/null || true)"
-author="$(git config --get user.name 2>/dev/null || true)"
-helper="$(git config --get-all credential.helper 2>/dev/null | tail -n 1 || true)"
-hooks="$(git config --path --get core.hooksPath 2>/dev/null || true)"
+agent_id="$(git config --worktree --get qwts.agentId 2>/dev/null || true)"
+agent_app="$(git config --worktree --get qwts.agentApp 2>/dev/null || true)"
+author="$(git config --worktree --get user.name 2>/dev/null || true)"
+helper="$(git config --worktree --get-all credential.helper 2>/dev/null | tail -n 1 || true)"
+hooks="$(git config --worktree --path --get core.hooksPath 2>/dev/null || true)"
 
 [[ -n "$agent_id" ]] || fail "setup completed without a qwts.agentId"
 [[ -n "$agent_app" ]] || fail "setup completed without a qwts.agentApp pin"

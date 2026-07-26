@@ -24,7 +24,9 @@ The shared Codex environment therefore runs
 setup does not produce one Agent ID, a matching App pin and Git author, and a
 credential helper for the same App. Setup also pins `core.hooksPath` to the
 hooks shipped beside the identity tool, avoiding a stale canonical-checkout
-path that would silently omit the commit trailer.
+path that would silently omit the commit trailer. A displaced custom path is
+preserved and explicitly chained across Git's client hooks, including
+Husky-managed checks.
 
 `setup-worktree.mjs` persists whichever App won ENG-0079 resolution as
 `qwts.agentApp`. An explicit per-model App such as

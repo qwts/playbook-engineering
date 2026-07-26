@@ -126,8 +126,9 @@ created the worktree** and calls `setup-worktree.mjs`, which:
   [`detect-harness.mjs`](../../tools/agent-bot/detect-harness.mjs)) and picks
   the matching bot.
 - Scoped via `extensions.worktreeConfig`, persists the resolved App as
-  `qwts.agentApp`, sets bot authorship, pins the current agent hooks, disables
-  commit signing, rewrites an SSH origin to HTTPS, and wires
+  `qwts.agentApp`, sets bot authorship, pins the current agent hooks while
+  proxying the full client hook surface to any displaced repository path,
+  disables commit signing, rewrites an SSH origin to HTTPS, and wires
   `git-credential-bot.mjs` as the credential helper — every later `git push`
   mints its own fresh token, so no `GH_TOKEN` is needed for pushes.
 
