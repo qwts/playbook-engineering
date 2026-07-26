@@ -68,6 +68,14 @@
       "sharedCi": false,
       "delta": "",
       "note": ""
+    },
+    {
+      "name": "playbook-dashboard",
+      "visibility": "public",
+      "status": "onboarding",
+      "sharedCi": false,
+      "delta": "",
+      "note": "Public redacted fleet dashboard; reads this manifest as its own source of truth."
     }
   ]
 }
