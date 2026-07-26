@@ -10,8 +10,8 @@ agent produced a change. Identity resolves in two levels
 ([ENG-0079](../decisions/ENG-0079-per-agent-identity.md)): the **harness** is
 detected (`qwts-claude-agent`, `qwts-codex-agent`, `qwts-cursor-agent`,
 `qwts-vscode-agent`), and a **pin refines it to one agent within that harness**
-— `qwts-claude-fable-agent` today, one per model as they are added, since the
-environment carries the tool but never the model.
+— currently `qwts-claude-fable-agent` and `qwts-codex-sol-agent`. The
+environment identifies the harness, not its model.
 
 Every identity is registered in [`governance/agents.json`](../../governance/agents.json).
 Drift verifies that roster, so an unregistered App is not watched. Examples
@@ -124,10 +124,10 @@ created the worktree** and calls `setup-worktree.mjs`, which:
 - **Detects which IDE is running** from the environment that tool sets on its
   own (`CLAUDECODE`, `CODEX_*`, Cursor's bundle id, `TERM_PROGRAM=vscode`; see
   [`detect-harness.mjs`](../../tools/agent-bot/detect-harness.mjs)) and picks
-  the matching bot. Nothing hard-codes one identity across tools.
-- Scoped via `extensions.worktreeConfig` so nothing leaks into the primary
-  checkout, sets the bot author/committer identity, disables commit signing,
-  rewrites an SSH origin to HTTPS, and wires
+  the matching bot.
+- Scoped via `extensions.worktreeConfig`, persists the resolved App as
+  `qwts.agentApp`, sets bot authorship, pins the current agent hooks, disables
+  commit signing, rewrites an SSH origin to HTTPS, and wires
   `git-credential-bot.mjs` as the credential helper — every later `git push`
   mints its own fresh token, so no `GH_TOKEN` is needed for pushes.
 
@@ -143,12 +143,10 @@ repo-local `core.hooksPath` (husky: `.husky/_`) shadows the global path — and
 worktree add` there runs **no hook at all**. And a harness that creates its
 worktree from a sandbox may be unable to write the *shared* git dir the
 `config.worktree` lives in: the checkout succeeds, the identity does not land.
-Both end as a `qwts` commit. Manual remedy either way, idempotent:
-`node tools/agent-bot/setup-worktree.mjs`. Nothing here is per-harness
-session machinery: under
-[ENG-0045](../decisions/ENG-0045-agent-environments-are-bot-territory.md)
-the model carries zero tool-specific mechanisms, and its `pre-commit` guard
-turns a missed hook into a loud error instead of a silent `qwts` commit.
+A missed hook used to surface only at pre-commit. Codex now makes a conclusive
+[startup retry](../../.codex/scripts/ensure-identity.sh) after its thread ID
+exists. Manual repair remains idempotent:
+`node tools/agent-bot/setup-worktree.mjs`.
 
 ## The Claude Code worktree hook (when git's hook is out of reach)
 
@@ -188,11 +186,11 @@ QWTS_AGENT_TRANSCRIPT_ID=<session-id> \
 ```
 
 `setup-worktree.mjs` reads the pin ahead of detection (`--app` and
-`GH_AGENT_APP` still outrank both). Pin after session start, or set
-`GH_AGENT_APP` in the launcher. Manual setup must also pass the transcript
-locator documented in
-[agent execution identity](agent-execution-identity.md); a pending identity is
-not reused automatically.
+`GH_AGENT_APP` still outrank both) and persists the resolved App as the
+worktree pin. Codex Sol uses `qwts-codex-sol-agent`; startup supplies its
+thread ID. Manual Claude setup must also pass the
+[transcript locator](agent-execution-identity.md); pending identities are not
+reused automatically.
 
 **Agents do not work in primary checkouts.** Per
 [ENG-0045](../decisions/ENG-0045-agent-environments-are-bot-territory.md),

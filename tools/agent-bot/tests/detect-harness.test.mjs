@@ -39,6 +39,10 @@ test('agent-process detection accepts agent-only markers', () => {
   assert.equal(detectAgentHarness({ CODEX_SANDBOX: 'seatbelt' }), 'qwts-codex-agent');
   assert.equal(detectAgentHarness({ CLAUDECODE: '1' }), 'qwts-claude-agent');
   assert.equal(detectAgentHarness({ AI_AGENT: 'cursor-agent' }), 'qwts-cursor-agent');
+  assert.equal(
+    detectAgentHarness({ GH_AGENT_APP: 'qwts-codex-sol-agent' }),
+    'qwts-codex-sol-agent',
+  );
 });
 
 test('agent-process detection ignores editor-only terminals', () => {

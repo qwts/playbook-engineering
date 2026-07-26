@@ -18,7 +18,7 @@ AGENT_CONTEXT=""
 [ -n "$CLAUDE_CODE_ENTRYPOINT" ] && AGENT_CONTEXT=1
 [ -n "$AI_AGENT" ] && AGENT_CONTEXT=1
 case "$GH_AGENT_APP" in
-  qwts-claude-agent|qwts-codex-agent|qwts-cursor-agent|qwts-vscode-agent)
+  qwts-*-agent)
     AGENT_CONTEXT=1
     ;;
 esac

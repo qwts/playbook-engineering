@@ -16,6 +16,21 @@ worktree config as `qwts.agentId`.
 - Other launchers set `QWTS_AGENT_TRANSCRIPT_PROVIDER` and
   `QWTS_AGENT_TRANSCRIPT_ID`.
 
+Git's `post-checkout` hook remains the earliest best-effort setup point, but a
+Codex worktree can be created before that hook receives any `CODEX_*` marker.
+The shared Codex environment therefore runs
+[`ensure-identity.sh`](../../.codex/scripts/ensure-identity.sh) after
+`CODEX_THREAD_ID` exists. That retry is conclusive: startup fails if identity
+setup does not produce one Agent ID, a matching App pin and Git author, and a
+credential helper for the same App. Setup also pins `core.hooksPath` to the
+hooks shipped beside the identity tool, avoiding a stale canonical-checkout
+path that would silently omit the commit trailer.
+
+`setup-worktree.mjs` persists whichever App won ENG-0079 resolution as
+`qwts.agentApp`. An explicit per-model App such as
+`qwts-codex-sol-agent` therefore remains authoritative for later commits,
+pushes, and `gh` calls instead of falling back to the generic harness App.
+
 Repeated bound setup in the same provider conversation is idempotent, including
 across worktrees on one workstation. Reusing a worktree for another transcript
 or repinning it to another App preserves the old record and mints a new one.

@@ -8,8 +8,9 @@
 //   node tools/agent-bot/setup-worktree.mjs [app-slug]
 //
 // Slug resolution, first hit wins: explicit arg, then $GH_AGENT_APP, then the
-// git config value `qwts.agentApp`. Set the git config once per checkout and
-// no env var is ever needed:
+// git config value `qwts.agentApp`. The resolved App is persisted as the
+// worktree pin, so later token minters and the gh shim cannot fall back to a
+// different harness identity:
 //
 //   git config qwts.agentApp qwts-codex-agent      (per checkout)
 //   git config --global qwts.agentApp qwts-...      (machine default)
@@ -98,7 +99,9 @@ async function main() {
 
   const slug = validateAppSlug(resolvedSlug);
   const uid = await botUid(slug);
-  const helper = join(dirname(fileURLToPath(import.meta.url)), 'git-credential-bot.mjs');
+  const agentBotDir = dirname(fileURLToPath(import.meta.url));
+  const helper = join(agentBotDir, 'git-credential-bot.mjs');
+  const hooks = join(agentBotDir, 'hooks');
 
   git('config', 'extensions.worktreeConfig', 'true');
   let currentAgentId = null;
@@ -116,10 +119,12 @@ async function main() {
     fields: identityFieldsFromEnv(),
     stateDir: stateDirectory(),
   });
+  git('config', '--worktree', 'qwts.agentApp', slug);
   git('config', '--worktree', 'qwts.agentId', executionIdentity.id);
   git('config', '--worktree', 'user.name', `${slug}[bot]`);
   git('config', '--worktree', 'user.email', `${uid}+${slug}[bot]@users.noreply.github.com`);
   git('config', '--worktree', 'commit.gpgsign', 'false');
+  git('config', '--worktree', 'core.hooksPath', hooks);
   try {
     git('config', '--worktree', '--unset-all', 'credential.helper');
   } catch {

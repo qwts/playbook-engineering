@@ -17,7 +17,13 @@
       "slug": "qwts-codex-agent",
       "harness": "codex",
       "status": "active",
-      "note": ""
+      "note": "The harness-level identity: what an unpinned Codex worktree resolves to."
+    },
+    {
+      "slug": "qwts-codex-sol-agent",
+      "harness": "codex",
+      "status": "active",
+      "note": "Sol, pinned per worktree with qwts.agentApp."
     },
     {
       "slug": "qwts-cursor-agent",

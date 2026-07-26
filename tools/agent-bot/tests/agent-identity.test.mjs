@@ -385,6 +385,21 @@ test('setup-worktree binds CODEX_THREAD_ID and rotates when a new conversation r
     cwd: worktree,
     encoding: 'utf8',
   }).trim();
+  assert.equal(
+    execFileSync('git', ['config', '--worktree', '--get', 'qwts.agentApp'], {
+      cwd: worktree,
+      encoding: 'utf8',
+    }).trim(),
+    app,
+    'the resolved App is persisted so later GitHub writes cannot fall back to the harness App',
+  );
+  assert.equal(
+    execFileSync('git', ['config', '--worktree', '--get', 'core.hooksPath'], {
+      cwd: worktree,
+      encoding: 'utf8',
+    }).trim(),
+    path.join(path.dirname(setup), 'hooks'),
+  );
   assert.equal(readAgentIdentity(firstId, { stateDir }).transcript.id, 'thread-1');
   assert.match(execFileSync('git', ['config', 'user.email'], { cwd: worktree, encoding: 'utf8' }), /308462948/);
 
