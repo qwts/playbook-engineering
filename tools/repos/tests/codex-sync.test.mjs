@@ -94,6 +94,32 @@ test('managed JSON overlays fail closed for malformed downstream configuration',
   );
 });
 
+test('managed JSON ownership propagates deletions without removing repository hooks', () => {
+  const source = canonical('.claude/settings.json', JSON.stringify({
+    $schema: 'https://json.schemastore.org/claude-code-settings.json',
+  }));
+  const target = Buffer.from(JSON.stringify({
+    hooks: {
+      PreToolUse: [{ matcher: 'Bash' }],
+      WorktreeCreate: [{ hooks: [{ type: 'command', command: 'obsolete' }] }],
+    },
+  }));
+  const merged = JSON.parse(mergeManagedFile(source, target).content.toString('utf8'));
+
+  assert.deepEqual(merged.hooks.PreToolUse, [{ matcher: 'Bash' }]);
+  assert.equal(Object.hasOwn(merged.hooks, 'WorktreeCreate'), false);
+});
+
+test('managed JSON overlays reject canonical keys without declared ownership', () => {
+  const source = canonical('.claude/settings.json', JSON.stringify({
+    permissions: { defaultMode: 'acceptEdits' },
+  }));
+  assert.throws(
+    () => mergeManagedFile(source),
+    /permissions\.defaultMode has no managed ownership/,
+  );
+});
+
 test('manifest exclusions remove files from the managed set', () => {
   const excluded = GOVERNED_HARNESS_FILES[2];
   const paths = managedCodexPaths({ codexSync: { exclude: [excluded] } });
@@ -221,7 +247,7 @@ test('an open sync pull repairs a JSON overlay from the target default branch', 
     hooks: {
       PreToolUse: [{ matcher: 'Bash' }],
       SessionStart: [{ hooks: [{ type: 'command', command: 'repo-session' }] }],
-      WorktreeCreate: [{ hooks: [{ type: 'command', command: 'stale' }] }],
+      WorktreeCreate: [{ hooks: [{ type: 'command', command: 'managed' }] }],
     },
   }, null, 2)}\n`);
   const baseEntry = {

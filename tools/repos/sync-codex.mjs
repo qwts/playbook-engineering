@@ -157,7 +157,6 @@ export async function syncRepository(client, {
     (entry) => readBlob(client, owner, repo, entry),
   );
   const baseDiff = diffManagedFiles(desiredFiles, baseTree, paths);
-  if (baseDiff.length === 0) return { name: repo, status: 'current', changed: [] };
 
   const head = encodeURIComponent(`${owner}:${CODEX_SYNC_BRANCH}`);
   const branchPulls = await client.call(
@@ -184,6 +183,9 @@ export async function syncRepository(client, {
     branchOwned,
     pulls: branchPulls,
   });
+  if (baseDiff.length === 0 && !choice.pull) {
+    return { name: repo, status: 'current', changed: [] };
+  }
 
   let changed = baseDiff;
   if (choice.pull) {

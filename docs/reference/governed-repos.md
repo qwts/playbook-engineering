@@ -135,13 +135,14 @@ node tools/repos/sync-codex.mjs --apply     # open or update downstream PRs
 node tools/repos/sync-codex.mjs --repo NAME # scope either mode
 ```
 
-Synchronization compares Git blob hashes and executable modes. Most managed
-files are exact replacements. `.claude/settings.json` is a recursive overlay:
-canonical keys win, target-only permissions, hooks, and settings survive, and
-invalid JSON fails closed. Drift uses the stable `governance/codex-sync` branch
-and a `qwts-codex-agent` pull request; default branches remain review- and
-CI-protected. An open sync PR is updated, not duplicated. The source repository
-sets `codexSync.enabled: false` because its root files are canonical.
+Synchronization compares blobs and modes; most files are exact replacements.
+`.claude/settings.json` applies declared central paths only: values and
+deletions propagate while other target settings survive. Invalid JSON or
+undeclared source keys fail closed. Drift uses the stable
+`governance/codex-sync` branch and a `qwts-codex-agent` pull request; default
+branches stay protected. Existing PRs are reconciled even when the base is
+current. The source sets `codexSync.enabled: false` because its root layer is
+canonical.
 
 After the source change is reviewed and merged, approve the generated pull
 requests from a normal human checkout:

@@ -15,7 +15,12 @@ export const COPILOT_REVIEW_BOT = 'copilot-pull-request-reviewer[bot]';
 export const CODEX_SOURCE_REPO = 'playbook-engineering';
 export const CODEX_SYNC_TITLE = 'governance: sync managed .codex files';
 export const CODEX_SYNC_COMMIT_PREFIX = `governance: sync .codex from ${CODEX_SOURCE_REPO}@`;
-export const MANAGED_JSON_OVERLAY_PATHS = new Set(['.claude/settings.json']);
+export const MANAGED_JSON_OVERLAYS = new Map([
+  ['.claude/settings.json', [
+    ['$schema'],
+    ['hooks', 'WorktreeCreate'],
+  ]],
+]);
 
 export function gitBlobSha(content) {
   const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content);
@@ -43,14 +48,40 @@ function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function mergeJsonObjects(target, managed) {
-  const merged = { ...target };
-  for (const [key, value] of Object.entries(managed)) {
-    merged[key] = isPlainObject(value) && isPlainObject(target[key])
-      ? mergeJsonObjects(target[key], value)
-      : value;
+function pathValue(source, path) {
+  let value = source;
+  for (const segment of path) {
+    if (!isPlainObject(value) || !Object.hasOwn(value, segment)) {
+      return { exists: false, value: undefined };
+    }
+    value = value[segment];
   }
-  return merged;
+  return { exists: true, value };
+}
+
+function setPathValue(target, path, value) {
+  let parent = target;
+  for (const segment of path.slice(0, -1)) {
+    if (!isPlainObject(parent[segment])) parent[segment] = {};
+    parent = parent[segment];
+  }
+  parent[path.at(-1)] = value;
+}
+
+function deletePathValue(target, path) {
+  let parent = target;
+  for (const segment of path.slice(0, -1)) {
+    if (!isPlainObject(parent[segment])) return;
+    parent = parent[segment];
+  }
+  delete parent[path.at(-1)];
+}
+
+function leafPaths(value, parent = []) {
+  if (!isPlainObject(value)) return [parent];
+  const entries = Object.entries(value);
+  if (entries.length === 0) return parent.length ? [parent] : [];
+  return entries.flatMap(([key, child]) => leafPaths(child, [...parent, key]));
 }
 
 function parseJsonObject(path, content, owner) {
@@ -65,12 +96,25 @@ function parseJsonObject(path, content, owner) {
 }
 
 export function mergeManagedFile(canonicalFile, targetContent) {
-  if (!targetContent || !MANAGED_JSON_OVERLAY_PATHS.has(canonicalFile.path)) {
-    return canonicalFile;
-  }
+  const ownedPaths = MANAGED_JSON_OVERLAYS.get(canonicalFile.path);
+  if (!ownedPaths) return canonicalFile;
   const managed = parseJsonObject(canonicalFile.path, canonicalFile.content, 'managed');
+  const owned = new Set(ownedPaths.map((path) => JSON.stringify(path)));
+  for (const path of leafPaths(managed)) {
+    if (!owned.has(JSON.stringify(path))) {
+      throw new Error(
+        `${canonicalFile.path}: canonical JSON path ${path.join('.')} has no managed ownership`,
+      );
+    }
+  }
+  if (!targetContent) return canonicalFile;
   const target = parseJsonObject(canonicalFile.path, targetContent, 'downstream');
-  const content = Buffer.from(`${JSON.stringify(mergeJsonObjects(target, managed), null, 2)}\n`);
+  for (const path of ownedPaths) {
+    const candidate = pathValue(managed, path);
+    if (candidate.exists) setPathValue(target, path, candidate.value);
+    else deletePathValue(target, path);
+  }
+  const content = Buffer.from(`${JSON.stringify(target, null, 2)}\n`);
   return {
     ...canonicalFile,
     content,
@@ -89,7 +133,7 @@ export async function materializeManagedFiles(
     const canonical = canonicalFiles.get(path);
     if (!canonical) throw new Error(`${path}: canonical managed file is missing`);
     const target = targetTree.get(path);
-    const content = target && MANAGED_JSON_OVERLAY_PATHS.has(path)
+    const content = target && MANAGED_JSON_OVERLAYS.has(path)
       ? await readTargetContent(target)
       : null;
     files.set(path, mergeManagedFile(canonical, content));
