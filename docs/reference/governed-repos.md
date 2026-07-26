@@ -201,4 +201,5 @@ contents permission.
 | `quorum` | public | active | no | managed | — |
 | `agent-bot-identity` | public | onboarding | no | managed | — |
 | `codex-rules-editor` | public | onboarding | no | managed | — |
+| `playbook-dashboard` | public | onboarding | no | managed | — |
 <!-- END GENERATED governed-repos -->
