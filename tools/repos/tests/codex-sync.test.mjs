@@ -13,6 +13,8 @@ import {
   cleanAiReviewEvidence,
   diffManagedFiles,
   gitBlobSha,
+  materializeManagedFiles,
+  mergeManagedFile,
   managedCodexPaths,
   preferredMergeFlag,
   syncPullBody,
@@ -41,6 +43,80 @@ test('managed diff detects missing, changed, and mode-only drift', () => {
   assert.deepEqual(
     diffManagedFiles(files, tree, ['a', 'b', 'c', 'd']).map((file) => file.path),
     ['b', 'c', 'd'],
+  );
+});
+
+test('managed JSON overlays preserve repository-owned agent harness configuration', async () => {
+  const path = '.claude/settings.json';
+  const source = canonical(path, JSON.stringify({
+    $schema: 'https://json.schemastore.org/claude-code-settings.json',
+    hooks: {
+      WorktreeCreate: [{ hooks: [{ type: 'command', command: 'managed' }] }],
+    },
+  }));
+  const targetContent = Buffer.from(JSON.stringify({
+    permissions: { defaultMode: 'acceptEdits' },
+    hooks: {
+      PreToolUse: [{ matcher: 'Bash' }],
+      SessionStart: [{ hooks: [{ type: 'command', command: 'repo-session' }] }],
+      WorktreeCreate: [{ hooks: [{ type: 'command', command: 'stale' }] }],
+    },
+  }));
+  const target = new Map([[path, {
+    path,
+    type: 'blob',
+    sha: gitBlobSha(targetContent),
+    mode: '100644',
+  }]]);
+
+  const files = await materializeManagedFiles(
+    new Map([[path, source]]),
+    target,
+    [path],
+    async () => targetContent,
+  );
+  const merged = JSON.parse(files.get(path).content.toString('utf8'));
+
+  assert.deepEqual(merged.permissions, { defaultMode: 'acceptEdits' });
+  assert.deepEqual(merged.hooks.PreToolUse, [{ matcher: 'Bash' }]);
+  assert.deepEqual(merged.hooks.SessionStart, [{
+    hooks: [{ type: 'command', command: 'repo-session' }],
+  }]);
+  assert.equal(merged.hooks.WorktreeCreate[0].hooks[0].command, 'managed');
+  assert.equal(files.get(path).mode, source.mode);
+});
+
+test('managed JSON overlays fail closed for malformed downstream configuration', () => {
+  const source = canonical('.claude/settings.json', '{}\n');
+  assert.throws(
+    () => mergeManagedFile(source, Buffer.from('{broken')),
+    /invalid downstream JSON/,
+  );
+});
+
+test('managed JSON ownership propagates deletions without removing repository hooks', () => {
+  const source = canonical('.claude/settings.json', JSON.stringify({
+    $schema: 'https://json.schemastore.org/claude-code-settings.json',
+  }));
+  const target = Buffer.from(JSON.stringify({
+    hooks: {
+      PreToolUse: [{ matcher: 'Bash' }],
+      WorktreeCreate: [{ hooks: [{ type: 'command', command: 'obsolete' }] }],
+    },
+  }));
+  const merged = JSON.parse(mergeManagedFile(source, target).content.toString('utf8'));
+
+  assert.deepEqual(merged.hooks.PreToolUse, [{ matcher: 'Bash' }]);
+  assert.equal(Object.hasOwn(merged.hooks, 'WorktreeCreate'), false);
+});
+
+test('managed JSON overlays reject canonical keys without declared ownership', () => {
+  const source = canonical('.claude/settings.json', JSON.stringify({
+    permissions: { defaultMode: 'acceptEdits' },
+  }));
+  assert.throws(
+    () => mergeManagedFile(source),
+    /permissions\.defaultMode has no managed ownership/,
   );
 });
 
@@ -157,6 +233,113 @@ test('a current existing pull request is a no-write synchronization result', asy
   assert.equal(result.pull, 'https://example.test/pr/7');
   assert.deepEqual(writes, []);
   assert.ok(calls.some(([, requestPath]) => requestPath.includes('/pulls?state=all')));
+});
+
+test('an open sync pull repairs a JSON overlay from the target default branch', async () => {
+  const path = '.claude/settings.json';
+  const source = canonical(path, `${JSON.stringify({
+    hooks: {
+      WorktreeCreate: [{ hooks: [{ type: 'command', command: 'managed' }] }],
+    },
+  }, null, 2)}\n`);
+  const baseContent = Buffer.from(`${JSON.stringify({
+    permissions: { defaultMode: 'acceptEdits' },
+    hooks: {
+      PreToolUse: [{ matcher: 'Bash' }],
+      SessionStart: [{ hooks: [{ type: 'command', command: 'repo-session' }] }],
+      WorktreeCreate: [{ hooks: [{ type: 'command', command: 'managed' }] }],
+    },
+  }, null, 2)}\n`);
+  const baseEntry = {
+    path,
+    type: 'blob',
+    sha: gitBlobSha(baseContent),
+    mode: '100644',
+  };
+  let uploaded = null;
+  const client = {
+    async call(method, requestPath, body) {
+      if (method === 'GET' && requestPath === '/repos/qwts/target') {
+        return { default_branch: 'main' };
+      }
+      if (method === 'GET' && requestPath.endsWith('/git/ref/heads/main')) {
+        return { object: { sha: 'base-sha' } };
+      }
+      if (method === 'GET' && requestPath.endsWith('/git/commits/base-sha')) {
+        return { tree: { sha: 'base-tree' } };
+      }
+      if (method === 'GET' && requestPath.endsWith('/git/trees/base-tree?recursive=1')) {
+        return { tree: [baseEntry], truncated: false };
+      }
+      if (method === 'GET' && requestPath.endsWith(`/git/blobs/${baseEntry.sha}`)) {
+        return { encoding: 'base64', content: baseContent.toString('base64') };
+      }
+      if (method === 'GET' && requestPath.includes('/pulls?state=all')) {
+        return [{
+          number: 7,
+          state: 'open',
+          title: CODEX_SYNC_TITLE,
+          html_url: 'https://example.test/pr/7',
+          head: { ref: CODEX_SYNC_BRANCH },
+        }];
+      }
+      if (method === 'GET' && requestPath.endsWith('/git/ref/heads/governance/codex-sync')) {
+        return { object: { sha: 'branch-sha' } };
+      }
+      if (method === 'GET' && requestPath.endsWith('/git/commits/branch-sha')) {
+        return { tree: { sha: 'branch-tree' } };
+      }
+      if (method === 'GET' && requestPath.endsWith('/git/trees/branch-tree?recursive=1')) {
+        return {
+          truncated: false,
+          tree: [{ path, type: 'blob', sha: source.sha, mode: source.mode }],
+        };
+      }
+      if (method === 'POST' && requestPath.endsWith('/git/blobs')) {
+        uploaded = Buffer.from(body.content, 'base64');
+        return { sha: 'merged-blob' };
+      }
+      if (method === 'POST' && requestPath.endsWith('/git/trees')) {
+        return { sha: 'merged-tree' };
+      }
+      if (method === 'POST' && requestPath.endsWith('/git/commits')) {
+        assert.deepEqual(body.parents, ['branch-sha']);
+        return { sha: 'merged-commit' };
+      }
+      if (
+        method === 'PATCH' &&
+        requestPath.endsWith('/git/refs/heads/governance/codex-sync')
+      ) {
+        return {};
+      }
+      if (method === 'PATCH' && requestPath.endsWith('/pulls/7')) {
+        return { html_url: 'https://example.test/pr/7' };
+      }
+      throw new Error(`unexpected request: ${method} ${requestPath}`);
+    },
+  };
+
+  const result = await syncRepository(client, {
+    owner: 'qwts',
+    entry: {
+      name: 'target',
+      codexSync: {
+        exclude: GOVERNED_HARNESS_FILES.filter((candidate) => candidate !== path),
+      },
+    },
+    canonicalFiles: new Map([[path, source]]),
+    sourceSha: 'a'.repeat(40),
+    apply: true,
+  });
+  const merged = JSON.parse(uploaded.toString('utf8'));
+
+  assert.equal(result.status, 'pull-updated');
+  assert.deepEqual(merged.permissions, { defaultMode: 'acceptEdits' });
+  assert.deepEqual(merged.hooks.PreToolUse, [{ matcher: 'Bash' }]);
+  assert.deepEqual(merged.hooks.SessionStart, [{
+    hooks: [{ type: 'command', command: 'repo-session' }],
+  }]);
+  assert.equal(merged.hooks.WorktreeCreate[0].hooks[0].command, 'managed');
 });
 
 test('pull body records source provenance and every managed path', () => {
