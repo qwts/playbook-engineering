@@ -15,6 +15,7 @@ export const COPILOT_REVIEW_BOT = 'copilot-pull-request-reviewer[bot]';
 export const CODEX_SOURCE_REPO = 'playbook-engineering';
 export const CODEX_SYNC_TITLE = 'governance: sync managed .codex files';
 export const CODEX_SYNC_COMMIT_PREFIX = `governance: sync .codex from ${CODEX_SOURCE_REPO}@`;
+export const MANAGED_JSON_OVERLAY_PATHS = new Set(['.claude/settings.json']);
 
 export function gitBlobSha(content) {
   const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content);
@@ -36,6 +37,64 @@ export function loadCanonicalFiles(root, paths = GOVERNED_HARNESS_FILES) {
       mode: executable ? '100755' : '100644',
     }];
   }));
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function mergeJsonObjects(target, managed) {
+  const merged = { ...target };
+  for (const [key, value] of Object.entries(managed)) {
+    merged[key] = isPlainObject(value) && isPlainObject(target[key])
+      ? mergeJsonObjects(target[key], value)
+      : value;
+  }
+  return merged;
+}
+
+function parseJsonObject(path, content, owner) {
+  let value;
+  try {
+    value = JSON.parse(content.toString('utf8'));
+  } catch (error) {
+    throw new Error(`${path}: invalid ${owner} JSON (${error.message})`);
+  }
+  if (!isPlainObject(value)) throw new Error(`${path}: ${owner} JSON must be an object`);
+  return value;
+}
+
+export function mergeManagedFile(canonicalFile, targetContent) {
+  if (!targetContent || !MANAGED_JSON_OVERLAY_PATHS.has(canonicalFile.path)) {
+    return canonicalFile;
+  }
+  const managed = parseJsonObject(canonicalFile.path, canonicalFile.content, 'managed');
+  const target = parseJsonObject(canonicalFile.path, targetContent, 'downstream');
+  const content = Buffer.from(`${JSON.stringify(mergeJsonObjects(target, managed), null, 2)}\n`);
+  return {
+    ...canonicalFile,
+    content,
+    sha: gitBlobSha(content),
+  };
+}
+
+export async function materializeManagedFiles(
+  canonicalFiles,
+  targetTree,
+  managedPaths,
+  readTargetContent,
+) {
+  const files = new Map();
+  for (const path of managedPaths) {
+    const canonical = canonicalFiles.get(path);
+    if (!canonical) throw new Error(`${path}: canonical managed file is missing`);
+    const target = targetTree.get(path);
+    const content = target && MANAGED_JSON_OVERLAY_PATHS.has(path)
+      ? await readTargetContent(target)
+      : null;
+    files.set(path, mergeManagedFile(canonical, content));
+  }
+  return files;
 }
 
 export function managedCodexPaths(entry, paths = GOVERNED_HARNESS_FILES) {

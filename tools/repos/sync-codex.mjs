@@ -23,6 +23,7 @@ import {
   chooseSyncHead,
   diffManagedFiles,
   loadCanonicalFiles,
+  materializeManagedFiles,
   managedCodexPaths,
   syncPullBody,
   treeByPath,
@@ -98,6 +99,14 @@ async function commitTree(client, owner, repo, commitSha) {
   return treeByPath(tree.tree);
 }
 
+async function readBlob(client, owner, repo, entry) {
+  const blob = await client.call('GET', `/repos/${owner}/${repo}/git/blobs/${entry.sha}`);
+  if (blob.encoding !== 'base64' || typeof blob.content !== 'string') {
+    throw new Error(`${owner}/${repo}:${entry.path}: unsupported Git blob encoding`);
+  }
+  return Buffer.from(blob.content.replaceAll('\n', ''), 'base64');
+}
+
 async function writeManagedCommit(client, {
   owner,
   repo,
@@ -141,7 +150,13 @@ export async function syncRepository(client, {
   const baseRef = await client.call('GET', apiRef(`/repos/${owner}/${repo}/git/ref/heads`, base));
   const baseSha = baseRef.object.sha;
   const baseTree = await commitTree(client, owner, repo, baseSha);
-  const baseDiff = diffManagedFiles(canonicalFiles, baseTree, paths);
+  const desiredFiles = await materializeManagedFiles(
+    canonicalFiles,
+    baseTree,
+    paths,
+    (entry) => readBlob(client, owner, repo, entry),
+  );
+  const baseDiff = diffManagedFiles(desiredFiles, baseTree, paths);
   if (baseDiff.length === 0) return { name: repo, status: 'current', changed: [] };
 
   const head = encodeURIComponent(`${owner}:${CODEX_SYNC_BRANCH}`);
@@ -173,7 +188,7 @@ export async function syncRepository(client, {
   let changed = baseDiff;
   if (choice.pull) {
     const branchTree = await commitTree(client, owner, repo, choice.parentSha);
-    changed = diffManagedFiles(canonicalFiles, branchTree, paths);
+    changed = diffManagedFiles(desiredFiles, branchTree, paths);
     if (changed.length === 0) {
       return {
         name: repo,

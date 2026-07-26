@@ -135,13 +135,13 @@ node tools/repos/sync-codex.mjs --apply     # open or update downstream PRs
 node tools/repos/sync-codex.mjs --repo NAME # scope either mode
 ```
 
-The synchronization compares Git blob hashes and executable modes for every
-managed file in each active target. Drift is proposed through the stable
-`governance/codex-sync` branch and a `qwts-codex-agent`-authored pull request;
-the target default branch is never written directly and downstream review and
-CI remain mandatory. An existing open sync PR is updated rather than
-duplicated. The source repository is marked `codexSync.enabled: false` because
-its root files are canonical.
+Synchronization compares Git blob hashes and executable modes. Most managed
+files are exact replacements. `.claude/settings.json` is a recursive overlay:
+canonical keys win, target-only permissions, hooks, and settings survive, and
+invalid JSON fails closed. Drift uses the stable `governance/codex-sync` branch
+and a `qwts-codex-agent` pull request; default branches remain review- and
+CI-protected. An open sync PR is updated, not duplicated. The source repository
+sets `codexSync.enabled: false` because its root files are canonical.
 
 After the source change is reviewed and merged, approve the generated pull
 requests from a normal human checkout:
