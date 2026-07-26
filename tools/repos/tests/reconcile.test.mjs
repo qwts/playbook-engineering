@@ -259,4 +259,6 @@ test('setup selects Node per worktree without changing the global nvm default', 
   assert.doesNotMatch(source, /nvm alias default/);
   assert.match(source, /codex_repo_root=.*git rev-parse --show-toplevel/);
   assert.match(source, /nvm use .*codex_repo_root.*\.nvmrc/);
+  assert.match(source, /bash \.codex\/scripts\/ensure-identity\.sh/);
+  assert.doesNotMatch(source, /ensure-identity\.sh.*\|\| true/);
 });

@@ -111,6 +111,15 @@ test('an agent outside bot territory cannot query or write through stock gh', ()
   }
 });
 
+test('a model-specific App marker is agent context and cannot use human gh outside bot territory', () => {
+  const result = runShim({
+    agentEnv: { GH_AGENT_APP: 'qwts-codex-sol-agent' },
+    args: ['issue', 'create', '--title', 'forbidden'],
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /outside bot territory.*refusing stock human gh/);
+});
+
 test('an agent fails closed when the installed token-helper path is stale', () => {
   const result = runShim({
     agentEnv: { CODEX_SANDBOX: 'seatbelt' },

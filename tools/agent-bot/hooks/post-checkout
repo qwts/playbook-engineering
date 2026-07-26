@@ -21,13 +21,6 @@ if [ -f "$SETUP" ] && command -v node >/dev/null 2>&1; then
   node "$SETUP" || true
 fi
 
-# Because this hook is installed via a global core.hooksPath, it shadows each
-# repo's own hooks/post-checkout. Chain through to a repo-local one if present
-# (and not this same file), so setting the global path never silently disables
-# another repo's hook.
-# --git-common-dir, not --git-path hooks: the latter honors core.hooksPath
-# and would resolve back to this global directory instead of the repo's own.
-LOCAL="$(git rev-parse --git-common-dir 2>/dev/null)/hooks/post-checkout"
-if [ -x "$LOCAL" ] && [ "$LOCAL" != "$HOOK_DIR/post-checkout" ]; then
-  "$LOCAL" "$@"
-fi
+# Preserve the hooks path that setup displaced. With none configured,
+# chain-hook falls back to the repository's common hooks directory.
+"$HOOK_DIR/chain-hook" post-checkout "$@"

@@ -4,10 +4,7 @@
 # provenance without changing GitHub attribution or exposing the transcript.
 
 HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-LOCAL="$(git rev-parse --git-common-dir 2>/dev/null)/hooks/prepare-commit-msg"
-if [ -x "$LOCAL" ] && [ "$LOCAL" != "$HOOK_DIR/prepare-commit-msg" ]; then
-  "$LOCAL" "$@" || exit $?
-fi
+"$HOOK_DIR/chain-hook" prepare-commit-msg "$@" || exit $?
 
 IDENTITY_TOOL="$HOOK_DIR/../agent-identity.mjs"
 [ -f "$IDENTITY_TOOL" ] && command -v node >/dev/null 2>&1 || exit 0

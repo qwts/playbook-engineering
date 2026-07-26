@@ -51,7 +51,7 @@ export function detectHarness(env = process.env) {
 // the agent/human identity boundary.
 export function detectAgentHarness(env = process.env) {
   const explicit = typeof env.GH_AGENT_APP === 'string' ? env.GH_AGENT_APP : '';
-  if (/^qwts-(?:claude|codex|cursor|vscode)-agent$/.test(explicit)) return explicit;
+  if (/^qwts-[a-z0-9]+(?:-[a-z0-9]+)*-agent$/.test(explicit)) return explicit;
 
   const aiAgent = typeof env.AI_AGENT === 'string' ? env.AI_AGENT.toLowerCase() : '';
   if (

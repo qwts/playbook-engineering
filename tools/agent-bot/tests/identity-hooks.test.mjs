@@ -2,6 +2,7 @@ import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -23,6 +24,7 @@ after(() => rmSync(root, { recursive: true, force: true }));
 const agentBot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const hooks = path.join(agentBot, 'hooks');
 const prepare = path.join(hooks, 'prepare-commit-msg');
+const commitMsg = path.join(hooks, 'commit-msg');
 const postCommit = path.join(hooks, 'post-commit');
 const preCommit = path.join(hooks, 'pre-commit');
 
@@ -54,17 +56,30 @@ function fixture(name) {
   return { repo, stateDir, identity, git, env };
 }
 
-test('prepare-commit-msg adds exactly one opaque identity trailer', () => {
-  const { repo, identity, env } = fixture('prepare');
+test('custom message hooks are chained and identity adds exactly one opaque trailer', () => {
+  const { repo, identity, git, env } = fixture('prepare');
   const message = path.join(repo, 'message.txt');
+  const customHooks = path.join(repo, '.custom-hooks');
+  const customPrepare = path.join(customHooks, 'prepare-commit-msg');
+  const customCommitMsg = path.join(customHooks, 'commit-msg');
+  mkdirSync(customHooks);
+  writeFileSync(customPrepare, '#!/bin/sh\nprintf "\\nCustom-Hook: ran\\n" >>"$1"\n');
+  writeFileSync(customCommitMsg, '#!/bin/sh\nprintf "Commit-Msg-Hook: ran\\n" >>"$1"\n');
+  chmodSync(customPrepare, 0o755);
+  chmodSync(customCommitMsg, 0o755);
+  git('config', 'extensions.worktreeConfig', 'true');
+  git('config', '--worktree', 'qwts.chainedHooksPath', '.custom-hooks');
   writeFileSync(message, 'explain why\n');
 
   execFileSync(prepare, [message, 'message'], { cwd: repo, env });
   execFileSync(prepare, [message, 'message'], { cwd: repo, env });
+  execFileSync(commitMsg, [message], { cwd: repo, env });
 
   const body = readFileSync(message, 'utf8');
   assert.equal(body.match(/^Agent-Identity:/gm)?.length, 1);
   assert.match(body, new RegExp(`Agent-Identity: ${identity.id}$`, 'm'));
+  assert.match(body, /^Custom-Hook: ran$/m);
+  assert.match(body, /^Commit-Msg-Hook: ran$/m);
   assert.doesNotMatch(body, /thread|token|credential/i);
 });
 

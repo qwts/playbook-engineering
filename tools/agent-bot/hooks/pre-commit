@@ -59,10 +59,5 @@ if [ -n "$AGENT" ]; then
   esac
 fi
 
-# Chain to a repo-local pre-commit so the global hooksPath never disables one.
-LOCAL="$(git rev-parse --git-common-dir 2>/dev/null)/hooks/pre-commit"
 HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-if [ -x "$LOCAL" ] && [ "$LOCAL" != "$HOOK_DIR/pre-commit" ]; then
-  exec "$LOCAL" "$@"
-fi
-exit 0
+"$HOOK_DIR/chain-hook" pre-commit "$@"

@@ -7,6 +7,7 @@ export const GOVERNED_CODEX_FILES = [
   '.codex/environments/environment.toml',
   '.codex/rules/environment.rules',
   '.codex/scripts/cleanup.sh',
+  '.codex/scripts/ensure-identity.sh',
   '.codex/scripts/gh.zsh',
   '.codex/scripts/git-with-nvm.zsh',
   '.codex/scripts/nvm.zsh',

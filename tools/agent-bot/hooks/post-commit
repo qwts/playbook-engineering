@@ -17,8 +17,4 @@ if [ -f "$IDENTITY_TOOL" ] && command -v node >/dev/null 2>&1; then
   fi
 fi
 
-LOCAL="$(git rev-parse --git-common-dir 2>/dev/null)/hooks/post-commit"
-if [ -x "$LOCAL" ] && [ "$LOCAL" != "$HOOK_DIR/post-commit" ]; then
-  exec "$LOCAL" "$@"
-fi
-exit 0
+"$HOOK_DIR/chain-hook" post-commit "$@"
