@@ -19,3 +19,9 @@ CLAUDE.md   @qwts
 .codex/     @qwts
 .cursor/    @qwts
 .mcp.json   @qwts
+
+# Shared skills distributed to the fleet. A skill is read as a directive and
+# ships executable scripts alongside it, so it is the same class as the entries
+# above — and higher blast radius, because it is installed into every agent's
+# harness rather than scoped to one repository.
+/skills/    @qwts
