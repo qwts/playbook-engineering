@@ -58,6 +58,7 @@ Each document includes navigation links, prerequisites, and cross-references to 
 - [Agent bot identity](docs/reference/agent-bot-identity.md) — the GitHub App agents author PRs as, so a human can approve them (ENG-0016).
 - [Agent execution identity](docs/reference/agent-execution-identity.md) — the private transcript-bound identity behind each agent conversation and its artifacts (ENG-0081).
 - [Agentic primitives conformance checklist](docs/reference/agentic-primitives-conformance-checklist.md) — the ENG-0006 §6 checklist per-repo alignment issues link to.
+- [Shared agent skills](skills/README.md) — skills centralized here and installed into every agent harness, rather than copied per repo (ENG-0004, ENG-0006).
 - [Documentation governance](docs/reference/documentation-governance.md) — the `docs-gov` gate: deterministic checks that keep docs agent-readable, consumable by other repos as a reusable workflow.
 - [Dependency & tooling inventory](docs/reference/dependency-inventory.md) — the report-only inventory of dependencies, licenses, and tooling across governed repos, consumed as a reusable workflow (ENG-0015).
 - [Documentation style guide](docs/23-documentation_style_guide.md) — conventions for writing docs in this playbook.

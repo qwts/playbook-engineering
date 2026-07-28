@@ -5,8 +5,8 @@
   "scripts": {
     "agent:identity": "node tools/agent-bot/agent-identity.mjs",
     "codex:approve": "node tools/repos/approve-codex-sync.mjs",
-    "lint:markdown": "markdownlint docs/ AGENTS.md",
-    "lint:markdown:fix": "markdownlint docs/ AGENTS.md --fix",
+    "lint:markdown": "markdownlint docs/ skills/ AGENTS.md",
+    "lint:markdown:fix": "markdownlint docs/ skills/ AGENTS.md --fix",
     "docs:gov": "node tools/docs-gov/docs-gov.mjs",
     "docs:eval": "node tools/docs-eval/run.mjs",
     "inventory": "node tools/dependency-inventory/inventory.mjs",
