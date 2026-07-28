@@ -76,6 +76,14 @@ export function validateManifest(manifest) {
     if (typeof repo.sharedCi !== 'boolean') {
       errors.push(`${where}.sharedCi must be a boolean`);
     }
+    // Consumed by the public dashboard as an opt-in publication gate: only the
+    // boolean `true` publishes a repo. A string "true" or a 1 would be treated
+    // as not-opted-in and the repo would vanish from the dashboard silently, so
+    // the typo is caught here rather than becoming an invisible omission
+    // downstream. Absent means do not publish, which is the intended default.
+    if (repo.publish !== undefined && typeof repo.publish !== 'boolean') {
+      errors.push(`${where}.publish must be a boolean when present`);
+    }
     if (repo.delta !== undefined && typeof repo.delta !== 'string') {
       errors.push(`${where}.delta must be a string when present`);
     }

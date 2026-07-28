@@ -60,6 +60,30 @@ test('rejects a non-boolean sharedCi', () => {
   assert.ok(validateManifest(m).some((e) => e.includes('sharedCi')));
 });
 
+test('rejects a non-boolean publish', () => {
+  // The dashboard opts in on `=== true`, so "true" and 1 withhold the repo.
+  // Caught here rather than surfacing as a repo silently missing from a public
+  // page, where nobody is looking for an absence.
+  for (const value of ['true', 1, null, {}]) {
+    const m = validManifest();
+    m.repos[0].publish = value;
+    assert.ok(
+      validateManifest(m).some((e) => e.includes('publish')),
+      `publish: ${JSON.stringify(value)} should be rejected`,
+    );
+  }
+});
+
+test('publish is optional, and absent means unpublished rather than invalid', () => {
+  const m = validManifest();
+  assert.equal(m.repos[0].publish, undefined);
+  assert.deepEqual(validateManifest(m), []);
+
+  const opted = validManifest();
+  opted.repos[0].publish = true;
+  assert.deepEqual(validateManifest(opted), []);
+});
+
 test('rejects a missing name', () => {
   const m = validManifest();
   delete m.repos[0].name;
