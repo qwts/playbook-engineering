@@ -14,16 +14,46 @@
       "note": "Fable, pinned per worktree with qwts.agentApp."
     },
     {
+      "slug": "qwts-claude-haiku-agent",
+      "harness": "claude-code",
+      "status": "active",
+      "note": "Haiku, pinned per worktree with qwts.agentApp."
+    },
+    {
+      "slug": "qwts-claude-opus-agent",
+      "harness": "claude-code",
+      "status": "active",
+      "note": "Opus, pinned per worktree with qwts.agentApp."
+    },
+    {
+      "slug": "qwts-claude-sonnet-agent",
+      "harness": "claude-code",
+      "status": "active",
+      "note": "Sonnet, pinned per worktree with qwts.agentApp."
+    },
+    {
       "slug": "qwts-codex-agent",
       "harness": "codex",
       "status": "active",
       "note": "The harness-level identity: what an unpinned Codex worktree resolves to."
     },
     {
+      "slug": "qwts-codex-luna-agent",
+      "harness": "codex",
+      "status": "active",
+      "note": "Luna, pinned per worktree with qwts.agentApp."
+    },
+    {
       "slug": "qwts-codex-sol-agent",
       "harness": "codex",
       "status": "active",
       "note": "Sol, pinned per worktree with qwts.agentApp."
+    },
+    {
+      "slug": "qwts-codex-terra-agent",
+      "harness": "codex",
+      "status": "active",
+      "note": "Terra, pinned per worktree with qwts.agentApp."
     },
     {
       "slug": "qwts-cursor-agent",
