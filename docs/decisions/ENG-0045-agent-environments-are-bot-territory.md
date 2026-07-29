@@ -17,14 +17,25 @@ This record settles the model permanently so it is never re-derived.
 
 ## Decision
 
-1. **The directory dictates the App.** A linked worktree under
-   `~/.<tool>/worktrees/` belongs to `qwts-<tool>-agent` — regardless of
+1. **The directory dictates the App.** A linked worktree under a
+   `.<tool>/worktrees/` path belongs to `qwts-<tool>-agent` — regardless of
    which process created it (the IDE, the agent, or a human command) and
-   regardless of ambient environment: `~/.claude/worktrees` →
-   `qwts-claude-agent`, `~/.codex/worktrees` → `qwts-codex-agent`,
-   `~/.vscode/worktrees` → `qwts-vscode-agent`, `~/.cursor/worktrees` →
+   regardless of ambient environment: `.claude/worktrees` →
+   `qwts-claude-agent`, `.codex/worktrees` → `qwts-codex-agent`,
+   `.vscode/worktrees` → `qwts-vscode-agent`, `.cursor/worktrees` →
    `qwts-cursor-agent`. Location is the identity signal; environment markers
    are at most a fallback for tools with no worktree directory convention.
+
+   **The segment is the signal; the root above it is not.** `~` is the usual
+   home for these directories, not a requirement. A workstation whose boot
+   volume cannot hold agent worktrees keeps them on
+   `/Volumes/<drive>/.claude/worktrees` — a fact about that machine's disks,
+   never a statement about who owns the work. Anchoring the rule to `$HOME`
+   demoted every worktree on such a machine to human territory, where the shim
+   refused to run and the agent fell back to the human's stored credentials:
+   the exact outcome this decision exists to prevent. The accepted tradeoff is
+   that a checkout containing a literal `.<tool>/worktrees/` path reads as
+   territory.
 2. **Inside bot territory, everything is the bot.** Commits and pushes via
    the per-worktree config the post-checkout hook writes; PRs, comments, and
    all other `gh` actions via a `gh` shim that resolves identity from that
@@ -47,7 +58,7 @@ This record settles the model permanently so it is never re-derived.
    record) blocks a commit when the process carries agent-only environment
    markers, the commit would be attributed to the human, and the repo has a
    GitHub remote — telling the agent it may only commit within
-   `~/.<tool>/worktrees/<repo>`. Humans are never evaluated (agent-only
+   `.<tool>/worktrees/<repo>`. Humans are never evaluated (agent-only
    markers, never editor markers); bot-attributed commits pass; remoteless
    scratch repos are exempt. The asymmetry with decision 3 is deliberate:
    agents get machinery, the human gets trust.

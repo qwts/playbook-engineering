@@ -20,7 +20,6 @@ import process from 'node:process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { mint } from './mint-token.mjs';
 import { detectAgentHarness, HARNESSES } from './detect-harness.mjs';
@@ -32,14 +31,23 @@ function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-// ENG-0045 decision 1: the directory dictates the App. ~/.<tool>/worktrees/**
-// belongs to that tool's bot regardless of which process created it — and
+// ENG-0045 decision 1: the directory dictates the App. A `.<tool>/worktrees/**`
+// path belongs to that tool's bot regardless of which process created it — and
 // regardless of whether the worktree config ever landed: sandboxed harnesses
 // (Codex) can be unable to write the shared git dir at setup time, and an
 // unconfigured bot worktree must still resolve as the bot, never the human.
-export function pathSlug(toplevel, home) {
-  if (!toplevel || !home) return null;
-  const m = toplevel.startsWith(`${home}/`) && toplevel.slice(home.length + 1).match(/^\.([a-z]+)\/worktrees\//);
+//
+// The `.<tool>/worktrees` segment is the signal; the root above it is not.
+// A workstation whose boot volume is too small keeps agent worktrees on
+// `/Volumes/<drive>/.claude/worktrees` — a fact about the hardware, never a
+// statement about who owns the work. Anchoring this to $HOME silently demoted
+// every worktree on such a machine to human territory, where the shim then
+// refused to run at all and agents fell back to the human's credentials: the
+// precise failure ENG-0045 exists to prevent. Accepted tradeoff: a checkout
+// that itself contains a literal `.<tool>/worktrees/` path reads as territory.
+export function pathSlug(toplevel) {
+  if (!toplevel) return null;
+  const m = toplevel.match(/(?:^|\/)\.([a-z]+)\/worktrees\//);
   if (!m) return null;
   return HARNESSES.find((h) => h.slug.split('-')[1] === m[1])?.slug ?? null;
 }
@@ -59,8 +67,8 @@ export function helperSlug(helperLines) {
 // helper line covers configured worktrees outside the directory pattern. A
 // stray qwts.agentApp in a normal clone still never makes the shim mint
 // (decision 3) — a pin alone is not territory.
-export function resolveSlug({ pinned, toplevel, home, helperLines }) {
-  const territory = pathSlug(toplevel, home) ?? helperSlug(helperLines);
+export function resolveSlug({ pinned, toplevel, helperLines }) {
+  const territory = pathSlug(toplevel) ?? helperSlug(helperLines);
   if (!territory) return null;
   return pinned || territory;
 }
@@ -107,7 +115,7 @@ async function main() {
   } catch {
     /* bare or odd repo — path rule cannot apply */
   }
-  const slug = resolveSlug({ pinned, toplevel, home: homedir(), helperLines: helpers });
+  const slug = resolveSlug({ pinned, toplevel, helperLines: helpers });
   // --slug: identity only, no mint, no network — the gh shim's `whoami`.
   if (process.argv.includes('--slug')) {
     if (slug) process.stdout.write(`${slug}\n`);

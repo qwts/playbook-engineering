@@ -27,9 +27,12 @@ if [ -z "$AGENT_CONTEXT" ]; then
 fi
 
 TERRITORY_HINT=""
+# The .<tool>/worktrees segment is the signal, not the root above it: a boot
+# volume too small for agent worktrees pushes them onto /Volumes/<drive>, which
+# says nothing about who owns the work (ENG-0045 decision 1).
 case "$PWD" in
-  "$HOME"/.claude/worktrees/*|"$HOME"/.codex/worktrees/*|\
-  "$HOME"/.cursor/worktrees/*|"$HOME"/.vscode/worktrees/*)
+  */.claude/worktrees/*|*/.codex/worktrees/*|\
+  */.cursor/worktrees/*|*/.vscode/worktrees/*)
     TERRITORY_HINT=1
     ;;
 esac
