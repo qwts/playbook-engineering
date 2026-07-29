@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { worktreeSlug, pathSlug, resolveSlug } from '../worktree-token.mjs';
+import { worktreeSlug, pathSlug, resolveSlug, configuredRootSlug } from '../worktree-token.mjs';
 
 test('extracts the slug baked into the credential-helper line', () => {
   const helpers = '\n!node /Users/x/Code/playbook-engineering/tools/agent-bot/git-credential-bot.mjs qwts-codex-agent';
@@ -54,6 +54,22 @@ test('paths outside .<tool>/worktrees are never territory', () => {
   assert.equal(pathSlug('/Volumes/d/claude/worktrees/x/r'), null); // undotted, not a tool dir
   assert.equal(pathSlug('/Volumes/d/.claude/worktrees'), null); // the container, not a worktree
   assert.equal(pathSlug(null), null);
+});
+
+test('a configured relocation root is territory even without the segment', () => {
+  // AGENT_WORKTREE_ROOT and the desktop preference accept any directory, and
+  // both creators then build <root>/<repo>/<name>. Those worktrees are Claude's
+  // by configuration though the path never says so — and the path rule exists
+  // precisely for when setup-worktree could not persist the helper line.
+  const HOME = '/Users/u';
+  assert.equal(configuredRootSlug('/override/test-repo/name', '/override', HOME), 'qwts-claude-agent');
+  assert.equal(configuredRootSlug('/wt', '/wt', HOME), 'qwts-claude-agent'); // the root itself
+  assert.equal(configuredRootSlug('/overridefoo/r/n', '/override', HOME), null); // prefix, not a path boundary
+  assert.equal(configuredRootSlug(`${HOME}/Code/r`, '/override', HOME), null);
+  // A root that broad is a misconfiguration, never a claim on human clones.
+  assert.equal(configuredRootSlug(`${HOME}/Code/r`, HOME, HOME), null);
+  assert.equal(configuredRootSlug('/anything/at/all', '/', HOME), null);
+  assert.equal(configuredRootSlug('/override/r/n', null, HOME), null);
 });
 
 test('resolution order: pin picks WHICH bot, only inside territory', () => {

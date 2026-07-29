@@ -20,7 +20,9 @@ import process from 'node:process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { desktopConfigPath, worktreeRoot } from './claude-worktree-create.mjs';
 import { mint } from './mint-token.mjs';
 import { detectAgentHarness, HARNESSES } from './detect-harness.mjs';
 
@@ -52,6 +54,22 @@ export function pathSlug(toplevel) {
   return HARNESSES.find((h) => h.slug.split('-')[1] === m[1])?.slug ?? null;
 }
 
+// A relocation root need not contain the segment: `AGENT_WORKTREE_ROOT` and the
+// desktop app's own preference take any directory, and both creators then build
+// `<root>/<repo>/<name>`. Those worktrees are Claude's by configuration even
+// though the path never says so, and the path rule is precisely the fallback for
+// when setup-worktree could not persist the credential helper — so resolution
+// reads the same roots the creator does (PR #111 review).
+//
+// A root of `/` or the home directory itself would make every human checkout
+// territory, so those are refused: a preference that broad is a misconfiguration,
+// not a claim on the human's clones (decision 3).
+export function configuredRootSlug(toplevel, root, home) {
+  if (!toplevel || !root || root === '/' || root === home) return null;
+  if (toplevel !== root && !toplevel.startsWith(`${root}/`)) return null;
+  return 'qwts-claude-agent';
+}
+
 // The credential-helper line baked in by setup-worktree marks territory the
 // path rule cannot see (an explicitly configured worktree elsewhere).
 export function helperSlug(helperLines) {
@@ -67,8 +85,8 @@ export function helperSlug(helperLines) {
 // helper line covers configured worktrees outside the directory pattern. A
 // stray qwts.agentApp in a normal clone still never makes the shim mint
 // (decision 3) — a pin alone is not territory.
-export function resolveSlug({ pinned, toplevel, helperLines }) {
-  const territory = pathSlug(toplevel) ?? helperSlug(helperLines);
+export function resolveSlug({ pinned, toplevel, helperLines, configuredRoot = null, home = null }) {
+  const territory = pathSlug(toplevel) ?? configuredRootSlug(toplevel, configuredRoot, home) ?? helperSlug(helperLines);
   if (!territory) return null;
   return pinned || territory;
 }
@@ -115,7 +133,21 @@ async function main() {
   } catch {
     /* bare or odd repo — path rule cannot apply */
   }
-  const slug = resolveSlug({ pinned, toplevel, helperLines: helpers });
+  // Same roots the creator honors, read the same way — an unreadable or absent
+  // desktop config just leaves the path and helper rules to decide.
+  let configuredRoot = null;
+  try {
+    let desktopConfig = null;
+    try {
+      desktopConfig = readFileSync(desktopConfigPath(), 'utf8');
+    } catch {
+      /* no desktop config on this machine */
+    }
+    configuredRoot = worktreeRoot({ desktopConfig });
+  } catch {
+    /* a malformed preference must never break identity resolution */
+  }
+  const slug = resolveSlug({ pinned, toplevel, helperLines: helpers, configuredRoot, home: homedir() });
   // --slug: identity only, no mint, no network — the gh shim's `whoami`.
   if (process.argv.includes('--slug')) {
     if (slug) process.stdout.write(`${slug}\n`);

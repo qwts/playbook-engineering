@@ -196,7 +196,7 @@ reused automatically.
 **Agents do not work in primary checkouts.** Per
 [ENG-0045](../decisions/ENG-0045-agent-environments-are-bot-territory.md),
 agent territory is any `.<tool>/worktrees/` path — the directory dictates the
-App, and the root above that segment does not matter —
+App —
 and primary clones are the human's, stock; a clone is never "pinned" to a bot
 identity. The machine-wide `pre-commit` guard enforces the agent side of the
 boundary: an agent-marked process attempting a human-attributed commit in a
@@ -218,10 +218,10 @@ node tools/agent-bot/install-gh-shim.mjs
 
 It writes `~/.config/agent-bot/bin/gh` and prepends its directory from
 `~/.zshenv`. Outside bot territory, human shells pass through; agent processes
-abort before stock `gh` can use the human credential. Territory comes from
-any `.<tool>/worktrees/**` path first, then the credential helper
-`setup-worktree.mjs` writes. Inside, the shim mints and exports the worktree's
-bot token. A supplied `GH_TOKEN` must resolve to that bot, and a failed mint
+abort before stock `gh` can use the human credential. Territory: any
+`.<tool>/worktrees/**` path, else a configured relocation root
+(`AGENT_WORKTREE_ROOT`, desktop preference), else the credential helper. Inside, the shim mints and
+exports the worktree's bot token. A supplied `GH_TOKEN` must resolve to that bot, and a failed mint
 aborts. Processes that never read `~/.zshenv` keep stock `gh`; the
 [ENG-0045](../decisions/ENG-0045-agent-environments-are-bot-territory.md)
 review requirement remains the backstop. `gh whoami` reports the supplied
