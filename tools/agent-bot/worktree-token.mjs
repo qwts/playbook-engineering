@@ -22,6 +22,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { desktopConfigPath, worktreeRoot } from './claude-worktree-create.mjs';
 import { mint } from './mint-token.mjs';
 import { detectAgentHarness, HARNESSES } from './detect-harness.mjs';
 
@@ -32,16 +33,41 @@ function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-// ENG-0045 decision 1: the directory dictates the App. ~/.<tool>/worktrees/**
-// belongs to that tool's bot regardless of which process created it — and
+// ENG-0045 decision 1: the directory dictates the App. A `.<tool>/worktrees/**`
+// path belongs to that tool's bot regardless of which process created it — and
 // regardless of whether the worktree config ever landed: sandboxed harnesses
 // (Codex) can be unable to write the shared git dir at setup time, and an
 // unconfigured bot worktree must still resolve as the bot, never the human.
-export function pathSlug(toplevel, home) {
-  if (!toplevel || !home) return null;
-  const m = toplevel.startsWith(`${home}/`) && toplevel.slice(home.length + 1).match(/^\.([a-z]+)\/worktrees\//);
+//
+// The `.<tool>/worktrees` segment is the signal; the root above it is not.
+// A workstation whose boot volume is too small keeps agent worktrees on
+// `/Volumes/<drive>/.claude/worktrees` — a fact about the hardware, never a
+// statement about who owns the work. Anchoring this to $HOME silently demoted
+// every worktree on such a machine to human territory, where the shim then
+// refused to run at all and agents fell back to the human's credentials: the
+// precise failure ENG-0045 exists to prevent. Accepted tradeoff: a checkout
+// that itself contains a literal `.<tool>/worktrees/` path reads as territory.
+export function pathSlug(toplevel) {
+  if (!toplevel) return null;
+  const m = toplevel.match(/(?:^|\/)\.([a-z]+)\/worktrees\//);
   if (!m) return null;
   return HARNESSES.find((h) => h.slug.split('-')[1] === m[1])?.slug ?? null;
+}
+
+// A relocation root need not contain the segment: `AGENT_WORKTREE_ROOT` and the
+// desktop app's own preference take any directory, and both creators then build
+// `<root>/<repo>/<name>`. Those worktrees are Claude's by configuration even
+// though the path never says so, and the path rule is precisely the fallback for
+// when setup-worktree could not persist the credential helper — so resolution
+// reads the same roots the creator does (PR #111 review).
+//
+// A root of `/` or the home directory itself would make every human checkout
+// territory, so those are refused: a preference that broad is a misconfiguration,
+// not a claim on the human's clones (decision 3).
+export function configuredRootSlug(toplevel, root, home) {
+  if (!toplevel || !root || root === '/' || root === home) return null;
+  if (toplevel !== root && !toplevel.startsWith(`${root}/`)) return null;
+  return 'qwts-claude-agent';
 }
 
 // The credential-helper line baked in by setup-worktree marks territory the
@@ -59,8 +85,8 @@ export function helperSlug(helperLines) {
 // helper line covers configured worktrees outside the directory pattern. A
 // stray qwts.agentApp in a normal clone still never makes the shim mint
 // (decision 3) — a pin alone is not territory.
-export function resolveSlug({ pinned, toplevel, home, helperLines }) {
-  const territory = pathSlug(toplevel, home) ?? helperSlug(helperLines);
+export function resolveSlug({ pinned, toplevel, helperLines, configuredRoot = null, home = null }) {
+  const territory = pathSlug(toplevel) ?? configuredRootSlug(toplevel, configuredRoot, home) ?? helperSlug(helperLines);
   if (!territory) return null;
   return pinned || territory;
 }
@@ -107,7 +133,21 @@ async function main() {
   } catch {
     /* bare or odd repo — path rule cannot apply */
   }
-  const slug = resolveSlug({ pinned, toplevel, home: homedir(), helperLines: helpers });
+  // Same roots the creator honors, read the same way — an unreadable or absent
+  // desktop config just leaves the path and helper rules to decide.
+  let configuredRoot = null;
+  try {
+    let desktopConfig = null;
+    try {
+      desktopConfig = readFileSync(desktopConfigPath(), 'utf8');
+    } catch {
+      /* no desktop config on this machine */
+    }
+    configuredRoot = worktreeRoot({ desktopConfig });
+  } catch {
+    /* a malformed preference must never break identity resolution */
+  }
+  const slug = resolveSlug({ pinned, toplevel, helperLines: helpers, configuredRoot, home: homedir() });
   // --slug: identity only, no mint, no network — the gh shim's `whoami`.
   if (process.argv.includes('--slug')) {
     if (slug) process.stdout.write(`${slug}\n`);

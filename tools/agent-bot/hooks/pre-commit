@@ -42,13 +42,16 @@ if [ -n "$AGENT" ]; then
           # Inside bot territory but resolving to the human: the worktree
           # config never landed (sandboxed harnesses cannot always write the
           # shared git dir at setup). Name the actual remedy.
+          # The .<tool>/worktrees segment is the signal at any root: a boot
+          # volume too small for agent worktrees relocates them to
+          # /Volumes/<drive> without making them any less the bot's.
           case "$PWD" in
-            "$HOME"/.*/worktrees/*)
+            */.*/worktrees/*)
               echo "agent-bot guard (ENG-0045): this IS a bot worktree, but its identity config never landed." >&2
               echo "Run: node ~/Code/playbook-engineering/tools/agent-bot/setup-worktree.mjs (from an unsandboxed shell), then retry." >&2
               ;;
             *)
-              echo "agent-bot guard (ENG-0045): agents may only commit changes within ~/.<tool>/worktrees/<repo>." >&2
+              echo "agent-bot guard (ENG-0045): agents may only commit changes within .<tool>/worktrees/<repo>." >&2
               echo "This commit would be attributed to the human ('${NAME:-unset}'). Create or use your tool's worktree." >&2
               ;;
           esac
