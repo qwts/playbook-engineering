@@ -30,6 +30,25 @@ does not apply to it.
   in [repository baseline files](repo-baseline-files.md) — and a bump follows the
   same review bar as any other change.
 
+## Validation reuse across versioning and release (mandatory)
+
+- A changesets or equivalent version-packages PR is a ready PR. The generated
+  version commit passes the repository's complete suite once under the
+  [CI execution policy](../reference/ci-execution-policy.md).
+- Version-cut automation generates and validates the version diff. It does not
+  manually dispatch a second equivalent CI run in addition to the version PR's
+  normal ready-PR run.
+- Tag and release automation verifies that the exact source commit is on the
+  protected default branch and has successful complete-suite evidence. Missing
+  evidence stops publication or triggers an explicit complete-suite recovery
+  run for that commit.
+- Release automation does not repeat generic merge gates such as lint, format,
+  typecheck, unit, Storybook, development-mode E2E, security, or docs-gov.
+- Release-only validation remains: version/tag/provenance checks, the artifact
+  build, packaging, signing, notarization, checksums, asset inspection, and
+  packaged-mode install, launch, smoke, or E2E checks. These validate the thing
+  being published and are not removed as duplicate CI.
+
 ## Changing a shared baseline
 
 A substantive edit to a shared SOP or reusable workflow is itself a release: it
@@ -50,6 +69,10 @@ changelog updated, then let consumers re-point. A shared change never moves a
 
 ## Changelog
 
+- 2026-07-31 — required version PRs to receive one complete-suite validation
+  and release workflows to reuse its exact-commit evidence while retaining
+  release-specific provenance, packaging, signing, and artifact checks
+  (ENG-0004).
 - 2026-07-22 — initial version; captured the changelog, version-consistency, and
   dependency-bump rules already common across repos, and scoped the rest as
   recorded deltas pending promotion (ENG-0008).

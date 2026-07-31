@@ -85,6 +85,39 @@ and security contexts, including docs-gov, CodeQL, Storybook, smoke, E2E, and
 repo-specific compliance checks, remain required and remain part of the ready
 suite unless a separate reviewed change explicitly replaces them.
 
+## Changesets, version PRs, and releases
+
+A changesets or equivalent version-packages PR creates a new commit containing
+the generated version and changelog changes. Treat that PR as a normal ready
+PR: its exact merge candidate runs the complete suite once. The automation that
+creates or refreshes the version PR performs only the work needed to generate
+and validate that deterministic version diff. It must not also dispatch an
+equivalent CI run for the same commit.
+
+Tagging and release workflows consume the successful complete-suite evidence
+for that exact commit instead of rerunning generic lint, format, typecheck,
+unit, Storybook, E2E, security, docs-gov, or other merge gates. Before
+publishing, they fail closed unless they can prove all of the following:
+
+- the tag and release source resolve to the intended commit on the protected
+  default branch;
+- that exact commit has successful ready-PR or merge-queue complete-suite
+  evidence; and
+- version, changeset, tag, and release provenance are internally consistent.
+
+Release-specific work is not duplicate CI and remains mandatory. This includes
+building the distributable from the release source, packaging, signing,
+notarization, checksums, asset inspection, install or launch checks, and smoke
+or E2E coverage that exercises the packaged release mode rather than the
+already-tested development build. Repositories may instead promote an
+immutable previously built artifact only when they preserve equivalent source,
+provenance, integrity, and signing guarantees.
+
+An explicit release-recovery dispatch follows the same rule. If exact-commit
+evidence is missing, it may trigger the complete suite for that commit and wait
+for success, or stop without publishing; it must not silently treat release
+packaging as a substitute for the merge gate.
+
 ## Required repository settings
 
 - Require `CI` and every retained independent governance/security context.

@@ -120,6 +120,15 @@ release recovery, workflow testing, and explicit reruns. This amendment changes
 when agreed validation runs; it does not remove docs-gov, CodeQL, Storybook,
 E2E, smoke, or repository-specific security and compliance gates.
 
+Changesets and equivalent version-package PRs follow the same lifecycle. Their
+generated version commit receives one complete-suite ready-PR validation;
+version-cut automation does not dispatch a duplicate suite. Tag and release
+jobs prove that their exact source commit has that successful evidence, then
+run only release-specific version/provenance, artifact build, packaging,
+signing, notarization, integrity, and packaged-mode smoke checks. Missing
+evidence fails closed or requires an explicit complete-suite recovery run
+before publication.
+
 ## References
 
 - [ENG-0003](ENG-0003-repo-is-documentation-source-of-truth.md) established this repo as the cross-repo home for shared engineering assets; this extends that from documents to CI/CD.
