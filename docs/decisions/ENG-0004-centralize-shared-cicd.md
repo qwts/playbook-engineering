@@ -100,6 +100,26 @@ a required edit, not an optional cleanup. The pinning model and the CI-gated
 `v1` tag are otherwise unaffected. The original snippet above is left as
 written, per the rule that accepted records are amended, not rewritten.
 
+## Amendment — 2026-07-31: lifecycle scheduling and trusted actors
+
+Shared CI now includes the execution contract, not only reusable implementation
+pieces. Every governed repository follows the
+[CI execution policy](../reference/ci-execution-policy.md): draft PRs start no
+Actions jobs and agents run lint/format/type/unit checks locally before marking
+ready; ready PRs and ready updates run every existing complete-suite gate; and
+an already-validated merged SHA receives only a short
+post-merge check. A merged SHA without complete-suite evidence falls back to
+every gate. PR concurrency cancels obsolete runs, while one stable `CI` gate
+prevents conditional expensive jobs from stranding branch protection.
+
+The repository-level GitHub Actions Policy is the primary execution boundary.
+Only `qwts`, `chores-dumb[bot]`, and the registered `qwts-*-agent[bot]` Apps may
+initiate workflows. `github-actions[bot]`, third parties, and public-fork actors
+are refused before a runner starts. Manual dispatch is limited to diagnostics,
+release recovery, workflow testing, and explicit reruns. This amendment changes
+when agreed validation runs; it does not remove docs-gov, CodeQL, Storybook,
+E2E, smoke, or repository-specific security and compliance gates.
+
 ## References
 
 - [ENG-0003](ENG-0003-repo-is-documentation-source-of-truth.md) established this repo as the cross-repo home for shared engineering assets; this extends that from documents to CI/CD.

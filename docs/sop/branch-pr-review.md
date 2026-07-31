@@ -34,6 +34,10 @@ where each repo differs.
 
 ## The merge bar (mandatory — extend, don't drop)
 
+- CI follows the shared [execution policy](../reference/ci-execution-policy.md):
+  agents run fast checks locally before leaving draft, every agreed gate runs on
+  ready merge candidates, and a short post-merge check runs only when that exact
+  commit was already validated.
 - All required status checks are green before merge. A red gate sends the PR back
   without review — fix the gate first.
 - At least one approving human review is required. Agent-authored changes are
@@ -64,6 +68,7 @@ where each repo differs.
 
 ## Changelog
 
+- 2026-07-31 — add lifecycle-aware CI scheduling to the mandatory merge bar.
 - 2026-07-23 — agent-authored PRs are opened under the dedicated bot identity
   (ENG-0016), keeping the one-approving-human-review requirement satisfiable.
 - 2026-07-22 — initial version; extracted the common branch/PR/review workflow

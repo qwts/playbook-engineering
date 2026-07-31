@@ -1,23 +1,66 @@
-# Playbook CI: this repo gates itself with the tooling it ships. Per
-# ENG-0004, this must stay green before the v1 tag ever moves — a defect in
-# the reusable workflow breaks every consumer at once, and this is the gate
-# that catches it first.
+# Reference implementation of the governed CI lifecycle in
+# docs/reference/ci-execution-policy.md. The repository-level Actions Policy is
+# the primary actor/fork enforcement; the Action Policy job fails closed if that
+# setting drifts.
 name: CI
 
 on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
   push:
     branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
-  test:
+  policy:
+    name: Action Policy
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.policy.outputs.mode }}
+      run_full: ${{ steps.policy.outputs.run_full }}
+      run_post_merge: ${{ steps.policy.outputs.run_post_merge }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: policy
+        uses: ./.github/actions/ci-policy
+
+  merge-evidence:
+    name: Verify merged commit evidence
+    needs: policy
+    if: needs.policy.outputs.run_post_merge == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      validated: ${{ steps.evidence.outputs.validated }}
+    steps:
+      - id: evidence
+        name: Find a successful complete-suite run for this exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          validated=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&per_page=100" \
+            --jq 'any(.workflow_runs[]; .name == "CI" and (.event == "pull_request" or .event == "merge_group") and .conclusion == "success")')
+          echo "validated=$validated" >> "$GITHUB_OUTPUT"
+
+  full:
+    name: Complete suite
+    needs: [policy, merge-evidence]
+    if: >-
+      always() && needs.policy.result == 'success' &&
+      (needs.policy.outputs.run_full == 'true' ||
+      (needs.policy.outputs.run_post_merge == 'true' && needs.merge-evidence.outputs.validated != 'true'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -26,27 +69,80 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      - name: docs-gov unit tests
+          cache: npm
+      - run: npm ci
+      - name: Lint and configuration checks
+        run: npm run lint:markdown && npm run docs:gov && npm run repos:check
+      - name: Unit and workflow-tooling tests
         run: npm test
-      - name: governed-repos manifest check
-        run: node tools/repos/repos.mjs check
-      - name: markdownlint
-        run: |
-          npm ci
-          npm run lint:markdown
 
-  # Exercises the reusable workflow itself, from the local checkout rather
-  # than the v1 tag, so a broken change to it fails here and not in photos.
   docs-gov:
+    needs: [policy, merge-evidence]
+    if: >-
+      always() && needs.policy.result == 'success' &&
+      (needs.policy.outputs.run_full == 'true' ||
+      (needs.policy.outputs.run_post_merge == 'true' && needs.merge-evidence.outputs.validated != 'true'))
     uses: ./.github/workflows/docs-governance.yml
     with:
       use-local-tooling: true
 
-  # Same self-test for the dependency inventory: runs Syft + the normalizer
-  # from this checkout so a broken change fails here before the v1 tag moves.
-  # fail-on-error keeps the self-test blocking; consumer runs stay report-only.
   dependency-inventory:
+    needs: [policy, merge-evidence]
+    if: >-
+      always() && needs.policy.result == 'success' &&
+      (needs.policy.outputs.run_full == 'true' ||
+      (needs.policy.outputs.run_post_merge == 'true' && needs.merge-evidence.outputs.validated != 'true'))
     uses: ./.github/workflows/dependency-inventory.yml
     with:
       use-local-tooling: true
       fail-on-error: true
+
+  post-merge:
+    name: Post-merge smoke
+    needs: [policy, merge-evidence]
+    if: needs.policy.outputs.run_post_merge == 'true' && needs.merge-evidence.outputs.validated == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Manifest and reconciler smoke
+        run: node tools/repos/repos.mjs check && node --test tools/repos/tests/repos.test.mjs
+
+  gate:
+    name: CI
+    needs: [policy, merge-evidence, full, docs-gov, dependency-inventory, post-merge]
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce the selected lifecycle lane
+        env:
+          MODE: ${{ needs.policy.outputs.mode }}
+          POLICY: ${{ needs.policy.result }}
+          FULL: ${{ needs.full.result }}
+          DOCS_GOV: ${{ needs.docs-gov.result }}
+          INVENTORY: ${{ needs.dependency-inventory.result }}
+          MERGE_VALIDATED: ${{ needs.merge-evidence.outputs.validated }}
+          POST_MERGE: ${{ needs.post-merge.result }}
+        run: |
+          test "$POLICY" = success
+          case "$MODE" in
+            full|manual)
+              test "$FULL" = success
+              test "$DOCS_GOV" = success
+              test "$INVENTORY" = success
+              ;;
+            post-merge)
+              if [ "$MERGE_VALIDATED" = true ]; then
+                test "$POST_MERGE" = success
+              else
+                test "$FULL" = success
+                test "$DOCS_GOV" = success
+                test "$INVENTORY" = success
+              fi
+              ;;
+            *) exit 1 ;;
+          esac
