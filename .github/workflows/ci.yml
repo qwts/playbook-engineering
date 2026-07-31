@@ -1,14 +1,13 @@
 # Reference implementation of the governed CI lifecycle in
 # docs/reference/ci-execution-policy.md. The repository-level Actions Policy is
-# the primary actor/fork enforcement; the Action Policy job fails closed if that
-# setting drifts.
+# the primary actor/fork enforcement. The Action Policy job is an additional
+# fail-closed check loaded from an immutable trusted revision.
 name: CI
 
 on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
-  merge_group:
   push:
     branches: [main]
   workflow_dispatch:
@@ -31,9 +30,6 @@ jobs:
       run_full: ${{ steps.policy.outputs.run_full }}
       run_post_merge: ${{ steps.policy.outputs.run_post_merge }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - id: policy
         uses: ./.github/actions/ci-policy
 
@@ -51,7 +47,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           validated=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&per_page=100" \
-            --jq 'any(.workflow_runs[]; .name == "CI" and (.event == "pull_request" or .event == "merge_group") and .conclusion == "success")')
+            --jq 'any(.workflow_runs[]; .name == "CI" and .event == "pull_request" and .conclusion == "success")')
           echo "validated=$validated" >> "$GITHUB_OUTPUT"
 
   full:

@@ -1,5 +1,5 @@
 name: CI policy
-description: Classify governed CI runs and fail closed for unauthorized actors or fork PRs.
+description: Classify governed CI runs and fail closed for unauthorized initiators or fork PRs.
 
 outputs:
   mode:
@@ -20,6 +20,7 @@ runs:
       shell: bash
       env:
         CI_POLICY_ACTOR: ${{ github.actor }}
+        CI_POLICY_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
         CI_POLICY_EVENT_NAME: ${{ github.event_name }}
         CI_POLICY_EVENT_PATH: ${{ github.event_path }}
         CI_POLICY_REF: ${{ github.ref }}

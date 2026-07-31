@@ -3,9 +3,10 @@
 Every governed repository keeps its agreed validation suite but schedules it by
 PR lifecycle: agents run fast checks locally before leaving draft, ready pull
 requests run every complete-suite gate, and `main` avoids repeating that suite
-only when the exact commit already has successful evidence. Repository-level GitHub Actions Policy
-blocks every actor except `qwts`, `chores-dumb[bot]`, and the registered
-`qwts-*-agent[bot]` Apps; public-fork workflows are never approved or run.
+only when the exact commit already has successful evidence. Repository-level
+GitHub Actions Policy blocks every actor except `qwts`, `chores-dumb[bot]`, and
+the active registered `qwts-*-agent[bot]` Apps; public-fork workflows are never
+approved or run.
 
 This is the CI/CD execution baseline established by
 [ENG-0004](../decisions/ENG-0004-centralize-shared-cicd.md) and inherited under
@@ -27,9 +28,11 @@ in every governed repository. The active actor allow list contains:
 Do not allow `github-actions[bot]`, Dependabot, Copilot, a repository role,
 external contributors, or another third party to initiate workflows.
 Automation that must initiate a later workflow authenticates as an allowed App.
-GitHub evaluates this policy before a runner starts; the checked-in CI-policy
-action is defense in depth for a misconfigured repository, not the primary
-boundary. GitHub documents the feature in
+The namespace pattern describes the allowed class but is not itself the allow
+list: retired or unregistered matching Apps remain unauthorized. GitHub
+evaluates this policy before a runner starts; an immutable trusted revision of
+the CI-policy action performs a secondary fail-closed check of both
+`github.actor` and `github.triggering_actor`. GitHub documents the feature in
 [workflow execution protections](https://docs.github.com/en/organizations/managing-organization-settings/actions-policies/workflow-execution-protections).
 
 For public repositories, do not approve a fork workflow after GitHub queues it.
@@ -47,23 +50,23 @@ lane unless a separate reviewed decision explicitly removes it.
 | Draft PR opened or updated | Do not start GitHub Actions. Before marking ready, the agent runs the repository's agreed local gates, including lint, formatting check, typecheck, unit tests, and docs-gov where configured; a missing category is recorded as not applicable. |
 | PR marked ready | Every agreed complete-suite gate: production build, Storybook, smoke/integration, E2E, and required security checks, in addition to draft checks. |
 | Ready PR updated | Cancel the older PR run and execute every complete-suite gate against the new merge candidate. |
-| Merge queue candidate | Execute every complete-suite gate against the exact `merge_group` commit. |
-| Push or merge to `main` | If that exact SHA has successful ready-PR or merge-queue evidence, run only a short smoke/integration check. Otherwise execute every complete-suite gate as the fail-safe. |
+| Push or rebase merge to `main` | If that exact SHA has successful ready-PR evidence, run only a short smoke/integration check. Otherwise execute every complete-suite gate as the fail-safe. |
 | Manual dispatch | Reserved for diagnostics, release recovery, workflow testing, and an explicit rerun. A CI dispatch defaults to the complete suite. |
 | Public-fork PR | Do not run or approve workflows. |
 
 A ready PR does not substitute local draft validation for remote evidence. The
 `ready_for_review` event creates a complete-suite run, and the required gate
-does not pass for the ready state until that run succeeds. Repositories using a
-merge method that creates a new commit use a merge queue or equivalent
-exact-commit validation; branch freshness alone is not evidence for a newly
-created merge commit.
+does not pass for the ready state until that run succeeds. Governed repositories
+use rebase-only merges and require the branch to be current with its target, so
+the validated PR head is the exact commit merged. Merge queues are not used
+because GitHub initiates `merge_group` workflows as a GitHub-owned actor, which
+this policy intentionally refuses.
 
 ## Workflow contract
 
-The CI workflow uses `pull_request` lifecycle events, `merge_group`, a
-default-branch `push`, and a narrowly described `workflow_dispatch`. Release
-tag pushes and operational recovery workflows remain separate; schedules,
+The CI workflow uses `pull_request` lifecycle events, a default-branch `push`,
+and a narrowly described `workflow_dispatch`. Release tag pushes and
+operational recovery workflows remain separate; schedules,
 `repository_dispatch`, and `pull_request_target` require a documented
 repo-local purpose and must still satisfy the actor policy.
 
@@ -101,8 +104,7 @@ publishing, they fail closed unless they can prove all of the following:
 
 - the tag and release source resolve to the intended commit on the protected
   default branch;
-- that exact commit has successful ready-PR or merge-queue complete-suite
-  evidence; and
+- that exact commit has successful ready-PR complete-suite evidence; and
 - version, changeset, tag, and release provenance are internally consistent.
 
 Release-specific work is not duplicate CI and remains mandatory. This includes
@@ -121,7 +123,8 @@ packaging as a substitute for the merge gate.
 ## Required repository settings
 
 - Require `CI` and every retained independent governance/security context.
-- Require the branch to be current or require a merge queue.
+- Require rebase-only merges and require the branch to be current.
+- Do not enable merge queue while GitHub-owned actors are prohibited.
 - Require the exact merge candidate to pass every complete-suite gate.
 - Keep the repository Actions Policy active, not in evaluate mode.
 - If CodeQL default setup cannot follow ready-only timing, migrate to an

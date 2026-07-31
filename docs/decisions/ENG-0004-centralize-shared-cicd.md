@@ -112,6 +112,10 @@ post-merge check. A merged SHA without complete-suite evidence falls back to
 every gate. PR concurrency cancels obsolete runs, while one stable `CI` gate
 prevents conditional expensive jobs from stranding branch protection.
 
+Exact-commit validation uses rebase-only merges with the PR branch required to
+be current. Merge queue is excluded because its `merge_group` workflow is
+initiated by a GitHub-owned actor, which the trusted-actor policy refuses.
+
 The repository-level GitHub Actions Policy is the primary execution boundary.
 Only `qwts`, `chores-dumb[bot]`, and the registered `qwts-*-agent[bot]` Apps may
 initiate workflows. `github-actions[bot]`, third parties, and public-fork actors
