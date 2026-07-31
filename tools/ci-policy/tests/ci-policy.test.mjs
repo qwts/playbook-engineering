@@ -86,6 +86,11 @@ test('fork PRs, unauthorized actors, and unsupported triggers fail closed', () =
 test('the reference workflow preserves governed gates and skips draft jobs', () => {
   const workflow = readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8');
   assert.match(workflow, /github\.event\.pull_request\.draft == false/);
+  assert.match(
+    workflow,
+    /uses: qwts\/playbook-engineering\/\.github\/actions\/ci-policy@[0-9a-f]{40}/,
+  );
+  assert.doesNotMatch(workflow, /uses: \.\/\.github\/actions\/ci-policy/);
   assert.doesNotMatch(workflow, /^  merge_group:/m);
   assert.doesNotMatch(workflow, /\.event == "merge_group"/);
   assert.match(workflow, /name: Complete suite/);
