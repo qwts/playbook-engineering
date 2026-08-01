@@ -106,8 +106,10 @@ Shared CI now includes the execution contract, not only reusable implementation
 pieces. Every governed repository follows the
 [CI execution policy](../reference/ci-execution-policy.md): draft PRs start no
 Actions jobs and agents run lint/format/type/unit checks locally before marking
-ready; ready PRs and ready updates run every existing complete-suite gate; and
-an already-validated merged SHA receives only a short
+ready; an agent may manually run the complete suite for the final feature SHA;
+ready PRs and ready updates reuse that evidence only for the exact SHA and
+otherwise run every existing complete-suite gate; and an already-validated
+merged SHA receives only a short
 post-merge check. A merged SHA without complete-suite evidence falls back to
 every gate. PR concurrency cancels obsolete runs, while one stable `CI` gate
 prevents conditional expensive jobs from stranding branch protection.
@@ -120,9 +122,10 @@ The repository-level GitHub Actions Policy is the primary execution boundary.
 Only `qwts`, `chores-dumb[bot]`, and the registered `qwts-*-agent[bot]` Apps may
 initiate workflows. `github-actions[bot]`, third parties, and public-fork actors
 are refused before a runner starts. Manual dispatch is limited to diagnostics,
-release recovery, workflow testing, and explicit reruns. This amendment changes
-when agreed validation runs; it does not remove docs-gov, CodeQL, Storybook,
-E2E, smoke, or repository-specific security and compliance gates.
+release recovery, workflow testing, explicit reruns, and exact-SHA preflight
+validation before PR promotion. This amendment changes when agreed validation
+runs; it does not remove docs-gov, CodeQL, Storybook, E2E, smoke, or
+repository-specific security and compliance gates.
 
 Changesets and equivalent version-package PRs follow the same lifecycle. Their
 generated version commit receives one complete-suite ready-PR validation;

@@ -93,6 +93,11 @@ test('the reference workflow preserves governed gates and skips draft jobs', () 
   assert.doesNotMatch(workflow, /uses: \.\/\.github\/actions\/ci-policy/);
   assert.doesNotMatch(workflow, /^  merge_group:/m);
   assert.doesNotMatch(workflow, /\.event == "merge_group"/);
+  assert.match(workflow, /^  preflight-evidence:$/m);
+  assert.match(workflow, /event=workflow_dispatch&head_sha=\$TARGET_SHA/);
+  assert.match(workflow, /\.name == "CI" and \.conclusion == "success"/);
+  assert.match(workflow, /needs\.preflight-evidence\.outputs\.validated != 'true'/);
+  assert.match(workflow, /if \[ "\$PREFLIGHT_VALIDATED" = true \]/);
   assert.match(workflow, /name: Complete suite/);
   assert.match(workflow, /^  docs-gov:$/m);
   assert.match(workflow, /^  dependency-inventory:$/m);

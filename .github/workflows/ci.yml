@@ -50,12 +50,35 @@ jobs:
             --jq 'any(.workflow_runs[]; .name == "CI" and .event == "pull_request" and .conclusion == "success")')
           echo "validated=$validated" >> "$GITHUB_OUTPUT"
 
+  preflight-evidence:
+    name: Verify preflight evidence
+    needs: policy
+    if: github.event_name == 'pull_request' && needs.policy.outputs.run_full == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      validated: ${{ steps.evidence.outputs.validated }}
+    steps:
+      - id: evidence
+        name: Find a successful manual complete-suite run for the PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?event=workflow_dispatch&head_sha=$TARGET_SHA&per_page=100" \
+            --jq 'first(.workflow_runs[] | select(.name == "CI" and .path == ".github/workflows/ci.yml" and .conclusion == "success") | .id) // empty')
+          validated=false
+          if [ -n "$run_id" ]; then
+            validated=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
+              --jq 'any(.jobs[]; .name == "CI" and .conclusion == "success")')
+          fi
+          echo "validated=$validated" >> "$GITHUB_OUTPUT"
+
   full:
     name: Complete suite
-    needs: [policy, merge-evidence]
+    needs: [policy, merge-evidence, preflight-evidence]
     if: >-
       always() && needs.policy.result == 'success' &&
-      (needs.policy.outputs.run_full == 'true' ||
+      ((needs.policy.outputs.run_full == 'true' && needs.preflight-evidence.outputs.validated != 'true') ||
       (needs.policy.outputs.run_post_merge == 'true' && needs.merge-evidence.outputs.validated != 'true'))
     runs-on: ubuntu-latest
     steps:
@@ -73,20 +96,20 @@ jobs:
         run: npm test
 
   docs-gov:
-    needs: [policy, merge-evidence]
+    needs: [policy, merge-evidence, preflight-evidence]
     if: >-
       always() && needs.policy.result == 'success' &&
-      (needs.policy.outputs.run_full == 'true' ||
+      ((needs.policy.outputs.run_full == 'true' && needs.preflight-evidence.outputs.validated != 'true') ||
       (needs.policy.outputs.run_post_merge == 'true' && needs.merge-evidence.outputs.validated != 'true'))
     uses: ./.github/workflows/docs-governance.yml
     with:
       use-local-tooling: true
 
   dependency-inventory:
-    needs: [policy, merge-evidence]
+    needs: [policy, merge-evidence, preflight-evidence]
     if: >-
       always() && needs.policy.result == 'success' &&
-      (needs.policy.outputs.run_full == 'true' ||
+      ((needs.policy.outputs.run_full == 'true' && needs.preflight-evidence.outputs.validated != 'true') ||
       (needs.policy.outputs.run_post_merge == 'true' && needs.merge-evidence.outputs.validated != 'true'))
     uses: ./.github/workflows/dependency-inventory.yml
     with:
@@ -110,7 +133,7 @@ jobs:
 
   gate:
     name: CI
-    needs: [policy, merge-evidence, full, docs-gov, dependency-inventory, post-merge]
+    needs: [policy, merge-evidence, preflight-evidence, full, docs-gov, dependency-inventory, post-merge]
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     steps:
@@ -121,12 +144,23 @@ jobs:
           FULL: ${{ needs.full.result }}
           DOCS_GOV: ${{ needs.docs-gov.result }}
           INVENTORY: ${{ needs.dependency-inventory.result }}
+          PREFLIGHT: ${{ needs.preflight-evidence.result }}
+          PREFLIGHT_VALIDATED: ${{ needs.preflight-evidence.outputs.validated }}
           MERGE_VALIDATED: ${{ needs.merge-evidence.outputs.validated }}
           POST_MERGE: ${{ needs.post-merge.result }}
         run: |
           test "$POLICY" = success
           case "$MODE" in
-            full|manual)
+            full)
+              if [ "$PREFLIGHT_VALIDATED" = true ]; then
+                test "$PREFLIGHT" = success
+              else
+                test "$FULL" = success
+                test "$DOCS_GOV" = success
+                test "$INVENTORY" = success
+              fi
+              ;;
+            manual)
               test "$FULL" = success
               test "$DOCS_GOV" = success
               test "$INVENTORY" = success
