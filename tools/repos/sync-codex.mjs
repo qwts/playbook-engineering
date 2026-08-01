@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Bot-only fleet synchronization for the centrally managed .codex files.
+// Fleet synchronization for the centrally managed agent harness files.
 //
 //   node tools/repos/sync-codex.mjs [--apply] [--repo <name>] [--json]
 //
-// Dry-run is the default. Apply creates or updates one bot-authored pull
-// request per drifting active repository. It never writes a default branch,
-// never uses a human token, and fails closed unless the installation token
-// belongs to qwts-codex-agent.
+// Dry-run is the default. Apply creates or updates one chores-dumb-authored
+// pull request per drifting active repository. It never writes a default
+// branch and fails closed unless the supplied installation token belongs to
+// chores-dumb. A local dry run may mint the current worktree agent's read token.
 
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';
@@ -63,13 +63,12 @@ export class GitHubClient {
   }
 }
 
-async function installationToken(env = process.env) {
+export async function installationToken({ apply, env = process.env, mintToken = mint } = {}) {
   if (env.GH_TOKEN) return env.GH_TOKEN;
-  const explicitCiConfig =
-    env.GH_APP_ID && (env.GH_APP_PRIVATE_KEY || env.GH_APP_PRIVATE_KEY_PATH);
-  const grant = explicitCiConfig
-    ? await mint({ env })
-    : await mint({ slug: CODEX_SYNC_BOT, env });
+  if (apply) {
+    throw new Error(`--apply requires a GH_TOKEN for ${CODEX_SYNC_BOT}[bot]`);
+  }
+  const grant = await mintToken({ env });
   return grant.token;
 }
 
@@ -274,8 +273,8 @@ async function main() {
     throw new Error(`--repo ${only}: not an enabled active target repository`);
   }
 
-  const client = new GitHubClient(await installationToken());
-  await assertBotIdentity(client);
+  const client = new GitHubClient(await installationToken({ apply }));
+  if (apply) await assertBotIdentity(client);
   const canonicalFiles = loadCanonicalFiles(ROOT);
   const sourceSha = sourceCommit();
   const results = [];

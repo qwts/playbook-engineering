@@ -130,6 +130,21 @@ missing from that page reads as "not covered" — the verification lies. A PR
 opened under `GH_TOKEN` shows the App's `[bot]` as author, and the review
 dialog offers `qwts` **Approve** — never offered when `qwts` authored it.
 
+## GitHub connector boundary
+
+The governed [Codex configuration](../../.codex/config.toml) keeps the hosted
+GitHub connector enabled for read operations but sets
+`destructive_enabled = false` for it. Codex therefore blocks the connector's
+write tools, which advertise the destructive hint, so they cannot bypass the
+worktree bot identity. Git and the bot-authenticated `gh` shim remain the only
+sanctioned GitHub write paths.
+
+The four bundled GitHub skills stay enabled. They provide task guidance and
+the `gh` fallback; disabling a skill does not disable the connector or revoke
+its human OAuth credential. Governed harness synchronization carries this
+project configuration to every managed repository. Start a new Codex task
+after the configuration lands so the updated project layer is loaded.
+
 ## Failure modes
 
 - `no app config for "<slug>"`: setup step 2 was not done for that App —
@@ -148,6 +163,6 @@ dialog offers `qwts` **Approve** — never offered when `qwts` authored it.
   `GH_AGENT_APP` — fix the launch environment, not the agent.
 - A PR appears as `qwts` with the shim installed and working: a **GitHub MCP
   connector** in the harness made it — connectors hold the human's OAuth,
-  never an App token, and bypass `git` and `gh` entirely. Disconnect the
-  GitHub connector in every agent harness (or deny its write tools); git and
-  `gh` are the only sanctioned write paths to GitHub.
+  never an App token, and bypass `git` and `gh` entirely. Confirm the governed
+  Codex configuration is loaded and still blocks that connector's destructive
+  tools; do not disable the GitHub skills as a substitute.

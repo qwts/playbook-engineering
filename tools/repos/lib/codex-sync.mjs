@@ -1,20 +1,21 @@
-// Pure contracts for fleet synchronization of the centrally managed agent
-// harness files (.codex/ and .claude/). Network orchestration lives in ../sync-codex.mjs; this module keeps
+// Pure contracts for fleet synchronization of centrally managed agent harness
+// files. Network orchestration lives in ../sync-codex.mjs; this module keeps
 // content comparison, manifest selection, and stable-branch decisions
-// deterministic and unit-testable.
+// deterministic and unit-testable. Legacy CODEX_* export names remain the
+// local CLI/API surface while the synchronization identity is vendor-neutral.
 
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { GOVERNED_HARNESS_FILES } from './baseline-files.mjs';
 
-export const CODEX_SYNC_BRANCH = 'governance/codex-sync';
-export const CODEX_SYNC_BOT = 'qwts-codex-agent';
+export const CODEX_SYNC_BRANCH = 'governance/harness-sync';
+export const CODEX_SYNC_BOT = 'chores-dumb';
 export const CODEX_REVIEW_BOT = 'chatgpt-codex-connector[bot]';
 export const COPILOT_REVIEW_BOT = 'copilot-pull-request-reviewer[bot]';
 export const CODEX_SOURCE_REPO = 'playbook-engineering';
-export const CODEX_SYNC_TITLE = 'governance: sync managed .codex files';
-export const CODEX_SYNC_COMMIT_PREFIX = `governance: sync .codex from ${CODEX_SOURCE_REPO}@`;
+export const CODEX_SYNC_TITLE = 'governance: sync managed agent harness files';
+export const CODEX_SYNC_COMMIT_PREFIX = `governance: sync agent harness from ${CODEX_SOURCE_REPO}@`;
 export const MANAGED_JSON_OVERLAYS = new Map([
   ['.claude/settings.json', [
     ['$schema'],
