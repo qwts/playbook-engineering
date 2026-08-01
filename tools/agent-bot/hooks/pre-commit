@@ -17,13 +17,15 @@ AGENT=""
 [ -n "$AI_AGENT" ] && AGENT=1
 if [ -z "$AGENT" ]; then env | grep -q '^CODEX_' && AGENT=1; fi
 
+HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SETUP="$HOOK_DIR/../setup-worktree.mjs"
+
 if [ -n "$AGENT" ]; then
   NAME=$(git config user.name 2>/dev/null || true)
   case "$NAME" in
     *"[bot]"*)
       # Bot attribution alone identifies only the GitHub App. ENG-0081 adds a
       # transcript-bound execution identity, automatically minted by setup.
-      HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
       IDENTITY_TOOL="$HOOK_DIR/../agent-identity.mjs"
       ID=""
       if [ -f "$IDENTITY_TOOL" ] && command -v node >/dev/null 2>&1; then
@@ -31,7 +33,7 @@ if [ -n "$AGENT" ]; then
       fi
       if [ -z "$ID" ] || ! node "$IDENTITY_TOOL" show "$ID" >/dev/null 2>&1; then
         echo "agent-bot guard (ENG-0081): bot identity has no resolvable Agent-Identity." >&2
-        echo "Run: node ~/Code/playbook-engineering/tools/agent-bot/setup-worktree.mjs, then retry." >&2
+        echo "Run: node \"$SETUP\", then retry." >&2
         exit 1
       fi
       ;;
@@ -48,7 +50,7 @@ if [ -n "$AGENT" ]; then
           case "$PWD" in
             */.*/worktrees/*)
               echo "agent-bot guard (ENG-0045): this IS a bot worktree, but its identity config never landed." >&2
-              echo "Run: node ~/Code/playbook-engineering/tools/agent-bot/setup-worktree.mjs (from an unsandboxed shell), then retry." >&2
+              echo "Run: node \"$SETUP\" (from an unsandboxed shell), then retry." >&2
               ;;
             *)
               echo "agent-bot guard (ENG-0045): agents may only commit changes within .<tool>/worktrees/<repo>." >&2
@@ -62,5 +64,4 @@ if [ -n "$AGENT" ]; then
   esac
 fi
 
-HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 "$HOOK_DIR/chain-hook" pre-commit "$@"

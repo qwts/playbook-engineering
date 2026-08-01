@@ -1,8 +1,24 @@
-export function buildGhShim(tokenTool) {
+// Builds the shell text for ~/.config/agent-bot/bin/gh (ENG-0045).
+// TOKEN_TOOL resolves at runtime from PLAYBOOK_HOME or
+// ~/.config/agent-bot/playbook-home so moving the checkout and re-running
+// install-* updates the pointer without a baked-in ~/Code path. Tests may
+// still pass an absolute tokenTool to pin a fake helper.
+
+export function buildGhShim(tokenTool = null) {
+  const tokenToolSetup = tokenTool
+    ? `TOKEN_TOOL="${tokenTool}"`
+    : `AGENT_BOT_CONFIG="\${XDG_CONFIG_HOME:-\$HOME/.config}/agent-bot"
+TOKEN_TOOL=""
+if [ -n "\$PLAYBOOK_HOME" ]; then
+  TOKEN_TOOL="\$PLAYBOOK_HOME/tools/agent-bot/worktree-token.mjs"
+elif [ -f "\$AGENT_BOT_CONFIG/playbook-home" ]; then
+  TOKEN_TOOL="\$(tr -d '\\n' < "\$AGENT_BOT_CONFIG/playbook-home")/tools/agent-bot/worktree-token.mjs"
+fi`;
+
   return `#!/bin/sh
 # gh shim — agent bot identity (ENG-0045). Managed by
 # install-gh-shim.mjs; do not edit in place.
-TOKEN_TOOL="${tokenTool}"
+${tokenToolSetup}
 SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REAL=""
 OLDIFS=$IFS; IFS=:
@@ -48,6 +64,7 @@ AGENT_SLUG=""
 if [ ! -f "$TOKEN_TOOL" ] || ! command -v node >/dev/null 2>&1; then
   if [ -n "$AGENT_CONTEXT$TERRITORY_HINT" ]; then
     echo "agent-bot: token helper or Node is unavailable — refusing stock human gh" >&2
+    echo "Re-run: node tools/agent-bot/install-gh-shim.mjs from your playbook-engineering checkout." >&2
     exit 1
   fi
 else
