@@ -35,8 +35,8 @@ split rather than another raise.
    ```bash
    mkdir -p ~/.config/qwts-claude-agent && echo '<app id>' > ~/.config/qwts-claude-agent/app-id
    # fetch/refresh PEM (also done by setup-worktree when missing):
-   node tools/agent-bot/ensure-private-key.mjs qwts-claude-agent
-   node tools/agent-bot/ensure-private-key.mjs qwts-claude-agent --force
+   playbook-ensure-private-key qwts-claude-agent
+   playbook-ensure-private-key qwts-claude-agent --force
    ```
 
 3. **Install App** (left sidebar) → install on `qwts` → *Only select
@@ -47,9 +47,10 @@ split rather than another raise.
    (slug, harness, `status: active`). Until that lands, drift does not verify
    the App is installed anywhere, and the first symptom of a missed install is
    a push failing mid-task on a repo nobody added.
-5. From this checkout:
-   `node tools/agent-bot/install-hooks.mjs` (records **this** absolute path)
-   and `node tools/agent-bot/install-gh-shim.mjs`. Identity is then
+5. From a clean playbook checkout, run
+   `node tools/agent-bot/playbook-launcher.mjs install`, then
+   `playbook-install-hooks` and `playbook-install-gh-shim`. The
+   launcher records the exact commit, and identity is then
    auto-detected per IDE (see
    [Automating worktrees](agent-bot-identity.md#automating-worktrees-tool-agnostic));
    `GH_AGENT_APP` is only an override. No `gh auth setup-git` — bot pushes
@@ -68,13 +69,12 @@ silently falling back to the stored `qwts` login. A failed mint must abort
 the task, never continue as `qwts`.
 
 ```bash
-GH_TOKEN=$(node tools/agent-bot/mint-token.mjs) || exit 1
+GH_TOKEN=$(playbook-mint-token) || exit 1
 export GH_TOKEN
 ```
 
-The `tools/agent-bot/` paths here are relative to this repository; from any
-*other* repo, use the checkout `playbook-home` / `$PLAYBOOK_HOME` points at
-([ENG-0004](../decisions/ENG-0004-centralize-shared-cicd.md)).
+The named shim resolves the selected checkout through the commit-pinned
+launcher; callers never need to know its filesystem location.
 
 The tool reads `GH_AGENT_APP` (or `--app <slug>`, or `GH_APP_ID` with either
 `GH_APP_PRIVATE_KEY` or `GH_APP_PRIVATE_KEY_PATH` for CI) and finds local
@@ -111,13 +111,12 @@ so without help, a perfectly configured bot worktree still opens PRs as
 `qwts`. The shim closes that lane. One machine-wide install:
 
 ```bash
-node tools/agent-bot/install-gh-shim.mjs
+playbook-install-gh-shim
 ```
 
-It writes `~/.config/agent-bot/bin/gh`, records this checkout in
-`playbook-home` (no baked `~/Code/...` path), symlinks to `~/.local/bin/gh`,
-and prepends the config bin from `~/.zshenv`. Re-run after moving the
-checkout. Outside bot territory, human shells pass through; agent processes
+It writes `~/.config/agent-bot/bin/gh`, symlinks to `~/.local/bin/gh`, and
+uses `~/.local/bin/playbook-engineering` for commit-pinned dispatch. Outside
+bot territory, human shells pass through; agent processes
 abort before stock `gh` can use the human credential. Territory: any
 `.<tool>/worktrees/**` path, else a relocation root, else the credential
 helper. Inside, the shim mints the worktree's bot token; a failed mint or
@@ -127,7 +126,7 @@ or human login.
 ## Verifying it works
 
 ```bash
-GH_TOKEN=$(node tools/agent-bot/mint-token.mjs) gh api installation/repositories --paginate --jq '.repositories[].full_name'
+GH_TOKEN=$(playbook-mint-token) gh api installation/repositories --paginate --jq '.repositories[].full_name'
 ```
 
 lists exactly the repositories the selected App is installed on. `--paginate`

@@ -22,7 +22,8 @@ once per machine:
 
 ```bash
 mkdir -p ~/.claude/skills
-ln -sfn "${PLAYBOOK_HOME:-$HOME/Code/playbook-engineering}/skills/signed-commit" ~/.claude/skills/signed-commit
+PLAYBOOK_ROOT="$(playbook-engineering status | sed -n '1p')"
+ln -sfn "$PLAYBOOK_ROOT/skills/signed-commit" ~/.claude/skills/signed-commit
 ```
 
 Symlink rather than copy, so a change here reaches every machine on its next
@@ -34,7 +35,7 @@ Work normally — branch, edit, commit locally, run the repo's gates. Then repla
 the local commits with signed equivalents just before opening the PR:
 
 ```bash
-node ~/.claude/skills/signed-commit/scripts/signed-commit.mjs
+playbook-signed-commit
 ```
 
 It replays every commit from the merge-base to `HEAD` through
@@ -45,7 +46,7 @@ individually — messages and boundaries are preserved, not squashed.
 Preview without writing anything:
 
 ```bash
-node ~/.claude/skills/signed-commit/scripts/signed-commit.mjs --dry-run
+playbook-signed-commit --dry-run
 ```
 
 Flags: `--base <ref>`, `--branch <name>`, `--repo owner/name`,
@@ -116,7 +117,7 @@ The active account should be the expected `<slug>[bot]`, via `GH_TOKEN`.
 Only outside a configured worktree, or in CI:
 
 ```bash
-GH_TOKEN=$(node "${PLAYBOOK_HOME:-$HOME/Code/playbook-engineering}/tools/agent-bot/mint-token.mjs") || exit 1
+GH_TOKEN=$(playbook-mint-token) || exit 1
 export GH_TOKEN
 ```
 

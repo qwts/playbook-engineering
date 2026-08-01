@@ -1,25 +1,13 @@
 // Builds the shell text for ~/.config/agent-bot/bin/gh (ENG-0045).
-// TOKEN_TOOL resolves at runtime from PLAYBOOK_HOME or
-// ~/.config/agent-bot/playbook-home so moving the checkout and re-running
-// install-* updates the pointer without a baked-in ~/Code path. Tests may
+// TOKEN_TOOL is reached through the commit-pinned machine launcher. Tests may
 // still pass an absolute tokenTool to pin a fake helper.
 
 export function buildGhShim(tokenTool = null) {
   const tokenToolSetup = tokenTool
-    ? `TOKEN_TOOL="${tokenTool}"`
-    : `# Resolve the token helper from PLAYBOOK_HOME or the recorded playbook-home.
-# The installer writes ~/.config/agent-bot/playbook-home (homeDir(), not XDG),
-# so fall back there even when XDG_CONFIG_HOME redirects config elsewhere.
-TOKEN_TOOL=""
-if [ -n "\$PLAYBOOK_HOME" ]; then
-  TOKEN_TOOL="\$PLAYBOOK_HOME/tools/agent-bot/worktree-token.mjs"
-else
-  POINTER="\${XDG_CONFIG_HOME:-\$HOME/.config}/agent-bot/playbook-home"
-  [ -f "\$POINTER" ] || POINTER="\$HOME/.config/agent-bot/playbook-home"
-  if [ -f "\$POINTER" ]; then
-    TOKEN_TOOL="\$(tr -d '\\n' < "\$POINTER")/tools/agent-bot/worktree-token.mjs"
-  fi
-fi`;
+    ? `TOKEN_TOOL="${tokenTool}"
+token_tool() { node "$TOKEN_TOOL" "$@"; }`
+    : `TOKEN_TOOL="\$HOME/.local/bin/playbook-engineering"
+token_tool() { "$TOKEN_TOOL" run tools/agent-bot/worktree-token.mjs -- "$@"; }`;
 
   return `#!/bin/sh
 # gh shim — agent bot identity (ENG-0045). Managed by
@@ -82,18 +70,18 @@ fi
 
 TERRITORY_SLUG=""
 AGENT_SLUG=""
-if [ ! -f "$TOKEN_TOOL" ] || ! command -v node >/dev/null 2>&1; then
+if [ ! -e "$TOKEN_TOOL" ] || ! command -v node >/dev/null 2>&1; then
   if [ -n "$AGENT_CONTEXT$TERRITORY_HINT" ]; then
     echo "agent-bot: token helper or Node is unavailable — refusing stock human gh" >&2
     echo "Re-run: node tools/agent-bot/install-gh-shim.mjs from your playbook-engineering checkout." >&2
     exit 1
   fi
 else
-  TERRITORY_SLUG=$(node "$TOKEN_TOOL" --slug 2>/dev/null) || {
+  TERRITORY_SLUG=$(token_tool --slug 2>/dev/null) || {
     echo "agent-bot: territory detection failed — refusing stock human gh" >&2
     exit 1
   }
-  AGENT_SLUG=$(node "$TOKEN_TOOL" --agent-slug 2>/dev/null) || {
+  AGENT_SLUG=$(token_tool --agent-slug 2>/dev/null) || {
     echo "agent-bot: agent detection failed — refusing stock human gh" >&2
     exit 1
   }
@@ -147,8 +135,8 @@ if [ "$1" = "whoami" ]; then
   echo "$("$REAL" api user --jq .login 2>/dev/null || echo 'unknown') — human territory, gh is stock"
   exit 0
 fi
-if [ -z "$GH_TOKEN" ] && [ -f "$TOKEN_TOOL" ] && command -v node >/dev/null 2>&1; then
-  TOKEN=$(node "$TOKEN_TOOL") || {
+if [ -z "$GH_TOKEN" ] && [ -e "$TOKEN_TOOL" ] && command -v node >/dev/null 2>&1; then
+  TOKEN=$(token_tool) || {
     echo "agent-bot: token mint failed in a bot worktree — refusing to run gh as the human" >&2
     exit 1
   }

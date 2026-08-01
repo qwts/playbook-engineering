@@ -11,13 +11,15 @@
 
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
+} from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  checkoutRootFromAgentBot,
-  writePlaybookHome,
-} from './playbook-home.mjs';
+  installLauncher,
+} from './playbook-launcher.mjs';
 
 export function hooksDirectory(agentBotDir = dirname(fileURLToPath(import.meta.url))) {
   return join(agentBotDir, 'hooks');
@@ -25,11 +27,17 @@ export function hooksDirectory(agentBotDir = dirname(fileURLToPath(import.meta.u
 
 export function installHooks({
   hooksPath = hooksDirectory(),
-  playbookRoot = checkoutRootFromAgentBot(),
+  playbookRoot,
+  home = homedir(),
   run = (args) => execFileSync('git', args, { encoding: 'utf8' }).trim(),
   exists = existsSync,
   stat = statSync,
-  writeHome = writePlaybookHome,
+  install = installLauncher,
+  mkdir = mkdirSync,
+  list = readdirSync,
+  read = readFileSync,
+  rm = rmSync,
+  write = writeFileSync,
 } = {}) {
   if (!exists(hooksPath)) {
     throw new Error(`hooks directory missing: ${hooksPath}`);
@@ -39,15 +47,31 @@ export function installHooks({
   if (!stat(hooksPath).isDirectory()) {
     throw new Error(`core.hooksPath must be a directory, not a file: ${hooksPath}`);
   }
-  const playbook = writeHome(playbookRoot);
+  const installed = install({ home, ...(playbookRoot ? { root: playbookRoot } : {}) });
+  const wrapperDir = join(home, '.local', 'share', 'playbook-engineering', 'hooks');
+  mkdir(wrapperDir, { recursive: true });
+  const names = list(hooksPath).filter((name) => name !== 'chain-hook');
+  const managed = '# Managed by playbook-install-hooks.';
+  for (const name of list(wrapperDir)) {
+    if (names.includes(name)) continue;
+    const stale = join(wrapperDir, name);
+    let body = '';
+    try { body = read(stale, 'utf8'); } catch { continue; }
+    if (body.includes(managed)) rm(stale);
+  }
+  for (const name of names) {
+    const source = join(hooksPath, name);
+    if (!stat(source).isFile()) continue;
+    write(join(wrapperDir, name), `#!/bin/sh\n${managed}\nexec "\${HOME}/.local/bin/playbook-engineering" run tools/agent-bot/hooks/${name} -- "$@"\n`, { mode: 0o755 });
+  }
   let previous = null;
   try {
     previous = run(['config', '--global', '--path', '--get', 'core.hooksPath']) || null;
   } catch {
     /* unset */
   }
-  run(['config', '--global', 'core.hooksPath', hooksPath]);
-  return { hooksPath, previous, playbookRoot: playbook.root, playbookHomeFile: playbook.path };
+  run(['config', '--global', 'core.hooksPath', wrapperDir]);
+  return { hooksPath: wrapperDir, previous, playbookRoot: installed.path, sha: installed.sha };
 }
 
 function main() {
@@ -59,7 +83,7 @@ function main() {
   } else {
     process.stdout.write(`core.hooksPath -> ${hooksPath}\n`);
   }
-  process.stdout.write(`playbook-home -> ${playbookRoot}\n`);
+  process.stdout.write(`playbook-engineering -> ${playbookRoot}\n`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -408,7 +408,7 @@ test('setup-worktree binds CODEX_THREAD_ID and rotates when a new conversation r
       env: cleanEnv,
       encoding: 'utf8',
     }).trim(),
-    path.join(path.dirname(setup), 'hooks'),
+    path.join(home, '.local', 'share', 'playbook-engineering', 'hooks'),
   );
   assert.equal(
     execFileSync('git', ['config', '--worktree', '--get', 'qwts.chainedHooksPath'], {

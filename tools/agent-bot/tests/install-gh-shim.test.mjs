@@ -12,17 +12,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { installGhShim } from '../install-gh-shim.mjs';
-import { playbookHomePath } from '../playbook-home.mjs';
+const installed = ({ root }) => ({ path: root, sha: 'a'.repeat(40) });
 
-test('installGhShim writes playbook-home, config shim, and ~/.local/bin symlink', () => {
+test('installGhShim installs a pinned launcher and ~/.local/bin symlink', () => {
   const home = mkdtempSync(join(tmpdir(), 'install-gh-'));
   const playbookRoot = join(home, 'playbook-engineering');
   mkdirSync(join(playbookRoot, 'tools', 'agent-bot'), { recursive: true });
 
-  const result = installGhShim({ home, playbookRoot });
+  const result = installGhShim({ home, playbookRoot, install: installed });
 
-  assert.equal(readFileSync(playbookHomePath(home), 'utf8').trim(), playbookRoot);
-  assert.match(readFileSync(result.shimPath, 'utf8'), /playbook-home/);
+  assert.equal(result.playbookRoot, playbookRoot);
+  assert.match(readFileSync(result.shimPath, 'utf8'), /playbook-engineering/);
   assert.equal(realpathSync(result.localShim), realpathSync(result.shimPath));
   assert.match(readFileSync(join(home, '.zshenv'), 'utf8'), /\.config\/agent-bot\/bin/);
 });
@@ -38,7 +38,7 @@ test('installGhShim replaces a prior agent-bot symlink and is idempotent on zshe
   symlinkSync(staleShim, join(home, '.local', 'bin', 'gh'));
   writeFileSync(join(home, '.zshenv'), 'export PATH="$HOME/.config/agent-bot/bin:$PATH"\n');
 
-  const result = installGhShim({ home, playbookRoot });
+  const result = installGhShim({ home, playbookRoot, install: installed });
   assert.equal(realpathSync(result.localShim), realpathSync(result.shimPath));
   assert.equal(result.zshenvUpdated, false);
   assert.equal(
@@ -55,7 +55,7 @@ test('installGhShim aborts when ~/.local/bin/gh is a real file, not an agent-bot
     mode: 0o755,
   });
   assert.throws(
-    () => installGhShim({ home, playbookRoot }),
+    () => installGhShim({ home, playbookRoot, install: installed }),
     /real file/,
   );
   // The real gh is left intact.
@@ -71,7 +71,7 @@ test('installGhShim aborts when ~/.local/bin/gh is a foreign symlink', () => {
   writeFileSync(join(elsewhere, 'gh'), '#!/bin/sh\necho foreign\n', { mode: 0o755 });
   symlinkSync(join(elsewhere, 'gh'), join(home, '.local', 'bin', 'gh'));
   assert.throws(
-    () => installGhShim({ home, playbookRoot }),
+    () => installGhShim({ home, playbookRoot, install: installed }),
     /not an agent-bot shim/,
   );
 });
@@ -79,10 +79,11 @@ test('installGhShim aborts when ~/.local/bin/gh is a foreign symlink', () => {
 test('installGhShim does not bake a checkout path into the shim body', () => {
   const home = mkdtempSync(join(tmpdir(), 'install-gh-'));
   const playbookRoot = '/Volumes/added_storage/Code/playbook-engineering';
-  const result = installGhShim({ home, playbookRoot });
+  const result = installGhShim({ home, playbookRoot, install: installed });
   const body = readFileSync(result.shimPath, 'utf8');
   assert.doesNotMatch(body, /Volumes\/added_storage/);
   assert.doesNotMatch(body, /Users\/user\/Code/);
-  assert.match(body, /PLAYBOOK_HOME/);
-  assert.match(body, /agent-bot\/playbook-home/);
+  assert.doesNotMatch(body, /PLAYBOOK_HOME/);
+  assert.doesNotMatch(body, /agent-bot\/playbook-home/);
+  assert.match(body, /\.local\/bin\/playbook-engineering/);
 });
