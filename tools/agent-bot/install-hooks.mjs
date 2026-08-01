@@ -11,7 +11,9 @@
 
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -33,6 +35,8 @@ export function installHooks({
   install = installLauncher,
   mkdir = mkdirSync,
   list = readdirSync,
+  read = readFileSync,
+  rm = rmSync,
   write = writeFileSync,
 } = {}) {
   if (!exists(hooksPath)) {
@@ -46,11 +50,19 @@ export function installHooks({
   const installed = install({ home, ...(playbookRoot ? { root: playbookRoot } : {}) });
   const wrapperDir = join(home, '.local', 'share', 'playbook-engineering', 'hooks');
   mkdir(wrapperDir, { recursive: true });
-  for (const name of list(hooksPath)) {
-    if (name === 'chain-hook') continue;
+  const names = list(hooksPath).filter((name) => name !== 'chain-hook');
+  const managed = '# Managed by playbook-install-hooks.';
+  for (const name of list(wrapperDir)) {
+    if (names.includes(name)) continue;
+    const stale = join(wrapperDir, name);
+    let body = '';
+    try { body = read(stale, 'utf8'); } catch { continue; }
+    if (body.includes(managed)) rm(stale);
+  }
+  for (const name of names) {
     const source = join(hooksPath, name);
     if (!stat(source).isFile()) continue;
-    write(join(wrapperDir, name), `#!/bin/sh\nexec "\${HOME}/.local/bin/playbook-engineering" run tools/agent-bot/hooks/${name} -- "$@"\n`, { mode: 0o755 });
+    write(join(wrapperDir, name), `#!/bin/sh\n${managed}\nexec "\${HOME}/.local/bin/playbook-engineering" run tools/agent-bot/hooks/${name} -- "$@"\n`, { mode: 0o755 });
   }
   let previous = null;
   try {

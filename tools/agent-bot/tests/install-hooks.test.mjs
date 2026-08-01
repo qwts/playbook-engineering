@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -53,6 +53,26 @@ test('installHooks reports a previous path when replacing one', () => {
     },
   }));
   assert.equal(result.previous, '/old/hooks');
+});
+
+test('installHooks prunes stale managed wrappers but preserves unrelated files', () => {
+  const home = mkdtempSync(join(tmpdir(), 'install-hooks-home-'));
+  const source = mkdtempSync(join(tmpdir(), 'install-hooks-source-'));
+  const wrapperDir = join(home, '.local', 'share', 'playbook-engineering', 'hooks');
+  mkdirSync(wrapperDir, { recursive: true });
+  writeFileSync(join(source, 'pre-commit'), '#!/bin/sh\n');
+  writeFileSync(join(wrapperDir, 'removed-hook'), '#!/bin/sh\n# Managed by playbook-install-hooks.\n');
+  writeFileSync(join(wrapperDir, 'custom-hook'), '#!/bin/sh\n# user-owned\n');
+
+  installHooks(installOpts({
+    home,
+    hooksPath: source,
+    run: () => '',
+  }));
+
+  assert.equal(existsSync(join(wrapperDir, 'removed-hook')), false);
+  assert.equal(existsSync(join(wrapperDir, 'custom-hook')), true);
+  assert.match(readFileSync(join(wrapperDir, 'pre-commit'), 'utf8'), /Managed by playbook-install-hooks/);
 });
 
 test('installHooks fails closed when the hooks directory is missing', () => {
