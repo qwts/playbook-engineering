@@ -13,7 +13,9 @@ where each repo differs.
   never commit directly to `main`.
 - One objective per branch and per PR. Unrelated changes go on their own branch,
   so review and revert stay clean.
-- Rebase onto the latest `main` before requesting review.
+- Start from the latest practical `main` and keep long-running work reasonably
+  current. Do not require rebase-only history: the merge queue validates the
+  approved change with the latest `main` before it merges.
 
 ## Opening the PR
 
@@ -53,6 +55,9 @@ where each repo differs.
   replies are visible on the thread.
 - Unresolved feedback is carried forward, never reopened under a fresh PR to
   escape it.
+- An approved PR enters the required merge queue. The queue uses `MERGE` and
+  the complete suite must pass on its `merge_group` candidate before `main`
+  advances.
 
 ## Commit hygiene
 
@@ -72,6 +77,8 @@ where each repo differs.
 
 ## Changelog
 
+- 2026-07-31 — replace the rebase-only assumption with the required `MERGE`
+  queue and exact merge-group validation.
 - 2026-07-31 — add lifecycle-aware CI scheduling and exact-SHA preflight reuse
   to the mandatory merge bar.
 - 2026-07-23 — agent-authored PRs are opened under the dedicated bot identity

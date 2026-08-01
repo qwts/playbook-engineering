@@ -8,6 +8,8 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
   workflow_dispatch:
@@ -17,7 +19,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'merge_group' && format('merge-group-{0}', github.event.merge_group.head_ref) || github.sha }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
@@ -31,7 +33,7 @@ jobs:
       run_post_merge: ${{ steps.policy.outputs.run_post_merge }}
     steps:
       - id: policy
-        uses: qwts/playbook-engineering/.github/actions/ci-policy@19d88d7ecdc7b1d842194cd5be3a398cb1211fde
+        uses: qwts/playbook-engineering/.github/actions/ci-policy@012ec7b8cd101c528b587d969e8d21da4e589770
 
   merge-evidence:
     name: Verify merged commit evidence
@@ -47,7 +49,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           validated=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&per_page=100" \
-            --jq 'any(.workflow_runs[]; .name == "CI" and .event == "pull_request" and .conclusion == "success")')
+            --jq 'any(.workflow_runs[]; .name == "CI" and (.event == "pull_request" or .event == "merge_group") and .conclusion == "success")')
           echo "validated=$validated" >> "$GITHUB_OUTPUT"
 
   preflight-evidence:
@@ -175,7 +177,7 @@ jobs:
                 test "$CODEQL" = success
               fi
               ;;
-            manual)
+            queue|manual)
               test "$FULL" = success
               test "$DOCS_GOV" = success
               test "$INVENTORY" = success

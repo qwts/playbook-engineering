@@ -1,10 +1,9 @@
 # CI execution policy
 
-Every governed repository keeps its agreed validation suite but schedules it by
-PR lifecycle: agents run fast checks locally before leaving draft, ready pull
-requests prove that their exact commit passed every complete-suite gate, and
-`main` avoids repeating that suite only when the exact commit already has
-successful evidence. Repository-level
+Every governed repository keeps its agreed validation suite: agents check
+drafts locally, ready PRs prove their head, the merge queue validates the exact
+candidate with current `main`, and `main` reuses successful queue evidence.
+Repository-level
 GitHub Actions Policy blocks every actor except `qwts`, `chores-dumb[bot]`,
 `dependabot[bot]`, and the active registered `qwts-*-agent[bot]` Apps;
 public-fork workflows are never approved or run.
@@ -37,6 +36,9 @@ the CI-policy action performs a secondary fail-closed check of both
 `github.actor` and `github.triggering_actor`. GitHub documents the feature in
 [workflow execution protections](https://docs.github.com/en/organizations/managing-organization-settings/actions-policies/workflow-execution-protections).
 
+Allow `merge_group` alongside each repository's governed events. This does not
+expand the actor list: both actor fields must still be registered above.
+
 For public repositories, do not approve a fork workflow after GitHub queues it.
 The actor policy must refuse the external actor. Maintainers move an accepted
 change onto an allowed, repository-owned branch before validation.
@@ -52,24 +54,24 @@ lane unless a separate reviewed decision explicitly removes it.
 | Draft PR opened or updated | Do not start GitHub Actions automatically. Before marking ready, the agent runs the repository's agreed local gates, including lint, formatting check, typecheck, unit tests, and docs-gov where configured; a missing category is recorded as not applicable. After the branch is pushed, the agent may explicitly dispatch the complete suite for the exact feature-branch SHA and wait for success. |
 | PR marked ready | Verify whether the exact PR-head SHA already has a successful manual complete-suite run. Reuse that evidence and report the stable required gate without rerunning expensive jobs; otherwise run every agreed complete-suite gate. |
 | Ready PR updated | Cancel the older PR run. Reuse successful complete-suite evidence only when it names the new exact SHA; otherwise execute every complete-suite gate against the new merge candidate. |
-| Push or rebase merge to `main` | If that exact SHA has successful ready-PR evidence, run only a short smoke/integration check. Otherwise execute every complete-suite gate as the fail-safe. |
+| PR enters the merge queue | Run every complete-suite gate against the `merge_group` SHA. Earlier evidence cannot replace validation with current `main` and prior queued changes. |
+| Queue merge or push to `main` | If that exact SHA has successful merge-group evidence, run only a short smoke/integration check. Otherwise execute every complete-suite gate as the fail-safe. |
 | Manual dispatch | Used for exact-SHA preflight validation before PR promotion, diagnostics, release recovery, workflow testing, and an explicit rerun. A CI dispatch defaults to the complete suite. |
 | Public-fork PR | Do not run or approve workflows. |
 
-A ready PR does not substitute local draft validation for remote evidence. The
-`ready_for_review` event always creates an evidence-verification run. Its stable
-gate passes only after it either proves a successful manual complete-suite run
-for the exact PR-head SHA or executes the suite itself. A manual run for an
-older SHA never counts. Governed repositories use rebase-only merges and
-require the branch to be current with its target, so the validated PR head is
-the exact commit merged. Merge queues are not used because GitHub initiates
-`merge_group` workflows as a GitHub-owned actor, which this policy intentionally
-refuses.
+A ready PR always verifies remote evidence. Its stable gate either proves a
+successful manual complete-suite run for that exact head SHA or runs the suite;
+older evidence never counts.
+
+Approval adds the PR to the required queue rather than merging directly. Its
+synthetic SHA runs the complete suite because it is the exact candidate with
+the latest target branch. Public forks are never enqueued; accepted changes
+first move to an allowed repository-owned branch.
 
 ## Workflow contract
 
-The CI workflow uses `pull_request` lifecycle events, a default-branch `push`,
-and a narrowly described `workflow_dispatch`. Release tag pushes and
+CI uses `pull_request`, `merge_group: checks_requested`, default-branch `push`,
+and narrowly described `workflow_dispatch` events. Release tag pushes and
 operational recovery workflows remain separate; schedules,
 `repository_dispatch`, and `pull_request_target` require a documented
 repo-local purpose and must still satisfy the actor policy.
@@ -87,40 +89,30 @@ evidence falls through to the complete suite. The agent waits for the manual
 run to finish before opening or promoting the PR; an in-progress run is not
 evidence.
 
-Use one PR-scoped concurrency group, such as the workflow name plus PR number,
-with `cancel-in-progress: true`. This cancels a superseded draft or ready run
-without canceling unrelated PRs. A single lifecycle workflow and concurrency
-group prevent equivalent suites from running twice for the same commit.
+Use a PR-scoped concurrency group with `cancel-in-progress: true`. Queue runs
+use their head ref, replacing obsolete builds without canceling another queue
+candidate. One lifecycle workflow prevents equivalent same-commit suites.
 
-Conditional jobs feed one stable required gate named `CI`. The gate always
-reports a result and checks that the lane selected for the current event
-succeeded, so a skipped expensive child job never leaves branch protection
-waiting for a context that was never created. Existing independent governance
-and security contexts, including docs-gov, CodeQL, Storybook, smoke, E2E, and
-repo-specific compliance checks, remain required and remain part of the ready
-suite unless a separate reviewed change explicitly replaces them.
+Conditional jobs feed stable required gate `CI`, which validates the selected
+lane even when expensive children skip. Existing docs-gov, CodeQL, Storybook,
+smoke, E2E, compliance, and other agreed contexts remain required unless a
+separate reviewed change replaces them.
 
-CodeQL uses advanced setup. Governed CI calls its reusable workflow for ready
-PRs lacking exact-SHA evidence, manual complete-suite dispatches, and every
-`main` push. The `main` scan remains when generic evidence is reused because a
-PR analysis cannot own default-branch alerts. The workflow preserves language
-coverage and immutable pins, with no direct PR trigger for drafts to start.
+Advanced CodeQL runs for ready PRs lacking evidence, manual suites, every merge
+group, and every `main` push. The default-branch scan remains because queue
+analysis cannot own its alerts; language coverage and immutable pins remain.
 
 When a repository requires more than the stable `CI` context, each retained
-context must either report its own evidence-backed ready result or remain
-available from the exact-SHA manual run. A rollout verifies this behavior in
-the merge box before enabling reuse; it never deletes an agreed validation to
-make branch protection pass.
+context must report for the merge-group candidate. PR-head or manual evidence
+may avoid a duplicate ready-PR run but cannot satisfy the queue. A rollout
+verifies this behavior in the merge box before enabling the queue; it never
+deletes an agreed validation to make branch protection pass.
 
 ## Changesets, version PRs, and releases
 
-A changesets or equivalent version-packages PR creates a new commit containing
-the generated version and changelog changes. Treat that PR as a normal ready
-PR: its exact merge candidate passes the complete suite once, either through
-preflight evidence or its ready event. The automation that creates or refreshes
-the version PR performs only the work needed to generate and validate that
-deterministic version diff. It must not also dispatch an equivalent CI run for
-the same commit.
+A changesets or version-packages PR follows the same lifecycle: validate its
+head, then its merge-group candidate. Generation automation validates only its
+deterministic version diff and dispatches no extra equivalent CI run.
 
 Tagging and release workflows consume the successful complete-suite evidence
 for that exact commit instead of rerunning generic lint, format, typecheck,
@@ -129,8 +121,9 @@ publishing, they fail closed unless they can prove all of the following:
 
 - the tag and release source resolve to the intended commit on the protected
   default branch;
-- that exact commit has successful complete-suite evidence and a successful
-  ready-PR verification gate; and
+- that exact commit has successful complete-suite evidence from its merge-group
+  run or the fail-safe default-branch run, and its reviewed PR head had a
+  successful ready-PR verification gate; and
 - version, changeset, tag, and release provenance are internally consistent.
 
 Release-specific work is not duplicate CI and remains mandatory. This includes
@@ -149,8 +142,12 @@ packaging as a substitute for the merge gate.
 ## Required repository settings
 
 - Require `CI` and every retained independent governance/security context.
-- Require rebase-only merges and require the branch to be current.
-- Do not enable merge queue while GitHub-owned actors are prohibited.
+- Require merge queue with merge method `MERGE`, grouping strategy `ALLGREEN`,
+  one concurrent candidate build, and one PR per merge.
+- Allow merge commits in repository settings; the queue controls their use on
+  protected default branches.
+- Allow the `merge_group` event in Actions Policy without adding a GitHub-owned
+  actor; the enqueueing user or registered App must remain authorized.
 - Require the exact merge candidate to pass every complete-suite gate.
 - Keep the repository Actions Policy active, not in evaluate mode.
 - Use CodeQL advanced setup. GitHub does not expose default setup's internal

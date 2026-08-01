@@ -80,6 +80,21 @@ export function bumpReviewCount(ruleset) {
   };
 }
 
+export function mergeQueueRule() {
+  return {
+    type: 'merge_queue',
+    parameters: {
+      check_response_timeout_minutes: 60,
+      grouping_strategy: 'ALLGREEN',
+      max_entries_to_build: 1,
+      max_entries_to_merge: 1,
+      merge_method: 'MERGE',
+      min_entries_to_merge: 1,
+      min_entries_to_merge_wait_minutes: 0,
+    },
+  };
+}
+
 // The standard default-branch ruleset for a repo that has none: the shape the
 // governed repos share, minus required status checks (those are per-repo).
 // Repository-admin bypass matches the existing rulesets — the solo human must
@@ -106,6 +121,7 @@ export function defaultRuleset() {
           allowed_merge_methods: ['merge'],
         },
       },
+      mergeQueueRule(),
     ],
   };
 }

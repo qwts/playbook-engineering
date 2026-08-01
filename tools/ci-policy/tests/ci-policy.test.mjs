@@ -67,6 +67,35 @@ test('main pushes and manual reruns select their dedicated modes', () => {
   assert.equal(outputsFor('manual').run_full, 'true');
 });
 
+test('merge queue candidates for main select a fresh complete-suite run', () => {
+  const event = {
+    action: 'checks_requested',
+    merge_group: {
+      base_ref: 'refs/heads/main',
+      head_ref: 'refs/heads/gh-readonly-queue/main/pr-116-e8c01cbc4c17',
+    },
+  };
+  assert.equal(classify({ actor: 'qwts', eventName: 'merge_group', event }), 'queue');
+  assert.equal(classify({ actor: 'qwts-codex-agent[bot]', eventName: 'merge_group', event }), 'queue');
+  assert.equal(outputsFor('queue').run_full, 'true');
+  assert.throws(
+    () => classify({ actor: 'github-merge-queue[bot]', eventName: 'merge_group', event }),
+    /not authorized/,
+  );
+  assert.throws(
+    () => classify({ actor: 'qwts', eventName: 'merge_group', event: { ...event, action: 'destroyed' } }),
+    /not supported/,
+  );
+  assert.throws(
+    () => classify({
+      actor: 'qwts',
+      eventName: 'merge_group',
+      event: { ...event, merge_group: { ...event.merge_group, base_ref: 'refs/heads/release' } },
+    }),
+    /not governed/,
+  );
+});
+
 test('reruns require the triggering actor to be authorized', () => {
   assert.throws(
     () =>
@@ -89,7 +118,6 @@ test('fork PRs, unauthorized actors, and unsupported triggers fail closed', () =
     () => classify({ actor: 'github-actions[bot]', eventName: 'push', event: {}, ref: 'refs/heads/main' }),
     /not authorized/,
   );
-  assert.throws(() => classify({ actor: 'qwts', eventName: 'merge_group', event: {} }), /not a governed CI trigger/);
   assert.throws(() => classify({ actor: 'qwts', eventName: 'schedule', event: {} }), /not a governed CI trigger/);
 });
 
@@ -101,8 +129,9 @@ test('the reference workflow preserves governed gates and skips draft jobs', () 
     /uses: qwts\/playbook-engineering\/\.github\/actions\/ci-policy@[0-9a-f]{40}/,
   );
   assert.doesNotMatch(workflow, /uses: \.\/\.github\/actions\/ci-policy/);
-  assert.doesNotMatch(workflow, /^  merge_group:/m);
-  assert.doesNotMatch(workflow, /\.event == "merge_group"/);
+  assert.match(workflow, /^  merge_group:\n    types: \[checks_requested\]$/m);
+  assert.match(workflow, /format\('merge-group-\{0\}', github\.event\.merge_group\.head_ref\)/);
+  assert.match(workflow, /\.event == "pull_request" or \.event == "merge_group"/);
   assert.match(workflow, /^  preflight-evidence:$/m);
   assert.match(workflow, /event=workflow_dispatch&head_sha=\$TARGET_SHA/);
   assert.match(workflow, /\.name == "CI" and \.conclusion == "success"/);
@@ -116,6 +145,7 @@ test('the reference workflow preserves governed gates and skips draft jobs', () 
   assert.match(workflow, /needs\.policy\.outputs\.run_post_merge == 'true'/);
   assert.match(workflow, /CODEQL: \$\{\{ needs\.codeql\.result \}\}/);
   assert.match(workflow, /test "\$CODEQL" = success/);
+  assert.match(workflow, /queue\|manual\)/);
   assert.match(workflow, /name: CI\n/);
   assert.doesNotMatch(workflow, /name: Draft checks/);
 });
