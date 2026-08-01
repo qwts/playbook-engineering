@@ -1,5 +1,5 @@
 name: CI policy
-description: Classify governed CI runs and fail closed for unauthorized initiators or fork PRs.
+description: Classify governed CI runs and fail closed outside the native merge-queue main-push exception.
 
 outputs:
   mode:

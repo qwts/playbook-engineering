@@ -161,6 +161,28 @@ pilot PR must prove the actual queue actor, the stable `CI` and retained check
 contexts, the exact queue SHA, and the post-merge evidence handoff before the
 same settings are applied to the rest of the governed fleet.
 
+## Amendment — 2026-08-01: native queue pushes and preview actor policy
+
+This amendment resolves
+[#120](https://github.com/qwts/playbook-engineering/issues/120).
+
+The native merge queue attributes its resulting default-branch push to
+`github-merge-queue[bot]`. The immutable CI-policy action therefore authorizes
+that GitHub-owned actor only when both actor fields match, the event is `push`,
+and the ref is `refs/heads/main`. The bot remains unauthorized for queue
+candidate, PR, manual, non-default-branch, and every other workflow event.
+
+GitHub's workflow-execution-protections preview cannot select the merge-queue
+bot or express this event-scoped exception. Its actor restriction is disabled;
+a repository role would authorize unrelated writers. Governed repositories
+retain the immutable actor check, external-contributor approval with a
+never-approve fork policy, read-only default token, action-source restrictions
+and SHA pinning, required checks, and protected-branch review and queue rules.
+
+Advanced CodeQL remains the lifecycle implementation rather than an actor-policy
+workaround: its callable workflow follows draft, ready, queue, and post-merge
+scheduling and preserves the required default-branch scan.
+
 ## References
 
 - [ENG-0003](ENG-0003-repo-is-documentation-source-of-truth.md) established this repo as the cross-repo home for shared engineering assets; this extends that from documents to CI/CD.

@@ -3,10 +3,11 @@
 Every governed repository keeps its agreed validation suite: agents check
 drafts locally, ready PRs prove their head, the merge queue validates the exact
 candidate with current `main`, and `main` reuses successful queue evidence.
-Repository-level
-GitHub Actions Policy blocks every actor except `qwts`, `chores-dumb[bot]`,
-`dependabot[bot]`, and the active registered `qwts-*-agent[bot]` Apps;
-public-fork workflows are never approved or run.
+The immutable CI-policy action admits `qwts`, `chores-dumb[bot]`,
+`dependabot[bot]`, and active registered `qwts-*-agent[bot]` Apps. Its only
+GitHub-owned actor exception is a native merge-queue `push` to `main`, where
+both actor fields are `github-merge-queue[bot]`. Public-fork workflows are
+never approved or run.
 
 This is the CI/CD execution baseline established by
 [ENG-0004](../decisions/ENG-0004-centralize-shared-cicd.md) and inherited under
@@ -14,10 +15,9 @@ This is the CI/CD execution baseline established by
 their existing commands and extra gates onto these lanes. The policy changes
 timing and deduplication, not the set of agreed validations.
 
-## Repository Actions Policy
+## Runtime actor boundary
 
-Configure **Settings → Actions → Policies → Workflow execution protections**
-in every governed repository. The active actor allow list contains:
+Allowed runtime actors are:
 
 - the human owner `qwts`;
 - the release/versioning App `chores-dumb` (runtime actor
@@ -26,22 +26,30 @@ in every governed repository. The active actor allow list contains:
 - every active App in [`governance/agents.json`](../../governance/agents.json),
   each of which runs as `<slug>[bot]`.
 
-Do not allow `github-actions[bot]`, Copilot, a repository role, external
-contributors, or another third party to initiate workflows.
+Do not allow `github-actions[bot]`, Copilot, an external contributor, or
+another third party to pass the immutable policy action.
 Automation that must initiate a later workflow authenticates as an allowed App.
 The namespace pattern describes the allowed class but is not itself the allow
-list: retired or unregistered matching Apps remain unauthorized. GitHub
-evaluates this policy before a runner starts; an immutable trusted revision of
-the CI-policy action performs a secondary fail-closed check of both
-`github.actor` and `github.triggering_actor`. GitHub documents the feature in
+list: retired or unregistered matching Apps remain unauthorized. An immutable
+trusted revision of the CI-policy action performs a fail-closed check of both
+`github.actor` and `github.triggering_actor`. GitHub documents its separate
+preview control in
 [workflow execution protections](https://docs.github.com/en/organizations/managing-organization-settings/actions-policies/workflow-execution-protections).
 
-Allow `merge_group` alongside each repository's governed events. This does not
-expand the actor list: both actor fields must still be registered above.
+Keep **Settings → Actions → Policies → Workflow execution protections**
+disabled while its actor picker cannot represent the native merge-queue bot
+or an event-scoped exception. Do not substitute a repository role: that
+authorizes unrelated writers.
+
+The merge-queue bot remains unauthorized for `merge_group`, manual dispatch,
+PR, and non-`main` push events. Only the resulting native queue push may reach
+the post-merge lane, and both actor fields must name that bot.
 
 For public repositories, do not approve a fork workflow after GitHub queues it.
-The actor policy must refuse the external actor. Maintainers move an accepted
-change onto an allowed, repository-owned branch before validation.
+Require approval for all external contributors, keep the default workflow token
+read-only, and let the immutable action refuse the external actor if a run is
+started. Maintainers move an accepted change onto an allowed,
+repository-owned branch before validation.
 
 ## Pull-request lifecycle
 
@@ -146,17 +154,20 @@ packaging as a substitute for the merge gate.
   one concurrent candidate build, and one PR per merge.
 - Allow merge commits in repository settings; the queue controls their use on
   protected default branches.
-- Allow the `merge_group` event in Actions Policy without adding a GitHub-owned
-  actor; the enqueueing user or registered App must remain authorized.
+- Keep workflow-execution protections disabled until GitHub can represent the
+  required system actors without authorizing a broad repository role.
+- Require approval for all external-contributor workflows and never approve a
+  public-fork workflow.
+- Keep the default workflow token read-only and retain the action-source allow
+  list plus full-commit-SHA pinning.
 - Require the exact merge candidate to pass every complete-suite gate.
-- Keep the repository Actions Policy active, not in evaluate mode.
-- Use CodeQL advanced setup. GitHub does not expose default setup's internal
-  `github-advanced-security[bot]` actor in the Actions Policy picker. After the
-  workflow lands, choose **Settings → Advanced Security → CodeQL analysis →
-  Switch to advanced**, disable default setup, dispatch CI, and verify the
-  required `CodeQL` context before merging.
+- Use CodeQL advanced setup so draft, ready, queue, and post-merge execution
+  follows the same lifecycle controller. After the workflow lands, choose
+  **Settings → Advanced Security → CodeQL analysis → Switch to advanced**,
+  disable default setup, dispatch CI, and verify the required `CodeQL` context
+  before merging.
 
-Actions Policy is currently a GitHub public-preview setting. Until GitHub
-provides a stable management API used by the governance reconciler, actor/event
-configuration and the default-to-advanced CodeQL switch are manual settings
-with review evidence attached to the rollout PR.
+Workflow execution protections are currently a GitHub public-preview setting.
+Until GitHub can express the governed system-actor exception and provides a
+stable management API, its disabled state and the default-to-advanced CodeQL
+switch are manual settings with review evidence attached to the rollout PR.

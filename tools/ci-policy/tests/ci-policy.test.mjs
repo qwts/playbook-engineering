@@ -6,6 +6,7 @@ import {
   allowedActorsFromRoster,
   classifyRun,
   isAllowedActor,
+  isNativeMergeQueueMainPush,
   outputsFor,
 } from '../../../.github/actions/ci-policy/classify.mjs';
 
@@ -65,6 +66,28 @@ test('main pushes and manual reruns select their dedicated modes', () => {
   );
   assert.equal(classify({ actor: 'qwts', eventName: 'workflow_dispatch', event: {} }), 'manual');
   assert.equal(outputsFor('manual').run_full, 'true');
+});
+
+test('only the native merge-queue bot pair may initiate a main push', () => {
+  const nativePush = {
+    actor: 'github-merge-queue[bot]',
+    triggeringActor: 'github-merge-queue[bot]',
+    eventName: 'push',
+    event: {},
+    ref: 'refs/heads/main',
+  };
+  assert.equal(isNativeMergeQueueMainPush(nativePush), true);
+  assert.equal(classify(nativePush), 'post-merge');
+
+  for (const override of [
+    { triggeringActor: 'qwts' },
+    { eventName: 'merge_group' },
+    { ref: 'refs/heads/release' },
+  ]) {
+    const attempt = { ...nativePush, ...override };
+    assert.equal(isNativeMergeQueueMainPush(attempt), false);
+    assert.throws(() => classify(attempt), /not authorized/);
+  }
 });
 
 test('merge queue candidates for main select a fresh complete-suite run', () => {

@@ -2,6 +2,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const ROSTER_URL = new URL('../../../governance/agents.json', import.meta.url);
+const MERGE_QUEUE_ACTOR = 'github-merge-queue[bot]';
 
 export function allowedActorsFromRoster(roster) {
   if (!Array.isArray(roster?.agents)) throw new Error('agent roster is malformed');
@@ -15,12 +16,29 @@ export function isAllowedActor(actor, allowedActors) {
   return allowedActors.has(actor);
 }
 
+export function isNativeMergeQueueMainPush({ actor, triggeringActor, eventName, ref }) {
+  return (
+    actor === MERGE_QUEUE_ACTOR &&
+    triggeringActor === MERGE_QUEUE_ACTOR &&
+    eventName === 'push' &&
+    ref === 'refs/heads/main'
+  );
+}
+
 export function classifyRun({ actor, triggeringActor = actor, allowedActors, eventName, event, ref }) {
-  if (!isAllowedActor(actor, allowedActors)) {
-    throw new Error(`actor ${actor || '<empty>'} is not authorized by CI policy`);
-  }
-  if (!isAllowedActor(triggeringActor, allowedActors)) {
-    throw new Error(`triggering actor ${triggeringActor || '<empty>'} is not authorized by CI policy`);
+  const nativeMergeQueueMainPush = isNativeMergeQueueMainPush({
+    actor,
+    triggeringActor,
+    eventName,
+    ref,
+  });
+  if (!nativeMergeQueueMainPush) {
+    if (!isAllowedActor(actor, allowedActors)) {
+      throw new Error(`actor ${actor || '<empty>'} is not authorized by CI policy`);
+    }
+    if (!isAllowedActor(triggeringActor, allowedActors)) {
+      throw new Error(`triggering actor ${triggeringActor || '<empty>'} is not authorized by CI policy`);
+    }
   }
   if (eventName === 'pull_request' && event.pull_request?.head?.repo?.fork) {
     throw new Error('public fork pull requests are not permitted to run workflows');
