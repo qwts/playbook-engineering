@@ -25,7 +25,7 @@ export function isNativeMergeQueueMainPush({ actor, triggeringActor, eventName, 
   );
 }
 
-export function classifyRun({ actor, triggeringActor = actor, allowedActors, eventName, event, ref }) {
+export function authorizeRun({ actor, triggeringActor = actor, allowedActors, eventName, event, ref }) {
   const nativeMergeQueueMainPush = isNativeMergeQueueMainPush({
     actor,
     triggeringActor,
@@ -43,6 +43,14 @@ export function classifyRun({ actor, triggeringActor = actor, allowedActors, eve
   if (eventName === 'pull_request' && event.pull_request?.head?.repo?.fork) {
     throw new Error('public fork pull requests are not permitted to run workflows');
   }
+  if (eventName === 'pull_request_target' && event.pull_request?.head?.repo?.fork) {
+    throw new Error('public fork pull requests are not permitted to run workflows');
+  }
+}
+
+export function classifyRun(options) {
+  authorizeRun(options);
+  const { eventName, event, ref } = options;
   if (eventName === 'pull_request' && event.pull_request?.draft) {
     throw new Error('draft pull requests are validated locally and do not run CI');
   }
@@ -74,14 +82,17 @@ export function outputsFor(mode) {
 function main() {
   const event = JSON.parse(readFileSync(process.env.CI_POLICY_EVENT_PATH, 'utf8'));
   const roster = JSON.parse(readFileSync(ROSTER_URL, 'utf8'));
-  const mode = classifyRun({
+  const options = {
     actor: process.env.CI_POLICY_ACTOR,
     triggeringActor: process.env.CI_POLICY_TRIGGERING_ACTOR,
     allowedActors: allowedActorsFromRoster(roster),
     eventName: process.env.CI_POLICY_EVENT_NAME,
     event,
     ref: process.env.CI_POLICY_REF,
-  });
+  };
+  const authorizationOnly = process.env.CI_POLICY_AUTHORIZATION_ONLY === 'true';
+  const mode = authorizationOnly ? 'authorized' : classifyRun(options);
+  if (authorizationOnly) authorizeRun(options);
   const output = Object.entries(outputsFor(mode)).map(([key, value]) => `${key}=${value}`).join('\n');
   appendFileSync(process.env.GITHUB_OUTPUT, `${output}\n`);
 }

@@ -1,5 +1,11 @@
 name: CI policy
-description: Classify governed CI runs and fail closed outside the native merge-queue main-push exception.
+description: Authorize governed workflow actors and classify CI lifecycle runs.
+
+inputs:
+  authorization-only:
+    description: Enforce actor and fork policy without classifying a CI lifecycle lane
+    required: false
+    default: 'false'
 
 outputs:
   mode:
@@ -24,4 +30,5 @@ runs:
         CI_POLICY_EVENT_NAME: ${{ github.event_name }}
         CI_POLICY_EVENT_PATH: ${{ github.event_path }}
         CI_POLICY_REF: ${{ github.ref }}
+        CI_POLICY_AUTHORIZATION_ONLY: ${{ inputs.authorization-only }}
       run: node "${{ github.action_path }}/classify.mjs"

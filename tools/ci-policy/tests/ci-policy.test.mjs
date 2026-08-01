@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   allowedActorsFromRoster,
+  authorizeRun,
   classifyRun,
   isAllowedActor,
   isNativeMergeQueueMainPush,
@@ -88,6 +89,45 @@ test('only the native merge-queue bot pair may initiate a main push', () => {
     assert.equal(isNativeMergeQueueMainPush(attempt), false);
     assert.throws(() => classify(attempt), /not authorized/);
   }
+});
+
+test('authorization-only enforcement protects non-CI entrypoints', () => {
+  for (const eventName of ['workflow_dispatch', 'schedule']) {
+    assert.doesNotThrow(() =>
+      authorizeRun({
+        actor: 'qwts',
+        triggeringActor: 'qwts',
+        allowedActors,
+        eventName,
+        event: {},
+        ref: 'refs/heads/main',
+      }),
+    );
+  }
+  assert.throws(
+    () =>
+      authorizeRun({
+        actor: 'octocat',
+        triggeringActor: 'octocat',
+        allowedActors,
+        eventName: 'workflow_dispatch',
+        event: {},
+        ref: 'refs/heads/main',
+      }),
+    /actor octocat is not authorized/,
+  );
+  assert.throws(
+    () =>
+      authorizeRun({
+        actor: 'qwts',
+        triggeringActor: 'qwts',
+        allowedActors,
+        eventName: 'pull_request_target',
+        event: pullRequest(false, true),
+        ref: 'refs/heads/main',
+      }),
+    /fork/,
+  );
 });
 
 test('merge queue candidates for main select a fresh complete-suite run', () => {
