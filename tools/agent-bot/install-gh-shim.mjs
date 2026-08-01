@@ -22,6 +22,8 @@ import {
   appendFileSync,
   symlinkSync,
   rmSync,
+  lstatSync,
+  readlinkSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -42,6 +44,8 @@ export function installGhShim({
   append = appendFileSync,
   symlink = symlinkSync,
   rm = rmSync,
+  lstat = lstatSync,
+  readlink = readlinkSync,
 } = {}) {
   const { path: playbookHomeFile, root } = writePlaybookHome(playbookRoot, {
     home,
@@ -57,9 +61,35 @@ export function installGhShim({
   const localBin = join(home, '.local', 'bin');
   mkdir(localBin, { recursive: true });
   const localShim = join(localBin, 'gh');
-  // Prefer a symlink so reinstalling the config-dir shim is enough; replace
-  // any prior file/symlink at ~/.local/bin/gh.
-  rm(localShim, { force: true });
+  // Only replace an agent-bot-owned symlink. A real gh CLI installed at
+  // ~/.local/bin/gh must not be deleted — abort and ask the user to move it,
+  // so the shim's PATH-skip can still find stock gh as a passthrough target.
+  let stat;
+  try {
+    stat = lstat(localShim);
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+  if (stat) {
+    if (stat.isSymbolicLink()) {
+      let target = readlink(localShim);
+      if (!target.startsWith('/')) target = join(localBin, target);
+      const agentBin = join(agentBotConfigDir(home), 'bin');
+      if (target === shimPath || target.startsWith(`${agentBin}/`)) {
+        rm(localShim, { force: true });
+      } else {
+        throw new Error(
+          `~/.local/bin/gh is a symlink to ${target}, not an agent-bot shim — ` +
+            'remove it manually if you want the agent-bot shim there',
+        );
+      }
+    } else {
+      throw new Error(
+        '~/.local/bin/gh is a real file (likely the GitHub CLI) — move it elsewhere ' +
+          'before installing the agent-bot shim, so stock gh stays reachable',
+      );
+    }
+  }
   symlink(shimPath, localShim);
 
   const zshenv = join(home, '.zshenv');
