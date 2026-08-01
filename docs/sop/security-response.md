@@ -27,8 +27,7 @@ one is a security regression, not a delta:
   repos); `SECURITY.md` is the entry point regardless.
 - Secret scanning **and** push protection **on**.
 - Dependabot security updates **on**.
-- CodeQL **on** once the repo has code, using advanced setup under the
-  restricted-actor Actions Policy so scans run through governed CI.
+- CodeQL default setup **on** once the repo has code.
 
 ## Handling a report
 
@@ -56,8 +55,6 @@ one is a security regression, not a delta:
 
 ## Changelog
 
-- 2026-07-31 — require lifecycle-controlled CodeQL advanced setup when the
-  Actions Policy blocks GitHub's unselectable default-setup actor.
 - 2026-07-22 — initial version; unified vulnerability reporting on private
   advisories and pinned the ENG-0005 security settings as the shared floor
   (ENG-0008).

@@ -116,19 +116,6 @@ jobs:
       use-local-tooling: true
       fail-on-error: true
 
-  codeql:
-    needs: [policy, merge-evidence, preflight-evidence]
-    if: >-
-      always() && needs.policy.result == 'success' &&
-      (needs.policy.outputs.run_post_merge == 'true' ||
-      (needs.policy.outputs.run_full == 'true' && needs.preflight-evidence.outputs.validated != 'true'))
-    permissions:
-      actions: read
-      contents: read
-      packages: read
-      security-events: write
-    uses: ./.github/workflows/codeql.yml
-
   post-merge:
     name: Post-merge smoke
     needs: [policy, merge-evidence]
@@ -146,7 +133,7 @@ jobs:
 
   gate:
     name: CI
-    needs: [policy, merge-evidence, preflight-evidence, full, docs-gov, dependency-inventory, codeql, post-merge]
+    needs: [policy, merge-evidence, preflight-evidence, full, docs-gov, dependency-inventory, post-merge]
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     steps:
@@ -157,7 +144,6 @@ jobs:
           FULL: ${{ needs.full.result }}
           DOCS_GOV: ${{ needs.docs-gov.result }}
           INVENTORY: ${{ needs.dependency-inventory.result }}
-          CODEQL: ${{ needs.codeql.result }}
           PREFLIGHT: ${{ needs.preflight-evidence.result }}
           PREFLIGHT_VALIDATED: ${{ needs.preflight-evidence.outputs.validated }}
           MERGE_VALIDATED: ${{ needs.merge-evidence.outputs.validated }}
@@ -172,17 +158,14 @@ jobs:
                 test "$FULL" = success
                 test "$DOCS_GOV" = success
                 test "$INVENTORY" = success
-                test "$CODEQL" = success
               fi
               ;;
             manual)
               test "$FULL" = success
               test "$DOCS_GOV" = success
               test "$INVENTORY" = success
-              test "$CODEQL" = success
               ;;
             post-merge)
-              test "$CODEQL" = success
               if [ "$MERGE_VALIDATED" = true ]; then
                 test "$POST_MERGE" = success
               else

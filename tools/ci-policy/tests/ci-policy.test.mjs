@@ -111,23 +111,6 @@ test('the reference workflow preserves governed gates and skips draft jobs', () 
   assert.match(workflow, /name: Complete suite/);
   assert.match(workflow, /^  docs-gov:$/m);
   assert.match(workflow, /^  dependency-inventory:$/m);
-  assert.match(workflow, /^  codeql:$/m);
-  assert.match(workflow, /uses: \.\/\.github\/workflows\/codeql\.yml/);
-  assert.match(workflow, /needs\.policy\.outputs\.run_post_merge == 'true'/);
-  assert.match(workflow, /CODEQL: \$\{\{ needs\.codeql\.result \}\}/);
-  assert.match(workflow, /test "\$CODEQL" = success/);
   assert.match(workflow, /name: CI\n/);
   assert.doesNotMatch(workflow, /name: Draft checks/);
-});
-
-test('advanced CodeQL is callable only through governed CI with stable coverage', () => {
-  const workflow = readFileSync(new URL('../../../.github/workflows/codeql.yml', import.meta.url), 'utf8');
-  assert.match(workflow, /^  workflow_call:$/m);
-  assert.doesNotMatch(workflow, /^  (?:pull_request|push|workflow_dispatch|schedule):$/m);
-  assert.match(workflow, /security-events: write/);
-  assert.match(workflow, /language: \[actions, javascript-typescript\]/);
-  assert.match(workflow, /name: Analyze \(\$\{\{ matrix\.language \}\}\)/);
-  assert.match(workflow, /actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\.0\.1/);
-  assert.match(workflow, /github\/codeql-action\/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4\.37\.4/);
-  assert.match(workflow, /github\/codeql-action\/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4\.37\.4/);
 });

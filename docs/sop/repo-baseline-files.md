@@ -39,13 +39,10 @@ secret scanning + push protection and Dependabot security updates **on**
 (the ENG-0005 baseline); CodeQL **on** once the repo has code. Configure the
 repository Actions Policy and CI/branch-protection settings from the shared
 [CI execution policy](../reference/ci-execution-policy.md). Use CodeQL advanced
-setup so the same coverage runs through governed CI; default setup's internal
-actor cannot be selected in the restricted-actor policy.
+setup only when needed to schedule the same coverage at ready-review time.
 
 ## Changelog
 
-- 2026-07-31 — require CodeQL advanced setup with the restricted-actor Actions
-  Policy while preserving the existing security baseline.
 - 2026-07-31 — add the Actions Policy and lifecycle-aware CI settings baseline.
 - 2026-07-22 — initial version, from the basic-docs audit following PR #8.
 - 2026-07-22 — point the feature-template row at the new [feature-lifecycle SOP](feature-lifecycle.md) (playbook#9).

@@ -100,12 +100,6 @@ and security contexts, including docs-gov, CodeQL, Storybook, smoke, E2E, and
 repo-specific compliance checks, remain required and remain part of the ready
 suite unless a separate reviewed change explicitly replaces them.
 
-CodeQL uses advanced setup. Governed CI calls its reusable workflow for ready
-PRs lacking exact-SHA evidence, manual complete-suite dispatches, and every
-`main` push. The `main` scan remains when generic evidence is reused because a
-PR analysis cannot own default-branch alerts. The workflow preserves language
-coverage and immutable pins, with no direct PR trigger for drafts to start.
-
 When a repository requires more than the stable `CI` context, each retained
 context must either report its own evidence-backed ready result or remain
 available from the exact-SHA manual run. A rollout verifies this behavior in
@@ -153,13 +147,11 @@ packaging as a substitute for the merge gate.
 - Do not enable merge queue while GitHub-owned actors are prohibited.
 - Require the exact merge candidate to pass every complete-suite gate.
 - Keep the repository Actions Policy active, not in evaluate mode.
-- Use CodeQL advanced setup. GitHub does not expose default setup's internal
-  `github-advanced-security[bot]` actor in the Actions Policy picker. After the
-  workflow lands, choose **Settings → Advanced Security → CodeQL analysis →
-  Switch to advanced**, disable default setup, dispatch CI, and verify the
-  required `CodeQL` context before merging.
+- If CodeQL default setup cannot follow ready-only timing, migrate to an
+  event-controlled advanced workflow without dropping CodeQL coverage or its
+  required context.
 
 Actions Policy is currently a GitHub public-preview setting. Until GitHub
 provides a stable management API used by the governance reconciler, actor/event
-configuration and the default-to-advanced CodeQL switch are manual settings
+configuration and any default-to-advanced CodeQL migration are manual settings
 with review evidence attached to the rollout PR.
