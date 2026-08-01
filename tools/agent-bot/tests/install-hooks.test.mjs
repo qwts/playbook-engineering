@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -61,5 +61,18 @@ test('installHooks fails closed when the hooks directory is missing', () => {
       run: () => '',
     })),
     /hooks directory missing/,
+  );
+});
+
+test('installHooks fails when hooksPath is a file, not a directory', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'install-hooks-'));
+  const filePath = join(dir, 'not-a-dir');
+  writeFileSync(filePath, 'i am a file\n');
+  assert.throws(
+    () => installHooks(installOpts({
+      hooksPath: filePath,
+      run: () => '',
+    })),
+    /must be a directory, not a file/,
   );
 });

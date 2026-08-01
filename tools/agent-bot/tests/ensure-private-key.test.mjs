@@ -82,6 +82,13 @@ test('selectPrivateKeyAttachment accepts a sole .pem when the exact name is abse
   assert.equal(chosen.id, 'a');
 });
 
+test('selectPrivateKeyAttachment rejects a sole non-.pem attachment', () => {
+  assert.throws(
+    () => selectPrivateKeyAttachment([{ id: 'a', name: 'notes.txt' }]),
+    /no private-key.pem attachment/,
+  );
+});
+
 test('ensurePrivateKey is a no-op when the key already exists', () => {
   const home = mkdtempSync(join(tmpdir(), 'ensure-key-'));
   const path = privateKeyPath('qwts-cursor-agent', home);

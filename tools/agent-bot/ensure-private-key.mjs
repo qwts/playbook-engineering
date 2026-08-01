@@ -137,11 +137,15 @@ export function selectPrivateKeyAttachment(attachments) {
   }
   const byExact = attachments.find((a) => a.name === 'private-key.pem');
   if (byExact) return byExact;
-  const byPem = attachments.filter((a) => a.name.toLowerCase().endsWith('.pem'));
+  const byPem = attachments.filter(
+    (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.pem'),
+  );
   if (byPem.length === 1) return byPem[0];
-  if (attachments.length === 1) return attachments[0];
   const names = attachments.map((a) => a.name || a.id).join(', ');
-  throw new Error(`pass-cli item has multiple attachments; expected private-key.pem (found: ${names})`);
+  throw new Error(
+    `pass-cli item has no private-key.pem attachment (found: ${names}) — ` +
+      'name the attachment private-key.pem or attach a single *.pem file',
+  );
 }
 
 function defaultRun(args) {

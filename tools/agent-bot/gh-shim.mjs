@@ -25,27 +25,27 @@ fi`;
 # gh shim — agent bot identity (ENG-0045). Managed by
 # install-gh-shim.mjs; do not edit in place.
 ${tokenToolSetup}
-SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-SELF_REAL=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)/$(basename -- "$0")
+SELF="$0"
+case "$SELF" in
+  */*) ;;  # already has a directory component
+  *) SELF=$(command -v -- "$SELF" 2>/dev/null) || SELF="$0" ;;
+esac
+# Physical path of this shim, following symlinks, so the PATH loop skips this
+# exact file even when invoked via a ~/.local/bin symlink into agent-bot/bin
+# or as a bare 'gh' resolved through PATH.
+SELF_REAL=$(readlink -f -- "$SELF" 2>/dev/null) || SELF_REAL=$SELF
+SELF_DIR=$(dirname -- "$SELF_REAL")
 REAL=""
 OLDIFS=$IFS; IFS=:
 for d in $PATH; do
   [ "$d" = "$SELF_DIR" ] && continue
-  if [ -x "$d/gh" ]; then
-    CAND="$d/gh"
-    CAND_REAL=$(CDPATH= cd -- "$d" 2>/dev/null && pwd -P)/gh
-    if [ -L "$CAND" ]; then
-      TARGET=$(readlink "$CAND")
-      case "$TARGET" in
-        /*) CAND_REAL="$(CDPATH= cd -- "$(dirname -- "$TARGET")" 2>/dev/null && pwd -P)/$(basename -- "$TARGET")" ;;
-        *) CAND_REAL="$(CDPATH= cd -- "$d" 2>/dev/null && pwd -P)/$(dirname -- "$TARGET")/$(basename -- "$TARGET")" ;;
-      esac
-    fi
-    # Never adopt another copy of this shim (e.g. a ~/.local/bin symlink into
-    # ~/.config/agent-bot/bin) as REAL: that loops until fork exhaustion.
-    [ "$CAND_REAL" = "$SELF_REAL" ] && continue
-    REAL="$CAND"; break
-  fi
+  [ -x "$d/gh" ] || continue
+  CAND="$d/gh"
+  CAND_REAL=$(readlink -f -- "$CAND" 2>/dev/null) || CAND_REAL="$CAND"
+  # Never adopt another copy of this shim (e.g. a ~/.local/bin symlink into
+  # ~/.config/agent-bot/bin) as REAL: that loops until fork exhaustion.
+  [ "$CAND_REAL" = "$SELF_REAL" ] && continue
+  REAL="$CAND"; break
 done
 IFS=$OLDIFS
 [ -z "$REAL" ] && { echo "agent-bot gh shim: real gh not found on PATH" >&2; exit 127; }

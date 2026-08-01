@@ -11,7 +11,7 @@
 
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -28,10 +28,16 @@ export function installHooks({
   playbookRoot = checkoutRootFromAgentBot(),
   run = (args) => execFileSync('git', args, { encoding: 'utf8' }).trim(),
   exists = existsSync,
+  stat = statSync,
   writeHome = writePlaybookHome,
 } = {}) {
   if (!exists(hooksPath)) {
     throw new Error(`hooks directory missing: ${hooksPath}`);
+  }
+  // core.hooksPath must point at a directory; a file would install silently
+  // broken (Git ignores it or behaves unexpectedly).
+  if (!stat(hooksPath).isDirectory()) {
+    throw new Error(`core.hooksPath must be a directory, not a file: ${hooksPath}`);
   }
   const playbook = writeHome(playbookRoot);
   let previous = null;
