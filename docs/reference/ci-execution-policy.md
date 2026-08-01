@@ -1,19 +1,13 @@
 # CI execution policy
 
-Every governed repository keeps its agreed validation suite: agents check
-drafts locally, ready PRs prove their head, the merge queue validates the exact
-candidate with current `main`, and `main` reuses successful queue evidence.
-The immutable CI-policy action admits `qwts`, `chores-dumb[bot]`,
-`dependabot[bot]`, and active registered `qwts-*-agent[bot]` Apps. Its only
-GitHub-owned actor exception is a native merge-queue `push` to `main`, where
-both actor fields are `github-merge-queue[bot]`. Public-fork workflows are
-never approved or run.
+Every governed repository keeps its agreed validations: agents check drafts
+locally, ready PRs prove their head, the queue validates the exact candidate,
+and `main` reuses queue evidence. Public-fork workflows never run.
 
-This is the CI/CD execution baseline established by
+This baseline comes from
 [ENG-0004](../decisions/ENG-0004-centralize-shared-cicd.md) and inherited under
 [ENG-0008](../decisions/ENG-0008-shared-sop-inheritance.md). Repositories map
-their existing commands and extra gates onto these lanes. The policy changes
-timing and deduplication, not the set of agreed validations.
+existing gates onto its lanes; only timing and deduplication change.
 
 ## Runtime actor boundary
 
@@ -26,20 +20,20 @@ Allowed runtime actors are:
 - every active App in [`governance/agents.json`](../../governance/agents.json),
   each of which runs as `<slug>[bot]`.
 
-Do not allow `github-actions[bot]`, Copilot, an external contributor, or
-another third party to pass the immutable policy action.
-Automation that must initiate a later workflow authenticates as an allowed App.
-The namespace pattern describes the allowed class but is not itself the allow
-list: retired or unregistered matching Apps remain unauthorized. An immutable
-trusted revision of the CI-policy action performs a fail-closed check of both
-`github.actor` and `github.triggering_actor`. GitHub documents its separate
-preview control in
+The immutable action checks both actor fields and rejects `github-actions[bot]`,
+Copilot, external contributors, third parties, and retired or unregistered
+Apps. Later automation authenticates as an allowed App. GitHub documents its
+separate preview control in
 [workflow execution protections](https://docs.github.com/en/organizations/managing-organization-settings/actions-policies/workflow-execution-protections).
 
 Keep **Settings → Actions → Policies → Workflow execution protections**
 disabled while its actor picker cannot represent the native merge-queue bot
 or an event-scoped exception. Do not substitute a repository role: that
 authorizes unrelated writers.
+
+Every direct non-CI entrypoint invokes the action in authorization-only mode
+before checkout or credentials. Reusable workflows inherit the gated caller
+event and token. New direct triggers require this gate and dependency edge.
 
 The merge-queue bot remains unauthorized for `merge_group`, manual dispatch,
 PR, and non-`main` push events. Only the resulting native queue push may reach

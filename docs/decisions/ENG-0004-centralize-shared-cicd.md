@@ -166,11 +166,9 @@ same settings are applied to the rest of the governed fleet.
 This amendment resolves
 [#120](https://github.com/qwts/playbook-engineering/issues/120).
 
-The native merge queue attributes its resulting default-branch push to
-`github-merge-queue[bot]`. The immutable CI-policy action therefore authorizes
-that GitHub-owned actor only when both actor fields match, the event is `push`,
-and the ref is `refs/heads/main`. The bot remains unauthorized for queue
-candidate, PR, manual, non-default-branch, and every other workflow event.
+The native queue attributes its default-branch push to
+`github-merge-queue[bot]`. The action authorizes it only when both actor fields
+match on a `push` to `refs/heads/main`; every other event remains unauthorized.
 
 GitHub's workflow-execution-protections preview cannot select the merge-queue
 bot or express this event-scoped exception. Its actor restriction is disabled;
@@ -178,6 +176,7 @@ a repository role would authorize unrelated writers. Governed repositories
 retain the immutable actor check, external-contributor approval with a
 never-approve fork policy, read-only default token, action-source restrictions
 and SHA pinning, required checks, and protected-branch review and queue rules.
+Direct non-CI entrypoints run the action in authorization-only mode first.
 
 Advanced CodeQL remains the lifecycle implementation rather than an actor-policy
 workaround: its callable workflow follows draft, ready, queue, and post-merge

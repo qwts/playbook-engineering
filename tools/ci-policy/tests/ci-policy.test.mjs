@@ -213,6 +213,16 @@ test('the reference workflow preserves governed gates and skips draft jobs', () 
   assert.doesNotMatch(workflow, /name: Draft checks/);
 });
 
+test('every direct non-CI workflow entrypoint enforces authorization first', () => {
+  for (const path of ['codex-sync.yml', 'inventory-catalog.yml']) {
+    const workflow = readFileSync(new URL(`../../../.github/workflows/${path}`, import.meta.url), 'utf8');
+    assert.match(workflow, /^  policy:$/m);
+    assert.match(workflow, /authorization-only: 'true'/);
+    assert.match(workflow, /uses: qwts\/playbook-engineering\/\.github\/actions\/ci-policy@[0-9a-f]{40}/);
+    assert.match(workflow, /needs: policy/);
+  }
+});
+
 test('advanced CodeQL is callable only through governed CI with stable coverage', () => {
   const workflow = readFileSync(new URL('../../../.github/workflows/codeql.yml', import.meta.url), 'utf8');
   assert.match(workflow, /^  workflow_call:$/m);
