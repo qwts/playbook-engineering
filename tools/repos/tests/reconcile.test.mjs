@@ -164,9 +164,26 @@ test('the protected Git wrapper keeps destructive pushes behind normal approval'
   assert.doesNotMatch(directRule, /^\s*"push",$/mu);
 });
 
-test('the governed Codex configuration explicitly enables project hooks', () => {
+test('the governed Codex configuration enables hooks and protects GitHub identity', () => {
   const config = readFileSync(join(ROOT, '.codex/config.toml'), 'utf8');
   assert.match(config, /\[features\][\s\S]*\bhooks = true\b/);
+  assert.match(
+    config,
+    /\[apps\.connector_76869538009648d5b282a4bb21c3d157\]\nenabled = true\ndestructive_enabled = false/,
+  );
+
+  for (const skill of [
+    'github:yeet',
+    'github:github',
+    'github:gh-fix-ci',
+    'github:gh-address-comments',
+  ]) {
+    assert.match(
+      config,
+      new RegExp(`\\[\\[skills\\.config\\]\\]\\nname = "${skill}"\\nenabled = true`),
+      `${skill} must remain enabled`,
+    );
+  }
 });
 
 test('the protected GitHub wrapper preserves the installed agent-bot identity shim', {
