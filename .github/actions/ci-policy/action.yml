@@ -1,0 +1,27 @@
+name: CI policy
+description: Classify governed CI runs and fail closed for unauthorized initiators or fork PRs.
+
+outputs:
+  mode:
+    description: full, post-merge, or manual
+    value: ${{ steps.classify.outputs.mode }}
+  run_full:
+    description: Whether the complete validation lane must run
+    value: ${{ steps.classify.outputs.run_full }}
+  run_post_merge:
+    description: Whether the short post-merge lane must run
+    value: ${{ steps.classify.outputs.run_post_merge }}
+
+runs:
+  using: composite
+  steps:
+    - id: classify
+      name: Enforce actor and classify lifecycle event
+      shell: bash
+      env:
+        CI_POLICY_ACTOR: ${{ github.actor }}
+        CI_POLICY_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        CI_POLICY_EVENT_NAME: ${{ github.event_name }}
+        CI_POLICY_EVENT_PATH: ${{ github.event_path }}
+        CI_POLICY_REF: ${{ github.ref }}
+      run: node "${{ github.action_path }}/classify.mjs"

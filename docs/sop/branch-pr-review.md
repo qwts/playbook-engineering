@@ -29,11 +29,19 @@ where each repo differs.
   comment alone, so the graph is machine-readable.
 - "Ready for review" is the definition of done. Do not end a unit of work as a
   lingering draft PR.
+- After pushing the final draft SHA, an agent may explicitly dispatch the
+  complete suite and wait for success before opening or promoting the PR. The
+  ready event reuses that exact-SHA evidence instead of repeating the suite.
 - Ship the docs that a change requires in the same PR as the change; they do not
   trail behind in a follow-up.
 
 ## The merge bar (mandatory — extend, don't drop)
 
+- CI follows the shared [execution policy](../reference/ci-execution-policy.md):
+  agents run fast checks locally before leaving draft, every agreed gate passes
+  on the exact ready merge candidate either through manual preflight or the
+  ready event, and a short post-merge check runs only when that exact commit was
+  already validated.
 - All required status checks are green before merge. A red gate sends the PR back
   without review — fix the gate first.
 - At least one approving human review is required. Agent-authored changes are
@@ -64,6 +72,8 @@ where each repo differs.
 
 ## Changelog
 
+- 2026-07-31 — add lifecycle-aware CI scheduling and exact-SHA preflight reuse
+  to the mandatory merge bar.
 - 2026-07-23 — agent-authored PRs are opened under the dedicated bot identity
   (ENG-0016), keeping the one-approving-human-review requirement satisfiable.
 - 2026-07-22 — initial version; extracted the common branch/PR/review workflow

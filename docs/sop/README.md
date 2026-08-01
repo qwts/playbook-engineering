@@ -54,6 +54,7 @@ classification, and the deltas each repo carries forward lives in
 
 ## Changelog
 
+- 2026-07-31 — make lifecycle-aware CI scheduling part of the shared branch/PR baseline.
 - 2026-07-22 — initial index; seeded the branch/PR/review, issue-lifecycle,
   release-and-versioning, and security-response baselines alongside the existing
   repository-baseline-files SOP (ENG-0008 Phase 2).
