@@ -2,6 +2,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const ROSTER_URL = new URL('../../../governance/agents.json', import.meta.url);
+const MERGE_QUEUE_ACTOR = 'github-merge-queue[bot]';
 
 export function allowedActorsFromRoster(roster) {
   if (!Array.isArray(roster?.agents)) throw new Error('agent roster is malformed');
@@ -15,16 +16,41 @@ export function isAllowedActor(actor, allowedActors) {
   return allowedActors.has(actor);
 }
 
-export function classifyRun({ actor, triggeringActor = actor, allowedActors, eventName, event, ref }) {
-  if (!isAllowedActor(actor, allowedActors)) {
-    throw new Error(`actor ${actor || '<empty>'} is not authorized by CI policy`);
-  }
-  if (!isAllowedActor(triggeringActor, allowedActors)) {
-    throw new Error(`triggering actor ${triggeringActor || '<empty>'} is not authorized by CI policy`);
+export function isNativeMergeQueueMainPush({ actor, triggeringActor, eventName, ref }) {
+  return (
+    actor === MERGE_QUEUE_ACTOR &&
+    triggeringActor === MERGE_QUEUE_ACTOR &&
+    eventName === 'push' &&
+    ref === 'refs/heads/main'
+  );
+}
+
+export function authorizeRun({ actor, triggeringActor = actor, allowedActors, eventName, event, ref }) {
+  const nativeMergeQueueMainPush = isNativeMergeQueueMainPush({
+    actor,
+    triggeringActor,
+    eventName,
+    ref,
+  });
+  if (!nativeMergeQueueMainPush) {
+    if (!isAllowedActor(actor, allowedActors)) {
+      throw new Error(`actor ${actor || '<empty>'} is not authorized by CI policy`);
+    }
+    if (!isAllowedActor(triggeringActor, allowedActors)) {
+      throw new Error(`triggering actor ${triggeringActor || '<empty>'} is not authorized by CI policy`);
+    }
   }
   if (eventName === 'pull_request' && event.pull_request?.head?.repo?.fork) {
     throw new Error('public fork pull requests are not permitted to run workflows');
   }
+  if (eventName === 'pull_request_target' && event.pull_request?.head?.repo?.fork) {
+    throw new Error('public fork pull requests are not permitted to run workflows');
+  }
+}
+
+export function classifyRun(options) {
+  authorizeRun(options);
+  const { eventName, event, ref } = options;
   if (eventName === 'pull_request' && event.pull_request?.draft) {
     throw new Error('draft pull requests are validated locally and do not run CI');
   }
@@ -56,14 +82,17 @@ export function outputsFor(mode) {
 function main() {
   const event = JSON.parse(readFileSync(process.env.CI_POLICY_EVENT_PATH, 'utf8'));
   const roster = JSON.parse(readFileSync(ROSTER_URL, 'utf8'));
-  const mode = classifyRun({
+  const options = {
     actor: process.env.CI_POLICY_ACTOR,
     triggeringActor: process.env.CI_POLICY_TRIGGERING_ACTOR,
     allowedActors: allowedActorsFromRoster(roster),
     eventName: process.env.CI_POLICY_EVENT_NAME,
     event,
     ref: process.env.CI_POLICY_REF,
-  });
+  };
+  const authorizationOnly = process.env.CI_POLICY_AUTHORIZATION_ONLY === 'true';
+  const mode = authorizationOnly ? 'authorized' : classifyRun(options);
+  if (authorizationOnly) authorizeRun(options);
   const output = Object.entries(outputsFor(mode)).map(([key, value]) => `${key}=${value}`).join('\n');
   appendFileSync(process.env.GITHUB_OUTPUT, `${output}\n`);
 }

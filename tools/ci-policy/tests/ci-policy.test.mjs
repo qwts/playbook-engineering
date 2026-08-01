@@ -4,8 +4,10 @@ import { readFileSync } from 'node:fs';
 
 import {
   allowedActorsFromRoster,
+  authorizeRun,
   classifyRun,
   isAllowedActor,
+  isNativeMergeQueueMainPush,
   outputsFor,
 } from '../../../.github/actions/ci-policy/classify.mjs';
 
@@ -65,6 +67,67 @@ test('main pushes and manual reruns select their dedicated modes', () => {
   );
   assert.equal(classify({ actor: 'qwts', eventName: 'workflow_dispatch', event: {} }), 'manual');
   assert.equal(outputsFor('manual').run_full, 'true');
+});
+
+test('only the native merge-queue bot pair may initiate a main push', () => {
+  const nativePush = {
+    actor: 'github-merge-queue[bot]',
+    triggeringActor: 'github-merge-queue[bot]',
+    eventName: 'push',
+    event: {},
+    ref: 'refs/heads/main',
+  };
+  assert.equal(isNativeMergeQueueMainPush(nativePush), true);
+  assert.equal(classify(nativePush), 'post-merge');
+
+  for (const override of [
+    { triggeringActor: 'qwts' },
+    { eventName: 'merge_group' },
+    { ref: 'refs/heads/release' },
+  ]) {
+    const attempt = { ...nativePush, ...override };
+    assert.equal(isNativeMergeQueueMainPush(attempt), false);
+    assert.throws(() => classify(attempt), /not authorized/);
+  }
+});
+
+test('authorization-only enforcement protects non-CI entrypoints', () => {
+  for (const eventName of ['workflow_dispatch', 'schedule']) {
+    assert.doesNotThrow(() =>
+      authorizeRun({
+        actor: 'qwts',
+        triggeringActor: 'qwts',
+        allowedActors,
+        eventName,
+        event: {},
+        ref: 'refs/heads/main',
+      }),
+    );
+  }
+  assert.throws(
+    () =>
+      authorizeRun({
+        actor: 'octocat',
+        triggeringActor: 'octocat',
+        allowedActors,
+        eventName: 'workflow_dispatch',
+        event: {},
+        ref: 'refs/heads/main',
+      }),
+    /actor octocat is not authorized/,
+  );
+  assert.throws(
+    () =>
+      authorizeRun({
+        actor: 'qwts',
+        triggeringActor: 'qwts',
+        allowedActors,
+        eventName: 'pull_request_target',
+        event: pullRequest(false, true),
+        ref: 'refs/heads/main',
+      }),
+    /fork/,
+  );
 });
 
 test('merge queue candidates for main select a fresh complete-suite run', () => {
@@ -148,6 +211,16 @@ test('the reference workflow preserves governed gates and skips draft jobs', () 
   assert.match(workflow, /queue\|manual\)/);
   assert.match(workflow, /name: CI\n/);
   assert.doesNotMatch(workflow, /name: Draft checks/);
+});
+
+test('every direct non-CI workflow entrypoint enforces authorization first', () => {
+  for (const path of ['codex-sync.yml', 'inventory-catalog.yml']) {
+    const workflow = readFileSync(new URL(`../../../.github/workflows/${path}`, import.meta.url), 'utf8');
+    assert.match(workflow, /^  policy:$/m);
+    assert.match(workflow, /authorization-only: 'true'/);
+    assert.match(workflow, /uses: qwts\/playbook-engineering\/\.github\/actions\/ci-policy@[0-9a-f]{40}/);
+    assert.match(workflow, /needs: policy/);
+  }
 });
 
 test('advanced CodeQL is callable only through governed CI with stable coverage', () => {
