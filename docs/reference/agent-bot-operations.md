@@ -28,10 +28,15 @@ split rather than another raise.
      use installation tokens.
    - **Where can this GitHub App be installed?** Only on this account.
 2. Note the **App ID** at the top of the App's page and **generate a private
-   key** there. Store both under the App's slug, outside every repository:
+   key** there. Store the App ID under the App's slug; put the PEM on the
+   Proton Pass item titled like the slug in vault **Agent Identities**
+   (attachment `private-key.pem`):
 
    ```bash
-   mkdir -p ~/.config/qwts-claude-agent && echo '<app id>' > ~/.config/qwts-claude-agent/app-id && mv ~/Downloads/qwts-claude-agent.*.pem ~/.config/qwts-claude-agent/private-key.pem && chmod 600 ~/.config/qwts-claude-agent/private-key.pem
+   mkdir -p ~/.config/qwts-claude-agent && echo '<app id>' > ~/.config/qwts-claude-agent/app-id
+   # fetch/refresh PEM (also done by setup-worktree when missing):
+   node tools/agent-bot/ensure-private-key.mjs qwts-claude-agent
+   node tools/agent-bot/ensure-private-key.mjs qwts-claude-agent --force
    ```
 
 3. **Install App** (left sidebar) → install on `qwts` → *Only select
@@ -42,7 +47,10 @@ split rather than another raise.
    (slug, harness, `status: active`). Until that lands, drift does not verify
    the App is installed anywhere, and the first symptom of a missed install is
    a push failing mid-task on a repo nobody added.
-5. Nothing else. Identity is auto-detected per IDE (see
+5. From this checkout:
+   `node tools/agent-bot/install-hooks.mjs` (records **this** absolute path)
+   and `node tools/agent-bot/install-gh-shim.mjs`. Identity is then
+   auto-detected per IDE (see
    [Automating worktrees](agent-bot-identity.md#automating-worktrees-tool-agnostic));
    `GH_AGENT_APP` is only an override. No `gh auth setup-git` — bot pushes
    go through the per-worktree credential helper, and the human's own push
@@ -65,9 +73,8 @@ export GH_TOKEN
 ```
 
 The `tools/agent-bot/` paths here are relative to this repository; from any
-*other* repo, run them from `~/Code/playbook-engineering/tools/agent-bot/` —
-centralized per [ENG-0004](../decisions/ENG-0004-centralize-shared-cicd.md),
-no per-repo copies.
+*other* repo, use the checkout `playbook-home` / `$PLAYBOOK_HOME` points at
+([ENG-0004](../decisions/ENG-0004-centralize-shared-cicd.md)).
 
 The tool reads `GH_AGENT_APP` (or `--app <slug>`, or `GH_APP_ID` with either
 `GH_APP_PRIVATE_KEY` or `GH_APP_PRIVATE_KEY_PATH` for CI) and finds local
@@ -107,16 +114,15 @@ so without help, a perfectly configured bot worktree still opens PRs as
 node tools/agent-bot/install-gh-shim.mjs
 ```
 
-It writes `~/.config/agent-bot/bin/gh` and prepends its directory from
-`~/.zshenv`. Outside bot territory, human shells pass through; agent processes
+It writes `~/.config/agent-bot/bin/gh`, records this checkout in
+`playbook-home` (no baked `~/Code/...` path), symlinks to `~/.local/bin/gh`,
+and prepends the config bin from `~/.zshenv`. Re-run after moving the
+checkout. Outside bot territory, human shells pass through; agent processes
 abort before stock `gh` can use the human credential. Territory: any
-`.<tool>/worktrees/**` path, else a configured relocation root
-(`AGENT_WORKTREE_ROOT`, desktop preference), else the credential helper. Inside, the shim mints and
-exports the worktree's bot token. A supplied `GH_TOKEN` must resolve to that bot, and a failed mint
-aborts. Processes that never read `~/.zshenv` keep stock `gh`; the
-[ENG-0045](../decisions/ENG-0045-agent-environments-are-bot-territory.md)
-review requirement remains the backstop. `gh whoami` reports the supplied
-token's viewer, the territory bot, or the human login.
+`.<tool>/worktrees/**` path, else a relocation root, else the credential
+helper. Inside, the shim mints the worktree's bot token; a failed mint or
+wrong explicit `GH_TOKEN` aborts. `gh whoami` reports token, territory bot,
+or human login.
 
 ## Verifying it works
 
@@ -147,8 +153,10 @@ after the configuration lands so the updated project layer is loaded.
 
 ## Failure modes
 
-- `no app config for "<slug>"`: setup step 2 was not done for that App —
-  create `~/.config/<slug>/app-id` and `private-key.pem`.
+- `no app config for "<slug>"`: create `~/.config/<slug>/app-id`; fetch the
+  PEM with `ensure-private-key.mjs` (Pass vault **Agent Identities**).
+- `pass-cli … failed`: `pass-cli login`, confirm the slug item has
+  `private-key.pem`, then `ensure-private-key.mjs <slug> [--force]`.
 - Mint fails with a JWT `401`: the `app-id` and key belong to different
   Apps, or the key was revoked — regenerate it.
 - `expected exactly one installation`: the App is installed on more than one
@@ -157,6 +165,8 @@ after the configuration lands so the updated project layer is loaded.
   `GH_TOKEN` unexported or expired — re-mint.
 - `agent is outside bot territory`: enter a linked bot worktree; the shim
   refuses stock human `gh` from a primary checkout or non-repo path.
+- Stale token helper / `which gh` is Homebrew: re-run `install-gh-shim.mjs`
+  from this checkout; expect `~/.local/bin/gh` or `~/.config/agent-bot/bin/gh`.
 - `git push` rejected while the token is set: the target repo is not in that
   App's installation list — add it (setup step 3).
 - The wrong `[bot]` authored a PR: the launcher exported another harness's
