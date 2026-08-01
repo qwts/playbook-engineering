@@ -97,9 +97,12 @@ export function mergeQueueRule() {
 
 // The standard default-branch ruleset for a repo that has none: the shape the
 // governed repos share, minus required status checks (those are per-repo).
+// Native merge queue is organization-only; user-owned repos receive the strict
+// updater fallback documented in the CI execution policy. Enabled repository
+// merge methods pass through unchanged.
 // Repository-admin bypass matches the existing rulesets — the solo human must
 // stay able to merge their own PRs.
-export function defaultRuleset() {
+export function defaultRuleset({ mergeQueueAvailable = false, allowedMergeMethods = ['merge'] } = {}) {
   return {
     name: 'Default',
     target: 'branch',
@@ -118,10 +121,10 @@ export function defaultRuleset() {
           require_code_owner_review: false,
           require_last_push_approval: false,
           required_review_thread_resolution: true,
-          allowed_merge_methods: ['merge'],
+          allowed_merge_methods: allowedMergeMethods,
         },
       },
-      mergeQueueRule(),
+      ...(mergeQueueAvailable ? [mergeQueueRule()] : []),
     ],
   };
 }

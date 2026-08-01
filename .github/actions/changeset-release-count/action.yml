@@ -1,0 +1,35 @@
+name: Changesets semantic release count
+description: Report semantic pending releases without treating governance-only changeset files as releases.
+
+inputs:
+  base-branch:
+    description: Local base branch Changesets resolves while planning releases
+    required: false
+    default: main
+
+outputs:
+  count:
+    description: Number of semantic pending releases from Changesets status
+    value: ${{ steps.status.outputs.count }}
+
+runs:
+  using: composite
+  steps:
+    - id: status
+      name: Read Changesets semantic release count
+      shell: bash
+      env:
+        BASE_BRANCH: ${{ inputs.base-branch }}
+      run: |
+        set -euo pipefail
+        git show-ref --verify --quiet "refs/heads/$BASE_BRANCH" || \
+          git branch -- "$BASE_BRANCH" "origin/$BASE_BRANCH"
+        status_file="$RUNNER_TEMP/changeset-status.json"
+        npx changeset status --output "$status_file"
+        count=$(node -p \
+          'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).releases.length' \
+          "$status_file")
+        case "$count" in
+          ''|*[!0-9]*) echo "::error::Changesets returned an invalid release count: $count"; exit 1 ;;
+        esac
+        echo "count=$count" >> "$GITHUB_OUTPUT"

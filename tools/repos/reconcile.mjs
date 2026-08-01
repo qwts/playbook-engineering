@@ -10,7 +10,8 @@
 //
 //   settings — via the human's ambient token (rulesets and repo settings need
 //              admin, which no App on a user account has): bump the ruleset's
-//              review count to 1 (creating the standard ruleset if none), and
+//              review count to 1 (creating the owner-aware standard ruleset if
+//              none while preserving enabled merge methods), and
 //              enable private vulnerability reporting.
 //   seeds    — missing baseline files, proposed as a bot-authored PR to the
 //              target repo (never a direct push): AGENTS.md, CONTRIBUTING.md,
@@ -73,7 +74,19 @@ async function applySettings(owner, name, actions, token) {
         }
       }
       if (!updated) {
-        await call('POST', `/repos/${owner}/${name}/rulesets`, token, defaultRuleset());
+        const meta = await call('GET', `/repos/${owner}/${name}`, token);
+        const allowedMergeMethods = [
+          ...(meta.allow_merge_commit ? ['merge'] : []),
+          ...(meta.allow_squash_merge ? ['squash'] : []),
+          ...(meta.allow_rebase_merge ? ['rebase'] : []),
+        ];
+        if (allowedMergeMethods.length === 0) {
+          throw new Error(`${owner}/${name}: repository has no enabled pull-request merge method`);
+        }
+        await call('POST', `/repos/${owner}/${name}/rulesets`, token, defaultRuleset({
+          mergeQueueAvailable: meta.owner?.type === 'Organization',
+          allowedMergeMethods,
+        }));
         done.push('ruleset "Default" created (review count 1)');
       }
     }

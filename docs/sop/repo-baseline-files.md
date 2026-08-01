@@ -40,10 +40,17 @@ secret scanning + push protection and Dependabot security updates **on**
 repository Actions Policy and CI/branch-protection settings from the shared
 [CI execution policy](../reference/ci-execution-policy.md). Use CodeQL advanced
 setup so the same coverage runs through governed CI; default setup's internal
-actor cannot be selected in the restricted-actor policy.
+actor cannot be selected in the restricted-actor policy. Keep the default
+workflow token read-only and disable GitHub Actions PR creation/approval unless
+the repository records a reviewed exception; privileged PR writes use an
+authorized App identity. Select the native queue for organization-owned repos
+or the strict governed-updater fallback for user-owned repos without changing
+the repository's enabled merge methods.
 
 ## Changelog
 
+- 2026-08-01 — record the user-owned updater fallback, App-authored PR writes,
+  read-only token default, and merge-method preservation.
 - 2026-07-31 — require CodeQL advanced setup with the restricted-actor Actions
   Policy while preserving the existing security baseline.
 - 2026-07-31 — add the Actions Policy and lifecycle-aware CI settings baseline.

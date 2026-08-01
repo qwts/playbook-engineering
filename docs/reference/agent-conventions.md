@@ -20,6 +20,17 @@ Run the repo's own gates locally before opening or updating a PR: lint, tests, a
 - A PR touching an agent primitive (`AGENTS.md`, a skill, a prompt, an MCP config entry) states what agent behavior changes and, where an eval exists, cites the before/after score — "it reads better" is not evidence (ENG-0006, decision item 4).
 - Feature work follows [ENG-0007](../decisions/ENG-0007-feature-lifecycle-convention.md)'s lifecycle where the repo has adopted it.
 
+## Dependency-update remediation
+
+Treat analyzer, linter, packager, and build-tool configuration as behavior, not
+generated cleanup. When a dependency update makes a gate fail, trace every
+configuration exception before removing it and run the repository's complete
+contract suite after the fix. A tool's new autofix or "unused" result is not
+evidence that an ignored binary, dependency, export, platform command, or
+packaging input is obsolete. Preserve the exception when another workflow,
+platform, release path, or contract test still consumes it; otherwise remove it
+only as an explicit, reviewed behavior change with focused regression evidence.
+
 ## Review-thread conduct
 
 An agent that addresses a review comment — a reply plus a change — resolves
