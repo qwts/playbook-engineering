@@ -18,7 +18,8 @@ test('all Changesets lanes share one semantic release-count contract', () => {
   assert.match(contract, /Empty or frontmatter-only\s+governance changesets/u);
   assert.match(contract, /a positive count fails\s+closed/u);
   assert.match(release, /may substitute `find \.changeset`, a file count/u);
-  assert.match(action, /npx changeset status --output/u);
+  assert.match(action, /git fetch --no-tags --depth=1 origin/u);
+  assert.match(action, /npx --no-install changeset status --output/u);
   assert.match(action, /\.releases\.length/u);
   assert.doesNotMatch(action, /find \.changeset|\.changeset\/\*\.md/u);
 });

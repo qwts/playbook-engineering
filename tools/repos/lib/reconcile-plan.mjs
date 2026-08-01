@@ -80,7 +80,7 @@ export function bumpReviewCount(ruleset) {
   };
 }
 
-export function mergeQueueRule() {
+export function mergeQueueRule(mergeMethod = 'MERGE') {
   return {
     type: 'merge_queue',
     parameters: {
@@ -88,7 +88,7 @@ export function mergeQueueRule() {
       grouping_strategy: 'ALLGREEN',
       max_entries_to_build: 1,
       max_entries_to_merge: 1,
-      merge_method: 'MERGE',
+      merge_method: mergeMethod,
       min_entries_to_merge: 1,
       min_entries_to_merge_wait_minutes: 0,
     },
@@ -103,6 +103,7 @@ export function mergeQueueRule() {
 // Repository-admin bypass matches the existing rulesets — the solo human must
 // stay able to merge their own PRs.
 export function defaultRuleset({ mergeQueueAvailable = false, allowedMergeMethods = ['merge'] } = {}) {
+  const queueMergeMethod = allowedMergeMethods[0]?.toUpperCase();
   return {
     name: 'Default',
     target: 'branch',
@@ -124,7 +125,7 @@ export function defaultRuleset({ mergeQueueAvailable = false, allowedMergeMethod
           allowed_merge_methods: allowedMergeMethods,
         },
       },
-      ...(mergeQueueAvailable ? [mergeQueueRule()] : []),
+      ...(mergeQueueAvailable ? [mergeQueueRule(queueMergeMethod)] : []),
     ],
   };
 }

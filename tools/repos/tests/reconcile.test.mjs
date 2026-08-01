@@ -111,6 +111,13 @@ test('the organization default ruleset adds the cost-bounded MERGE queue', () =>
   assert.equal(queue.parameters.max_entries_to_merge, 1);
 });
 
+test('the organization queue uses an enabled method when merge commits are disabled', () => {
+  const rs = defaultRuleset({ mergeQueueAvailable: true, allowedMergeMethods: ['squash', 'rebase'] });
+  const queue = rs.rules.find((r) => r.type === 'merge_queue');
+  assert.equal(queue.parameters.merge_method, 'SQUASH');
+  assert.notEqual(queue.parameters.merge_method, 'MERGE');
+});
+
 test('every seed source exists in this checkout', () => {
   for (const seed of Object.values(SEEDS)) {
     assert.ok(existsSync(join(ROOT, seed.source)), `${seed.source} missing`);
