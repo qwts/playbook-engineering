@@ -7,12 +7,18 @@
 export function buildGhShim(tokenTool = null) {
   const tokenToolSetup = tokenTool
     ? `TOKEN_TOOL="${tokenTool}"`
-    : `AGENT_BOT_CONFIG="\${XDG_CONFIG_HOME:-\$HOME/.config}/agent-bot"
+    : `# Resolve the token helper from PLAYBOOK_HOME or the recorded playbook-home.
+# The installer writes ~/.config/agent-bot/playbook-home (homeDir(), not XDG),
+# so fall back there even when XDG_CONFIG_HOME redirects config elsewhere.
 TOKEN_TOOL=""
 if [ -n "\$PLAYBOOK_HOME" ]; then
   TOKEN_TOOL="\$PLAYBOOK_HOME/tools/agent-bot/worktree-token.mjs"
-elif [ -f "\$AGENT_BOT_CONFIG/playbook-home" ]; then
-  TOKEN_TOOL="\$(tr -d '\\n' < "\$AGENT_BOT_CONFIG/playbook-home")/tools/agent-bot/worktree-token.mjs"
+else
+  POINTER="\${XDG_CONFIG_HOME:-\$HOME/.config}/agent-bot/playbook-home"
+  [ -f "\$POINTER" ] || POINTER="\$HOME/.config/agent-bot/playbook-home"
+  if [ -f "\$POINTER" ]; then
+    TOKEN_TOOL="\$(tr -d '\\n' < "\$POINTER")/tools/agent-bot/worktree-token.mjs"
+  fi
 fi`;
 
   return `#!/bin/sh
@@ -20,11 +26,26 @@ fi`;
 # install-gh-shim.mjs; do not edit in place.
 ${tokenToolSetup}
 SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SELF_REAL=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)/$(basename -- "$0")
 REAL=""
 OLDIFS=$IFS; IFS=:
 for d in $PATH; do
   [ "$d" = "$SELF_DIR" ] && continue
-  if [ -x "$d/gh" ]; then REAL="$d/gh"; break; fi
+  if [ -x "$d/gh" ]; then
+    CAND="$d/gh"
+    CAND_REAL=$(CDPATH= cd -- "$d" 2>/dev/null && pwd -P)/gh
+    if [ -L "$CAND" ]; then
+      TARGET=$(readlink "$CAND")
+      case "$TARGET" in
+        /*) CAND_REAL="$(CDPATH= cd -- "$(dirname -- "$TARGET")" 2>/dev/null && pwd -P)/$(basename -- "$TARGET")" ;;
+        *) CAND_REAL="$(CDPATH= cd -- "$d" 2>/dev/null && pwd -P)/$(dirname -- "$TARGET")/$(basename -- "$TARGET")" ;;
+      esac
+    fi
+    # Never adopt another copy of this shim (e.g. a ~/.local/bin symlink into
+    # ~/.config/agent-bot/bin) as REAL: that loops until fork exhaustion.
+    [ "$CAND_REAL" = "$SELF_REAL" ] && continue
+    REAL="$CAND"; break
+  fi
 done
 IFS=$OLDIFS
 [ -z "$REAL" ] && { echo "agent-bot gh shim: real gh not found on PATH" >&2; exit 127; }
