@@ -1,7 +1,6 @@
-# Synchronize the centrally managed agent-harness environment (.codex/ and
-# .claude/settings.json) to every active governed repository through
-# qwts-codex-agent-authored pull requests.
-name: Governed Codex sync
+# Synchronize the centrally managed agent-harness environment to every active
+# governed repository through chores-dumb-authored pull requests.
+name: Governed harness sync
 
 on:
   push:
@@ -37,6 +36,15 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
+      - name: Mint the chores-dumb token
+        id: chores
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.CHORES_DUMB_CLIENT_ID }}
+          private-key: ${{ secrets.CHORES_DUMB_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: write
+          permission-pull-requests: write
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -46,6 +54,5 @@ jobs:
       - name: Synchronize managed harness files
         env:
           CODEX_SYNC_REPO: ${{ inputs.repo }}
-          GH_APP_ID: ${{ secrets.CODEX_AGENT_APP_ID }}
-          GH_APP_PRIVATE_KEY: ${{ secrets.CODEX_AGENT_PRIVATE_KEY }}
+          GH_TOKEN: ${{ steps.chores.outputs.token }}
         run: node tools/repos/sync-codex.mjs --apply --json

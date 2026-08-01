@@ -121,28 +121,33 @@ Run it from this checkout; onboard a repo by adding its manifest row, running
 
 ## Continuous harness synchronization
 
-The [Governed Codex sync workflow](../../.github/workflows/codex-sync.yml)
+The [Governed harness sync workflow](../../.github/workflows/codex-sync.yml)
 keeps the shared agent-harness environment — [`.codex/`](../../.codex/) and
 [`.claude/settings.json`](../../.claude/settings.json) — current after
 onboarding. Seeding only fixes a *missing* file; this lane carries a change to
 either layer into repos that already have it. It runs when a managed source
 changes on `main`, on dispatch, and weekly as a repair loop. Also available
-locally:
+locally as a read-only comparison:
 
 ```bash
 node tools/repos/sync-codex.mjs             # dry-run content comparison
-node tools/repos/sync-codex.mjs --apply     # open or update downstream PRs
-node tools/repos/sync-codex.mjs --repo NAME # scope either mode
+node tools/repos/sync-codex.mjs --repo NAME # scope the comparison
 ```
+
+Use the workflow dispatch to open or update downstream PRs; its repository
+secrets keep the shared automation credential out of developer machines. The
+`--apply` CLI remains available for recovery but requires an explicit
+`chores-dumb[bot]` `GH_TOKEN` and never falls back to a local agent identity.
 
 Synchronization compares blobs and modes; most files are exact replacements.
 `.claude/settings.json` applies declared central paths only: values and
 deletions propagate while other target settings survive. Invalid JSON or
 undeclared source keys fail closed. Drift uses the stable
-`governance/codex-sync` branch and a `qwts-codex-agent` pull request; default
+`governance/harness-sync` branch and a `chores-dumb` pull request; default
 branches stay protected. Existing PRs are reconciled even when the base is
 current. The source sets `codexSync.enabled: false` because its root layer is
-canonical.
+canonical; that manifest field and the local `sync-codex.mjs` command retain
+their original names as compatibility interfaces, not identity boundaries.
 
 After the source change is reviewed and merged, approve the generated pull
 requests from a normal human checkout:
@@ -160,7 +165,7 @@ mints a personal token. Review-request and apply modes refuse bot identities.
 Request mode posts the exact `@codex review` trigger only after validating the
 pull request, and does not duplicate a pending current-head request from any
 human with write, maintain, or admin repository permission. Before approval
-the helper requires the exact `qwts-codex-agent` author, stable synchronization
+the helper requires the exact `chores-dumb` author, stable synchronization
 branch, target default branch, source provenance, and managed-file-only diff.
 It also requires clean AI-review evidence after the current head commit: a 👍
 from
@@ -172,15 +177,18 @@ the repetitive per-repository commands. Do not place a personal access token
 in the synchronization workflow; an unattended action would exercise a human
 identity without a fresh human decision.
 
-The workflow requires two repository secrets:
+The workflow requires the same two repository secrets used by the other
+`chores-dumb` automation:
 
-- `CODEX_AGENT_APP_ID` — the numeric App ID for `qwts-codex-agent`.
-- `CODEX_AGENT_PRIVATE_KEY` — that App's PEM private key.
+- `CHORES_DUMB_CLIENT_ID` — the Client ID for `chores-dumb`.
+- `CHORES_DUMB_PRIVATE_KEY` — that App's PEM private key.
 
-It mints a short-lived installation token at runtime and verifies that
-GraphQL reports the exact viewer `qwts-codex-agent[bot]` before any write. A
-missing secret, human token, or token for another App fails closed. The
-workflow checkout uses
+GitHub's token action mints a short-lived installation token for every
+repository in the App's `qwts` installation, down-scoped to contents and pull
+request writes; the App's release-only Packages and Attestations permissions
+do not reach this job. The synchronization script verifies that GraphQL reports
+the exact viewer `chores-dumb[bot]` before any write. A missing secret, human
+token, or token for another App fails closed. The workflow checkout uses
 `persist-credentials: false`, and its built-in `GITHUB_TOKEN` has read-only
 contents permission.
 

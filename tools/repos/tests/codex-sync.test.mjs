@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { GOVERNED_HARNESS_FILES } from '../lib/baseline-files.mjs';
 import {
@@ -21,12 +22,47 @@ import {
   validateSyncApprovalCandidate,
 } from '../lib/codex-sync.mjs';
 import { parseArgs, reviewRepository } from '../approve-codex-sync.mjs';
-import { syncRepository } from '../sync-codex.mjs';
+import { installationToken, syncRepository } from '../sync-codex.mjs';
 
 function canonical(path, content = 'canonical\n', mode = '100644') {
   const bytes = Buffer.from(content);
   return { path, content: bytes, sha: gitBlobSha(bytes), mode };
 }
+
+test('governed harness workflow mints a least-privilege chores-dumb token', () => {
+  const workflow = readFileSync('.github/workflows/codex-sync.yml', 'utf8');
+
+  assert.match(workflow, /name: Governed harness sync/u);
+  assert.match(workflow, /uses: actions\/create-github-app-token@[0-9a-f]{40} # v3\.2\.0/u);
+  assert.match(workflow, /client-id: \$\{\{ secrets\.CHORES_DUMB_CLIENT_ID \}\}/u);
+  assert.match(workflow, /private-key: \$\{\{ secrets\.CHORES_DUMB_PRIVATE_KEY \}\}/u);
+  assert.match(workflow, /permission-contents: write/u);
+  assert.match(workflow, /permission-pull-requests: write/u);
+  assert.match(workflow, /GH_TOKEN: \$\{\{ steps\.chores\.outputs\.token \}\}/u);
+  assert.doesNotMatch(workflow, /CODEX_AGENT_|\bapp-id:|permission-(?:attestations|packages):/u);
+});
+
+test('apply requires an explicit chores-dumb token while dry-run may mint read credentials', async () => {
+  await assert.rejects(
+    installationToken({ apply: true, env: {} }),
+    new RegExp(`requires a GH_TOKEN for ${CODEX_SYNC_BOT}\\[bot\\]`),
+  );
+  assert.equal(
+    await installationToken({ apply: true, env: { GH_TOKEN: 'runtime-token' } }),
+    'runtime-token',
+  );
+  assert.equal(
+    await installationToken({
+      apply: false,
+      env: {},
+      mintToken: async ({ env }) => {
+        assert.deepEqual(env, {});
+        return { token: 'read-token' };
+      },
+    }),
+    'read-token',
+  );
+});
 
 test('managed diff detects missing, changed, and mode-only drift', () => {
   const files = new Map([
@@ -208,7 +244,7 @@ test('a current existing pull request is a no-write synchronization result', asy
           head: { ref: CODEX_SYNC_BRANCH },
         }];
       }
-      if (requestPath.endsWith('/git/ref/heads/governance/codex-sync')) {
+      if (requestPath.endsWith('/git/ref/heads/governance/harness-sync')) {
         return { object: { sha: 'branch-sha' } };
       }
       if (requestPath.endsWith('/git/commits/branch-sha')) return { tree: { sha: 'branch-tree' } };
@@ -283,7 +319,7 @@ test('an open sync pull repairs a JSON overlay from the target default branch', 
           head: { ref: CODEX_SYNC_BRANCH },
         }];
       }
-      if (method === 'GET' && requestPath.endsWith('/git/ref/heads/governance/codex-sync')) {
+      if (method === 'GET' && requestPath.endsWith('/git/ref/heads/governance/harness-sync')) {
         return { object: { sha: 'branch-sha' } };
       }
       if (method === 'GET' && requestPath.endsWith('/git/commits/branch-sha')) {
@@ -308,7 +344,7 @@ test('an open sync pull repairs a JSON overlay from the target default branch', 
       }
       if (
         method === 'PATCH' &&
-        requestPath.endsWith('/git/refs/heads/governance/codex-sync')
+        requestPath.endsWith('/git/refs/heads/governance/harness-sync')
       ) {
         return {};
       }
