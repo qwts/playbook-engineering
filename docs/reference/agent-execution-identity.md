@@ -136,7 +136,7 @@ must not interpret it as presence.
 
 ## Failure modes
 
-- **No current ID:** run `node tools/agent-bot/setup-worktree.mjs` from the bot
+- **No current ID:** run `playbook-setup-worktree` from the bot
   worktree.
 - **Pending transcript:** the provider exposed no locator; bind one before
   finalization.

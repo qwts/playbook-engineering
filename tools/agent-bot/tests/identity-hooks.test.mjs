@@ -37,9 +37,11 @@ function fixture(name) {
   git('config', 'user.name', 'qwts-codex-agent[bot]');
   git('config', 'user.email', '308462948+qwts-codex-agent[bot]@users.noreply.github.com');
   git('config', 'commit.gpgsign', 'false');
+  git('config', 'core.hooksPath', '/dev/null');
   writeFileSync(path.join(repo, 'README.md'), '# fixture\n');
   git('add', 'README.md');
   git('commit', '--quiet', '-m', 'initial');
+  git('config', '--unset', 'core.hooksPath');
   const identity = mintAgentIdentity({
     appSlug: 'qwts-codex-agent',
     botUid: '308462948',

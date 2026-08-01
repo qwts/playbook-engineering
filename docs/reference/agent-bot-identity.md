@@ -30,14 +30,17 @@ the worktree machinery that applies it.
 
 Agents work in linked git worktrees, so the identity rides on the worktree and
 is applied by git itself — no per-tool or per-repo setup. Enable it from the
-canonical playbook-engineering checkout (records **this** absolute path):
+clean playbook-engineering checkout:
 
 ```bash
-node tools/agent-bot/install-hooks.mjs
+node tools/agent-bot/playbook-launcher.mjs install
+playbook-install-hooks
 ```
 
-That sets global `core.hooksPath` to this repo's [`hooks/`](../../tools/agent-bot/hooks/)
-— re-run after moving the checkout. Its `post-checkout` hook runs on
+That pins the checkout's exact commit and sets global `core.hooksPath` to
+stable wrappers under `~/.local/share/playbook-engineering/hooks`. Each
+wrapper verifies the pin before dispatching to this repo's
+[`hooks/`](../../tools/agent-bot/hooks/). Its `post-checkout` hook runs on
 `git worktree add` **regardless of which tool created the worktree** and calls
 `setup-worktree.mjs`, which:
 
@@ -68,7 +71,7 @@ worktree from a sandbox may be unable to write the *shared* git dir the
 Codex [retries](../../.codex/scripts/ensure-identity.sh) during local setup,
 which may precede any task locator; identity checks remain conclusive while
 transcript metadata may stay pending. Manual repair remains idempotent:
-`node tools/agent-bot/setup-worktree.mjs`.
+`playbook-setup-worktree`.
 
 ## The Claude Code worktree hook (when git's hook is out of reach)
 
@@ -92,11 +95,10 @@ either way; `AGENT_WORKTREE_ROOT` overrides. `worktree.symlinkDirectories` and
 `worktree.sparsePaths` are **not** applied: a repo needing them drops the hook
 and falls back to `post-checkout`. A failed identity step still yields a
 worktree, reported loudly — the `pre-commit` guard, not this hook, is what
-stops a `qwts` commit. The command resolves this checkout at
-`$HOME/Code/playbook-engineering`
-([ENG-0004](../decisions/ENG-0004-centralize-shared-cicd.md): one copy, no
-per-repo duplicates) or `PLAYBOOK_HOME`; with neither, creation fails with
-that instruction rather than silently.
+stops a `qwts` commit. The command uses the machine-local commit-pinned
+`playbook-claude-worktree-create` shim. If the selected checkout is missing,
+the launcher lists verified clones for explicit selection; with none,
+creation fails with a clone instruction rather than assuming a location.
 
 **Pinning one agent within a harness.** In the worktree:
 
@@ -104,11 +106,8 @@ that instruction rather than silently.
 git config --worktree qwts.agentApp qwts-claude-fable-agent
 QWTS_AGENT_TRANSCRIPT_PROVIDER=claude \
 QWTS_AGENT_TRANSCRIPT_ID=<session-id> \
-  node "$PLAYBOOK_HOME/tools/agent-bot/setup-worktree.mjs"
+  playbook-setup-worktree
 ```
-
-(`$PLAYBOOK_HOME` = the canonical playbook-engineering checkout; if unset,
-read `~/.config/agent-bot/playbook-home`.)
 
 `setup-worktree.mjs` reads the pin ahead of detection (`--app` and
 `GH_AGENT_APP` still outrank both) and persists the resolved App as the

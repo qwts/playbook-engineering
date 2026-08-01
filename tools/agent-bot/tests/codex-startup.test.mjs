@@ -30,7 +30,6 @@ function fixture() {
     ...process.env,
     HOME: home,
     GIT_CONFIG_GLOBAL: globalConfig,
-    PLAYBOOK_HOME: ROOT,
     QWTS_AGENT_STATE_HOME: stateDir,
   };
   for (const key of Object.keys(env)) {
@@ -39,6 +38,18 @@ function fixture() {
   env.QWTS_AGENT_STATE_HOME = stateDir;
 
   mkdirSync(path.join(home, '.config', app), { recursive: true });
+  mkdirSync(path.join(home, '.local', 'bin'), { recursive: true });
+  mkdirSync(path.join(home, '.local', 'share', 'playbook-engineering', 'hooks'), { recursive: true });
+  writeFileSync(
+    path.join(home, '.local', 'share', 'playbook-engineering', 'hooks', 'prepare-commit-msg'),
+    '#!/bin/sh\nexit 0\n',
+    { mode: 0o755 },
+  );
+  writeFileSync(
+    path.join(home, '.local', 'bin', 'playbook-setup-worktree'),
+    `#!/bin/sh\nexec node ${JSON.stringify(path.join(ROOT, 'tools', 'agent-bot', 'setup-worktree.mjs'))} "$@"\n`,
+    { mode: 0o755 },
+  );
   writeFileSync(path.join(home, '.config', app, 'bot-uid'), '309211430\n');
   writeFileSync(globalConfig, '');
   mkdirSync(repo);
@@ -96,13 +107,15 @@ test('Codex startup repairs a worktree created before harness markers exist', ()
     encoding: 'utf8',
   }).trim().split('\n');
   assert.equal(helperSlug(helpers.at(-1)), app);
+  assert.match(helpers.at(-1), /\.local\/bin\/playbook-git-credential-bot/);
+  assert.doesNotMatch(helpers.at(-1), /playbook-engineering\/tools/);
   assert.equal(
     execFileSync('git', ['config', '--worktree', '--get', 'core.hooksPath'], {
       cwd: worktree,
       env,
       encoding: 'utf8',
     }).trim(),
-    path.join(ROOT, 'tools', 'agent-bot', 'hooks'),
+    path.join(env.HOME, '.local', 'share', 'playbook-engineering', 'hooks'),
   );
   const record = readAgentIdentity(firstId, { stateDir });
   assert.equal(record.github.appSlug, app);
@@ -160,12 +173,16 @@ test('Codex startup cannot be satisfied by identity values outside worktree scop
     env,
   });
   execFileSync('git', ['config', '--global', 'core.hooksPath', fakeHooks], { env });
+  writeFileSync(
+    path.join(env.HOME, '.local', 'bin', 'playbook-setup-worktree'),
+    '#!/bin/sh\nexit 0\n',
+    { mode: 0o755 },
+  );
 
   const result = spawnSync('bash', [STARTUP], {
     cwd: worktree,
     env: {
       ...env,
-      PLAYBOOK_HOME: fakePlaybook,
       CODEX_THREAD_ID: 'thread-sol-spoof',
       GH_AGENT_APP: app,
     },

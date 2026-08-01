@@ -49,10 +49,11 @@ This record settles the model permanently so it is never re-derived.
 4. **Backstop:** governed repos set `required_approving_review_count: 1`, so
    an impersonated (`qwts`-authored) PR cannot merge — `qwts` cannot approve
    `qwts`. Anything that slips past every layer arrives quarantined.
-5. **This repository is the runtime source of truth.** Machines point
-   `core.hooksPath` at this repo's `tools/agent-bot/hooks`; the `gh` shim
-   must land here as governed code before it counts as part of the system.
-   Machines never run uncommitted or extracted-copy code.
+5. **This repository is the runtime source of truth.** A machine-local
+   `~/.local/bin/playbook-engineering` launcher records a verified checkout
+   and exact commit. Installed hooks and shims dispatch through it and refuse
+   dirty, missing, or advanced checkouts until the user explicitly selects a
+   clean commit again. No installed integration embeds a checkout path.
 6. **The agent side of the boundary is enforced.** A machine-wide
    `pre-commit` guard (`tools/agent-bot/hooks/pre-commit`, shipped with this
    record) blocks a commit when the process carries agent-only environment
@@ -78,6 +79,10 @@ This record settles the model permanently so it is never re-derived.
   runs `gh` as the human). Accepted; decision 4 is the mitigation.
 - A new agent tool joins by convention, not code review of the model: its
   worktree directory pattern plus a registered App.
+- Multiple clones are resolved explicitly. If the selected checkout is gone,
+  an interactive launcher lists verified clones and asks the user to choose;
+  unattended callers fail with the same list and selection command. With no
+  clone, the launcher fails and instructs the user to clone this repository.
 
 ## References
 

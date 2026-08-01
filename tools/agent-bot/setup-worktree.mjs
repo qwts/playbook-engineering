@@ -35,7 +35,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { resolveAgentSlug } from './resolve-agent.mjs';
 import {
   discoverTranscript,
@@ -65,7 +65,8 @@ export function credentialHelperCommand(helper, slug) {
   // fileURLToPath returns backslashes on Windows; the shell consumes those as
   // escapes unless the path is normalized and quoted.
   const shellPath = normalizeGitBashPath(helper).replaceAll("'", "'\"'\"'");
-  return `!node '${shellPath}' ${validateAppSlug(slug)}`;
+  const runner = shellPath.endsWith('.mjs') ? 'node ' : '';
+  return `!${runner}'${shellPath}' ${validateAppSlug(slug)}`;
 }
 
 export function normalizeGitBashPath(value) {
@@ -117,9 +118,10 @@ async function main() {
     process.stderr.write(`setup-worktree: private-key fetch skipped: ${err.message}\n`);
   }
   const uid = await botUid(slug);
-  const agentBotDir = dirname(fileURLToPath(import.meta.url));
-  const helper = join(agentBotDir, 'git-credential-bot.mjs');
-  const hooks = normalizeGitBashPath(join(agentBotDir, 'hooks'));
+  const helper = join(homedir(), '.local', 'bin', 'playbook-git-credential-bot');
+  const hooks = normalizeGitBashPath(join(
+    homedir(), '.local', 'share', 'playbook-engineering', 'hooks',
+  ));
   let previousHooks = null;
   try {
     previousHooks = normalizeGitBashPath(git('config', '--path', '--get', 'core.hooksPath')) || null;

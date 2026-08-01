@@ -20,7 +20,8 @@ symlink the skill directory into the harness so a `git pull` here updates every
 machine, rather than copying and drifting:
 
 ```bash
-ln -sfn "${PLAYBOOK_HOME:-$HOME/Code/playbook-engineering}/skills/<name>" ~/.claude/skills/<name>
+PLAYBOOK_ROOT="$(playbook-engineering status | sed -n '1p')"
+ln -sfn "$PLAYBOOK_ROOT/skills/<name>" ~/.claude/skills/<name>
 ```
 
 Distribution is manual today. Automating it — a worktree-create step, or a

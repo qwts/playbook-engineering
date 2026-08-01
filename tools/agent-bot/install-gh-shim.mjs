@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Install the gh shim (ENG-0045: PRs and comments as the worktree's bot,
-// automatically). Writes ~/.config/agent-bot/bin/gh, records this checkout in
-// ~/.config/agent-bot/playbook-home, symlinks into ~/.local/bin (already on
-// Cursor/agent PATHs), and adds an idempotent PATH line to ~/.zshenv. Run
+// automatically). Installs the commit-pinned playbook launcher, writes
+// ~/.config/agent-bot/bin/gh, and symlinks it into ~/.local/bin. Run
 // once per machine — and again after moving the checkout:
 //
 //   node tools/agent-bot/install-gh-shim.mjs
@@ -30,14 +29,12 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildGhShim } from './gh-shim.mjs';
 import {
-  agentBotConfigDir,
-  checkoutRootFromAgentBot,
-  writePlaybookHome,
-} from './playbook-home.mjs';
+  installLauncher,
+} from './playbook-launcher.mjs';
 
 export function installGhShim({
   home = homedir(),
-  playbookRoot = checkoutRootFromAgentBot(),
+  playbookRoot,
   mkdir = mkdirSync,
   write = writeFileSync,
   read = readFileSync,
@@ -46,14 +43,11 @@ export function installGhShim({
   rm = rmSync,
   lstat = lstatSync,
   readlink = readlinkSync,
+  install = installLauncher,
 } = {}) {
-  const { path: playbookHomeFile, root } = writePlaybookHome(playbookRoot, {
-    home,
-    mkdir,
-    write,
-  });
+  const installed = install({ home, ...(playbookRoot ? { root: playbookRoot } : {}) });
 
-  const binDir = join(agentBotConfigDir(home), 'bin');
+  const binDir = join(home, '.config', 'agent-bot', 'bin');
   mkdir(binDir, { recursive: true });
   const shimPath = join(binDir, 'gh');
   write(shimPath, buildGhShim(), { mode: 0o755 });
@@ -74,7 +68,7 @@ export function installGhShim({
     if (stat.isSymbolicLink()) {
       let target = readlink(localShim);
       if (!target.startsWith('/')) target = join(localBin, target);
-      const agentBin = join(agentBotConfigDir(home), 'bin');
+      const agentBin = join(home, '.config', 'agent-bot', 'bin');
       if (target === shimPath || target.startsWith(`${agentBin}/`)) {
         rm(localShim, { force: true });
       } else {
@@ -109,8 +103,8 @@ export function installGhShim({
   return {
     shimPath,
     localShim,
-    playbookHomeFile,
-    playbookRoot: root,
+    playbookRoot: installed.path,
+    sha: installed.sha,
     zshenvUpdated,
     zshenv,
   };
@@ -119,7 +113,7 @@ export function installGhShim({
 function main() {
   const result = installGhShim();
   process.stdout.write(`gh shim -> ${result.shimPath}\n`);
-  process.stdout.write(`playbook-home -> ${result.playbookRoot} (${result.playbookHomeFile})\n`);
+  process.stdout.write(`playbook-engineering -> ${result.playbookRoot} at ${result.sha}\n`);
   process.stdout.write(`PATH shim -> ${result.localShim}\n`);
   if (result.zshenvUpdated) {
     process.stdout.write(`PATH line appended to ${result.zshenv}\n`);

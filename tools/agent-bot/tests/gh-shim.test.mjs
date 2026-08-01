@@ -131,20 +131,24 @@ test('an agent fails closed when the installed token-helper path is stale', () =
   assert.match(result.stderr, /install-gh-shim/);
 });
 
-test('runtime playbook-home resolution finds the token helper without a baked path', () => {
+test('runtime launcher resolution finds the pinned token helper without a baked path', () => {
   const home = mkdtempSync(join(tmpdir(), 'gh-shim-home-'));
   const playbook = join(home, 'playbook-engineering');
   const agentBot = join(playbook, 'tools', 'agent-bot');
   // Use .codex rather than .cursor — some sandboxes forbid creating .cursor paths.
   const worktree = join(home, '.codex', 'worktrees', 'repo');
   mkdirSync(agentBot, { recursive: true });
-  mkdirSync(join(home, '.config', 'agent-bot'), { recursive: true });
+  mkdirSync(join(home, '.local', 'bin'), { recursive: true });
   mkdirSync(worktree, { recursive: true });
-  writeFileSync(join(home, '.config', 'agent-bot', 'playbook-home'), `${playbook}\n`);
   writeFileSync(
     join(agentBot, 'worktree-token.mjs'),
     `if (process.argv.includes('--slug')) process.stdout.write('qwts-cursor-agent');
 if (process.argv.includes('--agent-slug')) process.stdout.write('qwts-cursor-agent');`,
+  );
+  writeFileSync(
+    join(home, '.local', 'bin', 'playbook-engineering'),
+    `#!/bin/sh\nshift 3\nexec node ${JSON.stringify(join(agentBot, 'worktree-token.mjs'))} "$@"\n`,
+    { mode: 0o755 },
   );
 
   const shimDir = join(home, 'shim');
@@ -173,7 +177,6 @@ exit 0
       CLAUDECODE: '',
       CLAUDE_CODE_ENTRYPOINT: '',
       GH_TOKEN: '',
-      PLAYBOOK_HOME: '',
     },
     cwd: worktree,
   });

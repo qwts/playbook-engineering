@@ -8,7 +8,8 @@ import { hooksDirectory, installHooks } from '../install-hooks.mjs';
 
 function installOpts(overrides = {}) {
   return {
-    writeHome: (root) => ({ path: '/tmp/playbook-home', root }),
+    home: mkdtempSync(join(tmpdir(), 'install-hooks-home-')),
+    install: ({ root }) => ({ path: root || '/repo/playbook-engineering', sha: 'a'.repeat(40) }),
     ...overrides,
   };
 }
@@ -17,7 +18,7 @@ test('hooksDirectory is this checkout tools/agent-bot/hooks', () => {
   assert.match(hooksDirectory(), /tools[/\\]agent-bot[/\\]hooks$/);
 });
 
-test('installHooks writes global core.hooksPath to the given absolute hooks dir', () => {
+test('installHooks writes global core.hooksPath to stable dispatch wrappers', () => {
   const hooksPath = join(mkdtempSync(join(tmpdir(), 'install-hooks-')), 'hooks');
   mkdirSync(hooksPath);
   const calls = [];
@@ -35,10 +36,10 @@ test('installHooks writes global core.hooksPath to the given absolute hooks dir'
     },
   }));
 
-  assert.equal(result.hooksPath, hooksPath);
+  assert.match(result.hooksPath, /\.local\/share\/playbook-engineering\/hooks$/);
   assert.equal(result.previous, null);
   assert.equal(result.playbookRoot, '/Volumes/added_storage/Code/playbook-engineering');
-  assert.deepEqual(calls.at(-1), ['config', '--global', 'core.hooksPath', hooksPath]);
+  assert.deepEqual(calls.at(-1), ['config', '--global', 'core.hooksPath', result.hooksPath]);
 });
 
 test('installHooks reports a previous path when replacing one', () => {
