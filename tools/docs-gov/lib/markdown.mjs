@@ -9,9 +9,14 @@
 // but keeps their surrounding spaces), then spaces become hyphens. No trim —
 // GitHub keeps the leading hyphen that a stripped leading emoji produces.
 export function slugify(headingText) {
-  return headingText
-    .toLowerCase()
-    .replace(/<[^>]*>/g, '')
+  let withoutHtml = headingText.toLowerCase();
+  let previous;
+  do {
+    previous = withoutHtml;
+    withoutHtml = withoutHtml.replace(/<[^>]*>/g, '');
+  } while (withoutHtml !== previous);
+
+  return withoutHtml
     .replace(/[`*~]/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[^\p{L}\p{N}\p{M}_\- ]/gu, '')
