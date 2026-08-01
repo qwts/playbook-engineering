@@ -6,7 +6,14 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { plan, bumpReviewCount, defaultRuleset, mergeQueueRule, SEEDS } from '../lib/reconcile-plan.mjs';
+import {
+  plan,
+  bumpReviewCount,
+  canUseMergeQueue,
+  defaultRuleset,
+  mergeQueueRule,
+  SEEDS,
+} from '../lib/reconcile-plan.mjs';
 import { BASELINE_FILES, GOVERNED_CODEX_FILES, GOVERNED_HARNESS_FILES } from '../lib/baseline-files.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -86,6 +93,17 @@ test('bumpReviewCount never lowers an already-stricter count', () => {
 
 test('a ruleset without a pull_request rule is not bumpable', () => {
   assert.equal(bumpReviewCount({ name: 'x', rules: [{ type: 'deletion' }] }), null);
+});
+
+test('merge queue entitlement accounts for owner, visibility, and organization plan', () => {
+  assert.equal(canUseMergeQueue({ ownerType: 'User', visibility: 'public' }), false);
+  assert.equal(canUseMergeQueue({ ownerType: 'Organization', visibility: 'public' }), true);
+  assert.equal(canUseMergeQueue({ ownerType: 'Organization', visibility: 'private', ownerPlan: 'team' }), false);
+  assert.equal(canUseMergeQueue({
+    ownerType: 'Organization',
+    visibility: 'private',
+    ownerPlan: 'enterprise',
+  }), true);
 });
 
 test('the user-owned default ruleset preserves merge methods without an unavailable queue', () => {

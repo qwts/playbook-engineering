@@ -95,6 +95,10 @@ export function mergeQueueRule(mergeMethod = 'MERGE') {
   };
 }
 
+export function canUseMergeQueue({ ownerType, visibility, ownerPlan }) {
+  return ownerType === 'Organization' && (visibility === 'public' || ownerPlan === 'enterprise');
+}
+
 // The standard default-branch ruleset for a repo that has none: the shape the
 // governed repos share, minus required status checks (those are per-repo).
 // Native merge queue is organization-only; user-owned repos receive the strict

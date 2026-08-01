@@ -29,7 +29,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { checkRepo, appCoverage, userToken, api } from './drift.mjs';
-import { plan, bumpReviewCount, defaultRuleset } from './lib/reconcile-plan.mjs';
+import { plan, bumpReviewCount, canUseMergeQueue, defaultRuleset } from './lib/reconcile-plan.mjs';
 import { mint } from '../agent-bot/mint-token.mjs';
 import { resolveAgentSlug } from '../agent-bot/resolve-agent.mjs';
 
@@ -83,8 +83,15 @@ async function applySettings(owner, name, actions, token) {
         if (allowedMergeMethods.length === 0) {
           throw new Error(`${owner}/${name}: repository has no enabled pull-request merge method`);
         }
+        const ownerPlan = meta.owner?.type === 'Organization' && meta.visibility !== 'public'
+          ? (await call('GET', `/orgs/${owner}`, token)).plan?.name
+          : undefined;
         await call('POST', `/repos/${owner}/${name}/rulesets`, token, defaultRuleset({
-          mergeQueueAvailable: meta.owner?.type === 'Organization',
+          mergeQueueAvailable: canUseMergeQueue({
+            ownerType: meta.owner?.type,
+            visibility: meta.visibility,
+            ownerPlan,
+          }),
           allowedMergeMethods,
         }));
         done.push('ruleset "Default" created (review count 1)');
