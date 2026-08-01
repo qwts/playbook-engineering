@@ -10,7 +10,8 @@
 //
 //   settings — via the human's ambient token (rulesets and repo settings need
 //              admin, which no App on a user account has): bump the ruleset's
-//              review count to 1 (creating the standard ruleset if none), and
+//              review count to 1 (creating the owner-aware standard ruleset if
+//              none while preserving enabled merge methods), and
 //              enable private vulnerability reporting.
 //   seeds    — missing baseline files, proposed as a bot-authored PR to the
 //              target repo (never a direct push): AGENTS.md, CONTRIBUTING.md,
@@ -28,7 +29,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { checkRepo, appCoverage, userToken, api } from './drift.mjs';
-import { plan, bumpReviewCount, defaultRuleset } from './lib/reconcile-plan.mjs';
+import { plan, bumpReviewCount, canUseMergeQueue, defaultRuleset } from './lib/reconcile-plan.mjs';
 import { mint } from '../agent-bot/mint-token.mjs';
 import { resolveAgentSlug } from '../agent-bot/resolve-agent.mjs';
 
@@ -73,7 +74,26 @@ async function applySettings(owner, name, actions, token) {
         }
       }
       if (!updated) {
-        await call('POST', `/repos/${owner}/${name}/rulesets`, token, defaultRuleset());
+        const meta = await call('GET', `/repos/${owner}/${name}`, token);
+        const allowedMergeMethods = [
+          ...(meta.allow_merge_commit ? ['merge'] : []),
+          ...(meta.allow_squash_merge ? ['squash'] : []),
+          ...(meta.allow_rebase_merge ? ['rebase'] : []),
+        ];
+        if (allowedMergeMethods.length === 0) {
+          throw new Error(`${owner}/${name}: repository has no enabled pull-request merge method`);
+        }
+        const ownerPlan = meta.owner?.type === 'Organization' && meta.visibility !== 'public'
+          ? (await call('GET', `/orgs/${owner}`, token)).plan?.name
+          : undefined;
+        await call('POST', `/repos/${owner}/${name}/rulesets`, token, defaultRuleset({
+          mergeQueueAvailable: canUseMergeQueue({
+            ownerType: meta.owner?.type,
+            visibility: meta.visibility,
+            ownerPlan,
+          }),
+          allowedMergeMethods,
+        }));
         done.push('ruleset "Default" created (review count 1)');
       }
     }

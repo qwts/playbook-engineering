@@ -6,7 +6,14 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { plan, bumpReviewCount, defaultRuleset, mergeQueueRule, SEEDS } from '../lib/reconcile-plan.mjs';
+import {
+  plan,
+  bumpReviewCount,
+  canUseMergeQueue,
+  defaultRuleset,
+  mergeQueueRule,
+  SEEDS,
+} from '../lib/reconcile-plan.mjs';
 import { BASELINE_FILES, GOVERNED_CODEX_FILES, GOVERNED_HARNESS_FILES } from '../lib/baseline-files.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -88,19 +95,45 @@ test('a ruleset without a pull_request rule is not bumpable', () => {
   assert.equal(bumpReviewCount({ name: 'x', rules: [{ type: 'deletion' }] }), null);
 });
 
-test('the default ruleset requires review and a cost-bounded MERGE queue', () => {
-  const rs = defaultRuleset();
+test('merge queue entitlement accounts for owner, visibility, and organization plan', () => {
+  assert.equal(canUseMergeQueue({ ownerType: 'User', visibility: 'public' }), false);
+  assert.equal(canUseMergeQueue({ ownerType: 'Organization', visibility: 'public' }), true);
+  assert.equal(canUseMergeQueue({ ownerType: 'Organization', visibility: 'private', ownerPlan: 'team' }), false);
+  assert.equal(canUseMergeQueue({
+    ownerType: 'Organization',
+    visibility: 'private',
+    ownerPlan: 'enterprise',
+  }), true);
+});
+
+test('the user-owned default ruleset preserves merge methods without an unavailable queue', () => {
+  const rs = defaultRuleset({ allowedMergeMethods: ['merge', 'rebase'] });
   const pr = rs.rules.find((r) => r.type === 'pull_request');
   const queue = rs.rules.find((r) => r.type === 'merge_queue');
   assert.equal(pr.parameters.required_approving_review_count, 1);
-  assert.deepEqual(pr.parameters.allowed_merge_methods, ['merge']);
+  assert.deepEqual(pr.parameters.allowed_merge_methods, ['merge', 'rebase']);
+  assert.equal(queue, undefined);
+  assert.equal(rs.bypass_actors[0].actor_type, 'RepositoryRole');
+  assert.equal(rs.conditions.ref_name.include[0], '~DEFAULT_BRANCH');
+});
+
+test('the organization default ruleset adds the cost-bounded MERGE queue', () => {
+  const rs = defaultRuleset({ mergeQueueAvailable: true, allowedMergeMethods: ['merge', 'squash'] });
+  const pr = rs.rules.find((r) => r.type === 'pull_request');
+  const queue = rs.rules.find((r) => r.type === 'merge_queue');
+  assert.deepEqual(pr.parameters.allowed_merge_methods, ['merge', 'squash']);
   assert.deepEqual(queue, mergeQueueRule());
   assert.equal(queue.parameters.merge_method, 'MERGE');
   assert.equal(queue.parameters.grouping_strategy, 'ALLGREEN');
   assert.equal(queue.parameters.max_entries_to_build, 1);
   assert.equal(queue.parameters.max_entries_to_merge, 1);
-  assert.equal(rs.bypass_actors[0].actor_type, 'RepositoryRole');
-  assert.equal(rs.conditions.ref_name.include[0], '~DEFAULT_BRANCH');
+});
+
+test('the organization queue uses an enabled method when merge commits are disabled', () => {
+  const rs = defaultRuleset({ mergeQueueAvailable: true, allowedMergeMethods: ['squash', 'rebase'] });
+  const queue = rs.rules.find((r) => r.type === 'merge_queue');
+  assert.equal(queue.parameters.merge_method, 'SQUASH');
+  assert.notEqual(queue.parameters.merge_method, 'MERGE');
 });
 
 test('every seed source exists in this checkout', () => {

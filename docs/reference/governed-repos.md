@@ -119,6 +119,12 @@ attempted. Only missing files are added — existing content is never clobbered.
 Run it from this checkout; onboard a repo by adding its manifest row, running
 `--apply`, reviewing the seed PR, then flipping the row to `active`.
 
+When the settings lane must create a missing ruleset, it preserves the
+repository's enabled merge methods and adds a native merge-queue rule only for
+an organization-owned repository. User-owned repositories follow the governed
+updater fallback in the [CI execution policy](ci-execution-policy.md); asking
+GitHub to create an unavailable queue is not a valid reconciliation plan.
+
 ## Continuous harness synchronization
 
 The [Governed harness sync workflow](../../.github/workflows/codex-sync.yml)
@@ -177,11 +183,19 @@ the repetitive per-repository commands. Do not place a personal access token
 in the synchronization workflow; an unattended action would exercise a human
 identity without a fresh human decision.
 
-The workflow requires the same two repository secrets used by the other
-`chores-dumb` automation:
+The workflow requires the same two repository secrets used by every privileged
+`chores-dumb` consumer listed in the
+[governed CI rollout checklist](governed-ci-rollout.md):
 
 - `CHORES_DUMB_CLIENT_ID` — the Client ID for `chores-dumb`.
 - `CHORES_DUMB_PRIVATE_KEY` — that App's PEM private key.
+
+The ready-branch updater, Version packages PR creation or refresh, tag
+creation, release-recovery dispatch, this synchronization workflow, and any
+future privileged write or downstream-workflow initiator require both values.
+An obsolete App ID variable is not a substitute for the Client ID, and
+`RELEASE_TOKEN` is not a fallback. Actor authorization remains separate from
+stored credentials.
 
 GitHub's token action mints a short-lived installation token for every
 repository in the App's `qwts` installation, down-scoped to contents and pull

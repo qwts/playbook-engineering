@@ -28,6 +28,11 @@
         "path": "docs/reference/agent-bot-identity.md",
         "budget": 1800,
         "reason": "the identity model and the worktree machinery that applies it are only safe read together: territory, pinning, and the hook that persists them. Lowered from 3600 by the split its previous reason asked for \u2014 the operational half (App creation, mint, shim, verification, failure modes) moved to agent-bot-operations.md when registering the model-level Apps would have forced a third raise"
+      },
+      {
+        "path": "docs/decisions/ENG-0004-centralize-shared-cicd.md",
+        "budget": 2800,
+        "reason": "accepted ENG records are amended or superseded rather than rewritten, so the owner-aware rollout amendment must remain with the original lifecycle decision; the detailed operational contract is split into governed-ci-rollout.md"
       }
     ],
     "contextSets": []

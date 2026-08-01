@@ -14,8 +14,10 @@ where each repo differs.
 - One objective per branch and per PR. Unrelated changes go on their own branch,
   so review and revert stay clean.
 - Start from the latest practical `main` and keep long-running work reasonably
-  current. Do not require rebase-only history: the merge queue validates the
-  approved change with the latest `main` before it merges.
+  current. Organization-owned repositories use the native merge queue to
+  validate the approved change with the latest `main`. User-owned repositories,
+  where GitHub does not offer that queue, use the governed updater fallback in
+  the [CI execution policy](../reference/ci-execution-policy.md).
 
 ## Opening the PR
 
@@ -55,9 +57,14 @@ where each repo differs.
   replies are visible on the thread.
 - Unresolved feedback is carried forward, never reopened under a fresh PR to
   escape it.
-- An approved PR enters the required merge queue. The queue uses `MERGE` and
-  the complete suite must pass on its `merge_group` candidate before `main`
-  advances.
+- In an organization-owned repository, an approved PR enters the required
+  native merge queue. Its complete suite passes on the exact `merge_group`
+  candidate before `main` advances.
+- In a user-owned repository, strict checks and the governed
+  `chores-dumb[bot]` updater keep every ready branch current. Each updater head
+  runs the complete suite. If the eventual merge creates a new commit SHA,
+  `main` runs the full exact-SHA fallback; PR-head checks, tree equivalence, and
+  an earlier `main` commit never substitute for that evidence.
 
 ## Commit hygiene
 
@@ -77,6 +84,8 @@ where each repo differs.
 
 ## Changelog
 
+- 2026-08-01 — add the strict updater and exact-SHA fallback for user-owned
+  repositories while retaining native merge queue as the organization path.
 - 2026-07-31 — replace the rebase-only assumption with the required `MERGE`
   queue and exact merge-group validation.
 - 2026-07-31 — add lifecycle-aware CI scheduling and exact-SHA preflight reuse

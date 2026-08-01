@@ -165,3 +165,7 @@ Workflow execution protections are currently a GitHub public-preview setting.
 Until GitHub can express the governed system-actor exception and provides a
 stable management API, its disabled state and the default-to-advanced CodeQL
 switch are manual settings with review evidence attached to the rollout PR.
+
+The owner-aware merge path, semantic Changesets contract, required-context
+publishers, privileged credentials, repository settings, and concurrency
+follow-up are specified in the [rollout checklist](governed-ci-rollout.md).

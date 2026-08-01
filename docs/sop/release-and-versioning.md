@@ -29,6 +29,11 @@ does not apply to it.
 - Dependabot security updates are on for every repo — the security floor recorded
   in [repository baseline files](repo-baseline-files.md) — and a bump follows the
   same review bar as any other change.
+- A dependency-remediation commit does not accept a tool's autofix as proof that
+  configuration can be deleted. It traces ignored binaries, dependencies,
+  exports, platform commands, and packaging inputs to their consumers and runs
+  the complete contract suite. Removing an exception is a reviewed behavior
+  change, not incidental cleanup in a version bump.
 
 ## Validation reuse across versioning and release (mandatory)
 
@@ -48,6 +53,19 @@ does not apply to it.
   build, packaging, signing, notarization, checksums, asset inspection, and
   packaged-mode install, launch, smoke, or E2E checks. These validate the thing
   being published and are not removed as duplicate CI.
+
+### Semantic changeset planning
+
+Repositories using Changesets distinguish raw `.changeset/*.md` presence from
+semantic pending releases. Empty or frontmatter-only governance changesets may
+satisfy a repository PR gate, but they do not open or refresh a Version packages
+PR, block stranded-tag recovery, or make release verification reject an
+otherwise valid source.
+
+Version planning, tag planning, and release verification all consume the same
+semantic release count produced by `changeset status --output`. A positive
+`releases.length` fails closed before tagging or publishing. None of those lanes
+may substitute `find .changeset`, a file count, or another raw-file heuristic.
 
 ## Changing a shared baseline
 
@@ -69,6 +87,8 @@ changelog updated, then let consumers re-point. A shared change never moves a
 
 ## Changelog
 
+- 2026-08-01 — distinguish semantic Changesets releases from governance-only
+  files and require dependency remediation to preserve traced tool exceptions.
 - 2026-07-31 — required version PRs to receive one complete-suite validation
   and release workflows to reuse its exact-commit evidence while retaining
   release-specific provenance, packaging, signing, and artifact checks

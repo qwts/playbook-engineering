@@ -182,6 +182,17 @@ Advanced CodeQL remains the lifecycle implementation rather than an actor-policy
 workaround: its callable workflow follows draft, ready, queue, and post-merge
 scheduling and preserves the required default-branch scan.
 
+## Amendment — 2026-08-01: rollout portability and release semantics
+
+The lifecycle is now owner-aware: organization-owned repositories use the
+native queue, while user-owned repositories use strict checks, governed branch
+updates, and exact-SHA fallback validation without changing their merge methods.
+Required contexts bind to their actual publishers. Release lanes share semantic
+Changesets output, and privileged writes share the Client ID/private-key
+credential boundary. The existing PR concurrency contract remains unchanged.
+The [CI policy](../reference/ci-execution-policy.md) and
+[rollout checklist](../reference/governed-ci-rollout.md) define these controls.
+
 ## References
 
 - [ENG-0003](ENG-0003-repo-is-documentation-source-of-truth.md) established this repo as the cross-repo home for shared engineering assets; this extends that from documents to CI/CD.
