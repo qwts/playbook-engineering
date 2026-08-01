@@ -3,7 +3,7 @@ description: Classify governed CI runs and fail closed for unauthorized initiato
 
 outputs:
   mode:
-    description: full, post-merge, or manual
+    description: full, queue, post-merge, or manual
     value: ${{ steps.classify.outputs.mode }}
   run_full:
     description: Whether the complete validation lane must run

@@ -137,6 +137,30 @@ signing, notarization, integrity, and packaged-mode smoke checks. Missing
 evidence fails closed or requires an explicit complete-suite recovery run
 before publication.
 
+## Amendment — 2026-07-31: queue-validated `MERGE` commits
+
+The rebase-only exclusion above is superseded. Governed default branches use
+GitHub's required merge queue with merge method `MERGE`, `ALLGREEN` grouping,
+one candidate build at a time, and one PR per merge. Ready-PR validation still
+proves the reviewed head, but queue entry creates a new `merge_group` SHA from
+current `main`; every agreed complete-suite gate runs on that exact candidate.
+A successful queue run is the evidence reused for the short post-merge lane.
+If the merged SHA lacks that evidence, `main` still fails safe by running the
+complete suite.
+
+The Actions Policy allows the `merge_group` event but does not add a new actor.
+Both `github.actor` and `github.triggering_actor` remain restricted to `qwts`,
+`chores-dumb[bot]`, `dependabot[bot]`, and registered active agent Apps. Public
+forks remain ineligible: accepted changes move to a repository-owned branch
+before validation or queue entry.
+
+Rollout is staged so enabling the queue cannot strand a required check. First,
+the repository's stable CI workflow gains `merge_group: checks_requested` and
+the Actions Policy allows that event. Next, the ruleset requires the queue. A
+pilot PR must prove the actual queue actor, the stable `CI` and retained check
+contexts, the exact queue SHA, and the post-merge evidence handoff before the
+same settings are applied to the rest of the governed fleet.
+
 ## References
 
 - [ENG-0003](ENG-0003-repo-is-documentation-source-of-truth.md) established this repo as the cross-repo home for shared engineering assets; this extends that from documents to CI/CD.

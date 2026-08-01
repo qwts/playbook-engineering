@@ -27,7 +27,9 @@ the phase that closes them.
      user account has: applied with the human's ambient token. Review count
      is raised to ≥ 1 ([ENG-0045](ENG-0045-agent-environments-are-bot-territory.md)
      backstop), never lowered; a repo with no ruleset gets the standard one,
-     minus required status checks (per-repo).
+     including the cost-bounded `MERGE` queue but minus required status checks
+     (per-repo). Existing repositories enable the queue only after their CI
+     handles `merge_group` and the Actions Policy allows that event.
    - **seeds** — missing baseline files are proposed as a **bot-authored PR**
      to the target repo, never a direct push: the seeded content itself goes
      through review. Seeds: `AGENTS.md`, `CONTRIBUTING.md`, `CODEOWNERS`

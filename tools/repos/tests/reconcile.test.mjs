@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { plan, bumpReviewCount, defaultRuleset, SEEDS } from '../lib/reconcile-plan.mjs';
+import { plan, bumpReviewCount, defaultRuleset, mergeQueueRule, SEEDS } from '../lib/reconcile-plan.mjs';
 import { BASELINE_FILES, GOVERNED_CODEX_FILES, GOVERNED_HARNESS_FILES } from '../lib/baseline-files.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -88,10 +88,17 @@ test('a ruleset without a pull_request rule is not bumpable', () => {
   assert.equal(bumpReviewCount({ name: 'x', rules: [{ type: 'deletion' }] }), null);
 });
 
-test('the default ruleset requires one review and keeps the solo-admin bypass', () => {
+test('the default ruleset requires review and a cost-bounded MERGE queue', () => {
   const rs = defaultRuleset();
   const pr = rs.rules.find((r) => r.type === 'pull_request');
+  const queue = rs.rules.find((r) => r.type === 'merge_queue');
   assert.equal(pr.parameters.required_approving_review_count, 1);
+  assert.deepEqual(pr.parameters.allowed_merge_methods, ['merge']);
+  assert.deepEqual(queue, mergeQueueRule());
+  assert.equal(queue.parameters.merge_method, 'MERGE');
+  assert.equal(queue.parameters.grouping_strategy, 'ALLGREEN');
+  assert.equal(queue.parameters.max_entries_to_build, 1);
+  assert.equal(queue.parameters.max_entries_to_merge, 1);
   assert.equal(rs.bypass_actors[0].actor_type, 'RepositoryRole');
   assert.equal(rs.conditions.ref_name.include[0], '~DEFAULT_BRANCH');
 });
