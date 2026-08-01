@@ -29,6 +29,17 @@ export function classifyRun({ actor, triggeringActor = actor, allowedActors, eve
     throw new Error('draft pull requests are validated locally and do not run CI');
   }
   if (eventName === 'pull_request') return 'full';
+  if (eventName === 'merge_group') {
+    const baseRef = event.merge_group?.base_ref;
+    const headRef = event.merge_group?.head_ref;
+    if (event.action !== 'checks_requested') {
+      throw new Error(`merge_group action ${event.action || '<empty>'} is not supported`);
+    }
+    if (baseRef !== 'refs/heads/main' || !headRef?.startsWith('refs/heads/gh-readonly-queue/main/')) {
+      throw new Error(`merge_group refs ${headRef || '<empty>'} -> ${baseRef || '<empty>'} are not governed`);
+    }
+    return 'queue';
+  }
   if (eventName === 'push' && ref === 'refs/heads/main') return 'post-merge';
   if (eventName === 'workflow_dispatch') return 'manual';
   throw new Error(`event ${eventName || '<empty>'} on ${ref || '<empty>'} is not a governed CI trigger`);
@@ -37,7 +48,7 @@ export function classifyRun({ actor, triggeringActor = actor, allowedActors, eve
 export function outputsFor(mode) {
   return {
     mode,
-    run_full: String(mode === 'full' || mode === 'manual'),
+    run_full: String(mode === 'full' || mode === 'queue' || mode === 'manual'),
     run_post_merge: String(mode === 'post-merge'),
   };
 }
