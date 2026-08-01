@@ -119,13 +119,14 @@ be current. Merge queue is excluded because its `merge_group` workflow is
 initiated by a GitHub-owned actor, which the trusted-actor policy refuses.
 
 The repository-level GitHub Actions Policy is the primary execution boundary.
-Only `qwts`, `chores-dumb[bot]`, and the registered `qwts-*-agent[bot]` Apps may
-initiate workflows. `github-actions[bot]`, third parties, and public-fork actors
-are refused before a runner starts. Manual dispatch is limited to diagnostics,
-release recovery, workflow testing, explicit reruns, and exact-SHA preflight
-validation before PR promotion. This amendment changes when agreed validation
-runs; it does not remove docs-gov, CodeQL, Storybook, E2E, smoke, or
-repository-specific security and compliance gates.
+Only `qwts`, `chores-dumb[bot]`, `dependabot[bot]`, and the registered
+`qwts-*-agent[bot]` Apps may initiate workflows. `github-actions[bot]`, other
+third parties, and public-fork actors are refused before a runner starts.
+Manual dispatch is limited to diagnostics, release recovery, workflow testing,
+explicit reruns, and exact-SHA preflight validation before PR promotion. This
+amendment changes when agreed validation runs; it does not remove docs-gov,
+CodeQL, Storybook, E2E, smoke, or repository-specific security and compliance
+gates.
 
 Changesets and equivalent version-package PRs follow the same lifecycle. Their
 generated version commit receives one complete-suite ready-PR validation;

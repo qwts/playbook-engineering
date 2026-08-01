@@ -5,9 +5,9 @@ PR lifecycle: agents run fast checks locally before leaving draft, ready pull
 requests prove that their exact commit passed every complete-suite gate, and
 `main` avoids repeating that suite only when the exact commit already has
 successful evidence. Repository-level
-GitHub Actions Policy blocks every actor except `qwts`, `chores-dumb[bot]`, and
-the active registered `qwts-*-agent[bot]` Apps; public-fork workflows are never
-approved or run.
+GitHub Actions Policy blocks every actor except `qwts`, `chores-dumb[bot]`,
+`dependabot[bot]`, and the active registered `qwts-*-agent[bot]` Apps;
+public-fork workflows are never approved or run.
 
 This is the CI/CD execution baseline established by
 [ENG-0004](../decisions/ENG-0004-centralize-shared-cicd.md) and inherited under
@@ -22,12 +22,13 @@ in every governed repository. The active actor allow list contains:
 
 - the human owner `qwts`;
 - the release/versioning App `chores-dumb` (runtime actor
-  `chores-dumb[bot]`); and
+  `chores-dumb[bot]`);
+- Dependabot (runtime actor `dependabot[bot]`); and
 - every active App in [`governance/agents.json`](../../governance/agents.json),
   each of which runs as `<slug>[bot]`.
 
-Do not allow `github-actions[bot]`, Dependabot, Copilot, a repository role,
-external contributors, or another third party to initiate workflows.
+Do not allow `github-actions[bot]`, Copilot, a repository role, external
+contributors, or another third party to initiate workflows.
 Automation that must initiate a later workflow authenticates as an allowed App.
 The namespace pattern describes the allowed class but is not itself the allow
 list: retired or unregistered matching Apps remain unauthorized. GitHub

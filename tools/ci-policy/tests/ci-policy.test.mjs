@@ -14,8 +14,14 @@ const roster = JSON.parse(readFileSync(new URL('../../../governance/agents.json'
 const allowedActors = allowedActorsFromRoster(roster);
 const classify = (options) => classifyRun({ allowedActors, ...options });
 
-test('the human, release bot, and active roster Apps are authorized', () => {
-  for (const actor of ['qwts', 'chores-dumb[bot]', 'qwts-codex-agent[bot]', 'qwts-codex-sol-agent[bot]']) {
+test('the human, named automation, and active roster Apps are authorized', () => {
+  for (const actor of [
+    'qwts',
+    'chores-dumb[bot]',
+    'dependabot[bot]',
+    'qwts-codex-agent[bot]',
+    'qwts-codex-sol-agent[bot]',
+  ]) {
     assert.equal(isAllowedActor(actor, allowedActors), true, actor);
   }
 });
@@ -24,7 +30,7 @@ test('GitHub, third-party, and unregistered namespace actors are rejected', () =
   for (const actor of [
     'github-actions[bot]',
     'github-merge-queue[bot]',
-    'dependabot[bot]',
+    'copilot-swe-agent[bot]',
     'renovate[bot]',
     'qwts-unregistered-agent[bot]',
     'octocat',
@@ -46,6 +52,10 @@ test('draft PRs are refused and ready lifecycle events select complete validatio
     /validated locally/,
   );
   assert.equal(classify({ actor: 'qwts', eventName: 'pull_request', event: pullRequest(false) }), 'full');
+  assert.equal(
+    classify({ actor: 'dependabot[bot]', eventName: 'pull_request', event: pullRequest(false) }),
+    'full',
+  );
 });
 
 test('main pushes and manual reruns select their dedicated modes', () => {

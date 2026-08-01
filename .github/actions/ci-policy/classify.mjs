@@ -8,7 +8,7 @@ export function allowedActorsFromRoster(roster) {
   const activeAgents = roster.agents
     .filter((agent) => agent.status === 'active')
     .map((agent) => `${agent.slug}[bot]`);
-  return new Set(['qwts', 'chores-dumb[bot]', ...activeAgents]);
+  return new Set(['qwts', 'chores-dumb[bot]', 'dependabot[bot]', ...activeAgents]);
 }
 
 export function isAllowedActor(actor, allowedActors) {
