@@ -104,8 +104,11 @@ that instruction rather than silently.
 git config --worktree qwts.agentApp qwts-claude-fable-agent
 QWTS_AGENT_TRANSCRIPT_PROVIDER=claude \
 QWTS_AGENT_TRANSCRIPT_ID=<session-id> \
-  node tools/agent-bot/setup-worktree.mjs
+  node "$PLAYBOOK_HOME/tools/agent-bot/setup-worktree.mjs"
 ```
+
+(`$PLAYBOOK_HOME` = the canonical playbook-engineering checkout; if unset,
+read `~/.config/agent-bot/playbook-home`.)
 
 `setup-worktree.mjs` reads the pin ahead of detection (`--app` and
 `GH_AGENT_APP` still outrank both) and persists the resolved App as the

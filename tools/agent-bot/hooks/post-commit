@@ -10,9 +10,14 @@ if [ -f "$IDENTITY_TOOL" ] && command -v node >/dev/null 2>&1; then
   if [ -n "$ID" ]; then
     SHA=$(git rev-parse HEAD 2>/dev/null || true)
     if [ -n "$SHA" ]; then
-      node "$IDENTITY_TOOL" record "$ID" --artifact "commit:$SHA" >/dev/null || {
-        echo "warning: could not record commit $SHA for Agent-Identity $ID" >&2
-      }
+      # post-commit must never block or fail a commit: a missing/unreadable
+      # identity record (fresh fixture, pruned state) only means the artifact
+      # link is skipped — the commit itself is already durable.
+      if node "$IDENTITY_TOOL" show "$ID" >/dev/null 2>&1; then
+        node "$IDENTITY_TOOL" record "$ID" --artifact "commit:$SHA" >/dev/null 2>&1 || {
+          echo "warning: could not record commit $SHA for Agent-Identity $ID" >&2
+        }
+      fi
     fi
   fi
 fi

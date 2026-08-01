@@ -49,5 +49,6 @@ test('installGhShim does not bake a checkout path into the shim body', () => {
   const body = readFileSync(result.shimPath, 'utf8');
   assert.doesNotMatch(body, /Volumes\/added_storage/);
   assert.doesNotMatch(body, /Users\/user\/Code/);
-  assert.match(body, /AGENT_BOT_CONFIG=/);
+  assert.match(body, /PLAYBOOK_HOME/);
+  assert.match(body, /agent-bot\/playbook-home/);
 });

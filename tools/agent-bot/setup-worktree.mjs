@@ -105,9 +105,16 @@ async function main() {
   if (gitDir === commonDir) return; // primary checkout, not an agent worktree
 
   const slug = validateAppSlug(resolvedSlug);
-  const key = ensurePrivateKey({ slug });
-  if (key.downloaded) {
-    process.stdout.write(`private key fetched from Proton Pass for ${slug}\n`);
+  try {
+    const key = ensurePrivateKey({ slug });
+    if (key.downloaded) {
+      process.stdout.write(`private key fetched from Proton Pass for ${slug}\n`);
+    }
+  } catch (err) {
+    // Non-fatal: pushes mint on demand through git-credential-bot, which fails
+    // then if the key is truly absent. Never block identity setup because
+    // pass-cli/Proton Pass is unavailable or not logged in.
+    process.stderr.write(`setup-worktree: private-key fetch skipped: ${err.message}\n`);
   }
   const uid = await botUid(slug);
   const agentBotDir = dirname(fileURLToPath(import.meta.url));
