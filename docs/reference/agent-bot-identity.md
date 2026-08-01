@@ -29,16 +29,17 @@ the worktree machinery that applies it.
 ## Automating worktrees (tool-agnostic)
 
 Agents work in linked git worktrees, so the identity rides on the worktree and
-is applied by git itself — no per-tool or per-repo setup. One machine-wide
-command enables it:
+is applied by git itself — no per-tool or per-repo setup. Enable it from the
+canonical playbook-engineering checkout (records **this** absolute path):
 
 ```bash
-git config --global core.hooksPath ~/Code/playbook-engineering/tools/agent-bot/hooks
+node tools/agent-bot/install-hooks.mjs
 ```
 
-That points every repo's git hooks at this repo's [`hooks/`](../../tools/agent-bot/hooks/).
-Its `post-checkout` hook runs on `git worktree add` **regardless of which tool
-created the worktree** and calls `setup-worktree.mjs`, which:
+That sets global `core.hooksPath` to this repo's [`hooks/`](../../tools/agent-bot/hooks/)
+— re-run after moving the checkout. Its `post-checkout` hook runs on
+`git worktree add` **regardless of which tool created the worktree** and calls
+`setup-worktree.mjs`, which:
 
 - **Detects which IDE is running** from the environment that tool sets on its
   own (`CLAUDECODE`, `CODEX_*`, Cursor's bundle id, `TERM_PROGRAM=vscode`; see
@@ -49,7 +50,8 @@ created the worktree** and calls `setup-worktree.mjs`, which:
   proxying the full client hook surface to any displaced repository path,
   disables commit signing, rewrites an SSH origin to HTTPS, and wires
   `git-credential-bot.mjs` as the credential helper — every later `git push`
-  mints its own fresh token, so no `GH_TOKEN` is needed for pushes.
+  mints its own fresh token. Missing `~/.config/<slug>/private-key.pem` is
+  pulled from Proton Pass vault **Agent Identities** (item title = slug).
 
 The hook only touches *linked* worktrees (primary checkouts, and human shells
 with no IDE markers, stay the human's) and swallows errors so it never blocks
@@ -102,8 +104,11 @@ that instruction rather than silently.
 git config --worktree qwts.agentApp qwts-claude-fable-agent
 QWTS_AGENT_TRANSCRIPT_PROVIDER=claude \
 QWTS_AGENT_TRANSCRIPT_ID=<session-id> \
-  node ~/Code/playbook-engineering/tools/agent-bot/setup-worktree.mjs
+  node "$PLAYBOOK_HOME/tools/agent-bot/setup-worktree.mjs"
 ```
+
+(`$PLAYBOOK_HOME` = the canonical playbook-engineering checkout; if unset,
+read `~/.config/agent-bot/playbook-home`.)
 
 `setup-worktree.mjs` reads the pin ahead of detection (`--app` and
 `GH_AGENT_APP` still outrank both) and persists the resolved App as the

@@ -23,6 +23,8 @@
 //   - commit signing off (the human's key would show Unverified on bot commits)
 //   - credential helper = git-credential-bot.mjs, so pushes mint on demand
 //   - rewrites an SSH origin URL to HTTPS (SSH would push as the human)
+//   - if ~/.config/<slug>/private-key.pem is missing, fetch it from Proton Pass
+//     (vault "Agent Identities", item title = slug) via pass-cli
 //
 // Guard: it only touches LINKED worktrees (git-dir != common-dir). A session
 // in a primary checkout is left alone, so a human's own clone never silently
@@ -42,6 +44,7 @@ import {
   identityFieldsFromEnv,
   stateDirectory,
 } from './agent-identity.mjs';
+import { ensurePrivateKey } from './ensure-private-key.mjs';
 
 function git(...args) {
   return execFileSync('git', args, {
@@ -102,6 +105,17 @@ async function main() {
   if (gitDir === commonDir) return; // primary checkout, not an agent worktree
 
   const slug = validateAppSlug(resolvedSlug);
+  try {
+    const key = ensurePrivateKey({ slug });
+    if (key.downloaded) {
+      process.stdout.write(`private key fetched from Proton Pass for ${slug}\n`);
+    }
+  } catch (err) {
+    // Non-fatal: pushes mint on demand through git-credential-bot, which fails
+    // then if the key is truly absent. Never block identity setup because
+    // pass-cli/Proton Pass is unavailable or not logged in.
+    process.stderr.write(`setup-worktree: private-key fetch skipped: ${err.message}\n`);
+  }
   const uid = await botUid(slug);
   const agentBotDir = dirname(fileURLToPath(import.meta.url));
   const helper = join(agentBotDir, 'git-credential-bot.mjs');

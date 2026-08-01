@@ -1,14 +1,51 @@
-export function buildGhShim(tokenTool) {
+// Builds the shell text for ~/.config/agent-bot/bin/gh (ENG-0045).
+// TOKEN_TOOL resolves at runtime from PLAYBOOK_HOME or
+// ~/.config/agent-bot/playbook-home so moving the checkout and re-running
+// install-* updates the pointer without a baked-in ~/Code path. Tests may
+// still pass an absolute tokenTool to pin a fake helper.
+
+export function buildGhShim(tokenTool = null) {
+  const tokenToolSetup = tokenTool
+    ? `TOKEN_TOOL="${tokenTool}"`
+    : `# Resolve the token helper from PLAYBOOK_HOME or the recorded playbook-home.
+# The installer writes ~/.config/agent-bot/playbook-home (homeDir(), not XDG),
+# so fall back there even when XDG_CONFIG_HOME redirects config elsewhere.
+TOKEN_TOOL=""
+if [ -n "\$PLAYBOOK_HOME" ]; then
+  TOKEN_TOOL="\$PLAYBOOK_HOME/tools/agent-bot/worktree-token.mjs"
+else
+  POINTER="\${XDG_CONFIG_HOME:-\$HOME/.config}/agent-bot/playbook-home"
+  [ -f "\$POINTER" ] || POINTER="\$HOME/.config/agent-bot/playbook-home"
+  if [ -f "\$POINTER" ]; then
+    TOKEN_TOOL="\$(tr -d '\\n' < "\$POINTER")/tools/agent-bot/worktree-token.mjs"
+  fi
+fi`;
+
   return `#!/bin/sh
 # gh shim — agent bot identity (ENG-0045). Managed by
 # install-gh-shim.mjs; do not edit in place.
-TOKEN_TOOL="${tokenTool}"
-SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+${tokenToolSetup}
+SELF="$0"
+case "$SELF" in
+  */*) ;;  # already has a directory component
+  *) SELF=$(command -v -- "$SELF" 2>/dev/null) || SELF="$0" ;;
+esac
+# Physical path of this shim, following symlinks, so the PATH loop skips this
+# exact file even when invoked via a ~/.local/bin symlink into agent-bot/bin
+# or as a bare 'gh' resolved through PATH.
+SELF_REAL=$(readlink -f -- "$SELF" 2>/dev/null) || SELF_REAL=$SELF
+SELF_DIR=$(dirname -- "$SELF_REAL")
 REAL=""
 OLDIFS=$IFS; IFS=:
 for d in $PATH; do
   [ "$d" = "$SELF_DIR" ] && continue
-  if [ -x "$d/gh" ]; then REAL="$d/gh"; break; fi
+  [ -x "$d/gh" ] || continue
+  CAND="$d/gh"
+  CAND_REAL=$(readlink -f -- "$CAND" 2>/dev/null) || CAND_REAL="$CAND"
+  # Never adopt another copy of this shim (e.g. a ~/.local/bin symlink into
+  # ~/.config/agent-bot/bin) as REAL: that loops until fork exhaustion.
+  [ "$CAND_REAL" = "$SELF_REAL" ] && continue
+  REAL="$CAND"; break
 done
 IFS=$OLDIFS
 [ -z "$REAL" ] && { echo "agent-bot gh shim: real gh not found on PATH" >&2; exit 127; }
@@ -48,6 +85,7 @@ AGENT_SLUG=""
 if [ ! -f "$TOKEN_TOOL" ] || ! command -v node >/dev/null 2>&1; then
   if [ -n "$AGENT_CONTEXT$TERRITORY_HINT" ]; then
     echo "agent-bot: token helper or Node is unavailable — refusing stock human gh" >&2
+    echo "Re-run: node tools/agent-bot/install-gh-shim.mjs from your playbook-engineering checkout." >&2
     exit 1
   fi
 else
