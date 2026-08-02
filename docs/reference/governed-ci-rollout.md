@@ -55,9 +55,11 @@ authorship alone, or a generic "automation PR" category.
   deterministic generation, version consistency, exact-SHA, CodeQL, packaging,
   signing, and integrity gates.
 - Queue lanes use the GitHub-owned queue head ref and GraphQL queue entries to
-  resolve every constituent PR. Manual and post-merge fallback lanes resolve
-  the exact commit's associated PR. Both use `pull-requests: read`, reapply the
-  reviewed projection identity, and fail closed on missing evidence.
+  resolve every constituent PR, then classify only the current head PR so an
+  earlier generated projection cannot weaken a source PR. Manual and post-merge
+  fallback lanes resolve the exact commit's associated PR. Both use
+  `pull-requests: read`, reapply the reviewed projection identity, and fail
+  closed on missing evidence.
 
 For Changesets repositories, version planning, tag planning, and release
 verification all read the semantic `releases.length` emitted by

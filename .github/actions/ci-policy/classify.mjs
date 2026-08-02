@@ -1,6 +1,6 @@
 import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { resolveReleasePullRequests } from './release-origin.mjs';
+import { mergeGroupHeadPullRequest, resolveReleasePullRequests } from './release-origin.mjs';
 
 const ROSTER_URL = new URL('../../../governance/agents.json', import.meta.url);
 const RELEASE_LIFECYCLES_URL = new URL('../../../governance/release-lifecycles.json', import.meta.url);
@@ -39,6 +39,14 @@ export function releaseLifecycleFor(catalog, repository) {
 }
 
 function releasePullRequests({ eventName, event, pullRequests = [] }) {
+  if (eventName === 'merge_group' && pullRequests.length > 0) {
+    const head = mergeGroupHeadPullRequest(event);
+    const matches = pullRequests.filter((pullRequest) => pullRequest.number === head.number);
+    if (matches.length !== 1) {
+      throw new Error(`merge queue evidence does not uniquely identify head pull request #${head.number}`);
+    }
+    return matches;
+  }
   if (pullRequests.length > 0) return pullRequests;
   return eventName === 'pull_request' && event.pull_request ? [event.pull_request] : [];
 }

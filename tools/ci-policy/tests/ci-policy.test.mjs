@@ -251,13 +251,13 @@ test('ordinary automation is not a generated-release exception', () => {
   assert.equal(outputs.release_gate_mode, 'source-policy');
 });
 
-test('exact-SHA lifecycle lanes retain the originating generated projection', () => {
+test('manual and post-merge lanes retain the originating generated projection', () => {
   const lifecycle = releaseLifecycleFor(releaseCatalog, 'qwts/overlook');
   const projection = releasePullRequest({
     author: 'chores-dumb[bot]',
     headRef: 'changeset-release/main',
   }).pull_request;
-  for (const eventName of ['merge_group', 'workflow_dispatch', 'push']) {
+  for (const eventName of ['workflow_dispatch', 'push']) {
     const outputs = releaseOutputs({
       eventName,
       event: {},
@@ -367,11 +367,50 @@ test('merge groups resolve every constituent pull request from queue evidence', 
   };
   const pullRequests = await listMergeGroupPullRequests(options);
   assert.equal(pullRequests.length, 2);
+  assert.equal(pullRequests[1].number, 116);
   assert.equal(pullRequests[1].user.login, 'chores-dumb[bot]');
   assert.equal(requests[0].url, options.graphqlUrl);
   assert.equal(requests[0].body.variables.number, 116);
   assert.equal(requests[1].body.variables.after, 'queue-cursor');
   assert.equal(releaseOutputs({ ...options, pullRequests }).release_gate_mode, 'generated-projection');
+});
+
+test('mixed merge groups classify only the current head pull request', () => {
+  const lifecycle = releaseLifecycleFor(releaseCatalog, 'qwts/overlook');
+  const event = {
+    merge_group: { head_ref: 'refs/heads/gh-readonly-queue/main/pr-116-e8c01cbc4c17' },
+  };
+  const generated = {
+    number: 115,
+    ...releasePullRequest({
+      author: 'chores-dumb[bot]',
+      headRef: 'changeset-release/main',
+    }).pull_request,
+  };
+  const source = {
+    number: 116,
+    ...releasePullRequest({ headRef: 'codex/source-change' }).pull_request,
+  };
+  const outputs = releaseOutputs({
+    eventName: 'merge_group',
+    event,
+    repository: 'qwts/overlook',
+    lifecycle,
+    pullRequests: [generated, source],
+  });
+  assert.equal(outputs.pull_request_kind, 'change-pr');
+  assert.equal(outputs.generated_release_projection, 'false');
+  assert.equal(outputs.release_gate_mode, 'source-policy');
+  assert.throws(
+    () => releaseOutputs({
+      eventName: 'merge_group',
+      event,
+      repository: 'qwts/overlook',
+      lifecycle,
+      pullRequests: [generated],
+    }),
+    /does not uniquely identify head pull request #116/,
+  );
 });
 
 test('release-origin lookup fails closed on missing or malformed evidence', async () => {

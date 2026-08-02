@@ -40,8 +40,13 @@ test('release lifecycle policy distinguishes source inputs from generated projec
   assert.match(contract, /both\s+`github\.actor` and `github\.triggering_actor`/u);
   assert.match(contract, /repeated force-regeneration remains safe/u);
   assert.match(contract, /GraphQL `mergeQueueEntry`/u);
-  assert.match(contract, /every queue entry included\s+through that position/u);
-  assert.match(contract, /exact\s+`github\.sha` through the read-only associated-pull-request endpoint/u);
+  assert.match(contract, /every queue entry included\s+through\s+that position/u);
+  assert.match(contract, /classifies only the current head PR/u);
+  assert.match(contract, /earlier generated\s+projection never overrides a source PR/u);
+  assert.match(
+    contract,
+    /exact\s+`github\.sha` through the read-only\s+associated-pull-request endpoint/u,
+  );
   assert.match(contract, /`pull-requests: read`/u);
   assert.match(contract, /missing or malformed origin evidence fails closed/iu);
   assert.match(fleet, /`qwts\/overlook#870`/u);

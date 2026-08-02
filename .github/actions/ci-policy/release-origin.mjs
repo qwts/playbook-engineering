@@ -78,6 +78,7 @@ function normalizeQueuePullRequest(pullRequest) {
     ? `${author.login}[bot]`
     : author?.login;
   return {
+    number: pullRequest.number,
     base: { ref: pullRequest.baseRefName },
     head: { ref: pullRequest.headRefName, repo: { full_name: pullRequest.headRepository?.nameWithOwner } },
     user: { login },
