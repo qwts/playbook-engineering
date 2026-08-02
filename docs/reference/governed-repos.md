@@ -221,7 +221,7 @@ contents permission.
 | `cartograph` | public | active | no | managed | Branch prefixes feat/ fix/ chore/ docs/; issue-before-branch; Rust gate (fmt, clippy -D warnings, test); spec/traceability artifacts in the same PR. |
 | `bookmarkit` | public | active | no | managed | — |
 | `quorum` | public | active | no | managed | — |
-| `agent-bot-identity` | public | onboarding | no | managed | — |
-| `codex-rules-editor` | public | onboarding | no | managed | — |
+| `agent-bot-identity` | public | active | no | managed | — |
+| `codex-rules-editor` | public | active | no | managed | — |
 | `playbook-dashboard` | public | onboarding | no | managed | — |
 <!-- END GENERATED governed-repos -->

@@ -63,7 +63,7 @@
       "name": "agent-bot-identity",
       "visibility": "public",
       "publish": true,
-      "status": "onboarding",
+      "status": "active",
       "sharedCi": false,
       "delta": "",
       "note": "Standalone source of truth for agent identity runtime code and operational mechanics (ENG-0128)."
@@ -72,7 +72,7 @@
       "name": "codex-rules-editor",
       "visibility": "public",
       "publish": true,
-      "status": "onboarding",
+      "status": "active",
       "sharedCi": false,
       "delta": "",
       "note": ""
