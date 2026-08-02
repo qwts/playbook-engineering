@@ -96,6 +96,8 @@ test('governed integrations use the installed CLI and the playbook suite exclude
 
   assert.match(codex, /AGENT_BOT_BIN:-agent-bot/);
   assert.match(codex, /"\$setup" setup-worktree/);
+  assert.match(codex, /AGENT_BOT_HOME:-[\s\S]*setup-worktree\.mjs/);
+  assert.match(codex, /node "\$AGENT_BOT_HOME\/setup-worktree\.mjs"/);
   assert.ok(!codex.includes('qwts.agent'));
   assert.ok(!codex.includes(legacyHome));
   assert.ok(!codex.includes(obsoleteRuntime));

@@ -22,7 +22,7 @@ once per machine:
 
 ```bash
 mkdir -p ~/.claude/skills
-PLAYBOOK_ROOT="$(playbook-engineering status | sed -n '1p')"
+PLAYBOOK_ROOT="$(git rev-parse --show-toplevel)"
 ln -sfn "$PLAYBOOK_ROOT/skills/signed-commit" ~/.claude/skills/signed-commit
 ```
 

@@ -21,10 +21,13 @@ if [[ "$git_dir" == "$common_dir" ]]; then
 fi
 
 setup="${AGENT_BOT_BIN:-agent-bot}"
-command -v "$setup" >/dev/null 2>&1 ||
+if command -v "$setup" >/dev/null 2>&1; then
+  "$setup" setup-worktree
+elif [[ -n "${AGENT_BOT_HOME:-}" && -f "$AGENT_BOT_HOME/setup-worktree.mjs" ]]; then
+  node "$AGENT_BOT_HOME/setup-worktree.mjs"
+else
   fail "agent-bot is not installed; install it from the agent-bot-identity runtime repository"
-
-"$setup" setup-worktree
+fi
 
 agent_id="$(git config --worktree --get agentBot.agentId 2>/dev/null || true)"
 agent_app="$(git config --worktree --get agentBot.app 2>/dev/null || true)"
