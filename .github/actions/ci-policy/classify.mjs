@@ -64,8 +64,13 @@ export function isGeneratedReleaseProjection(options) {
   const { repository, lifecycle } = options;
   const projection = lifecycle.generatedProjection;
   if (!projection) return false;
-  return releasePullRequests(options).some((pullRequest) =>
+  const pullRequests = releasePullRequests(options);
+  const matches = pullRequests.filter((pullRequest) =>
     matchesGeneratedProjection(pullRequest, repository, projection));
+  if (matches.length > 0 && pullRequests.length !== 1) {
+    throw new Error('generated release projection origin is ambiguous');
+  }
+  return matches.length === 1;
 }
 
 export function releaseOutputs(options) {

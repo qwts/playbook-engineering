@@ -140,13 +140,14 @@ exception or PR-controlled flag. The reviewed catalog must match the GitHub
 event's repository, base ref, head ref, canonical head repository, and PR
 author. Actor authorization still checks both
 `github.actor` and `github.triggering_actor`, and public forks remain refused.
-For `merge_group`, the policy parses GitHub's queue head ref, reads the head
-PR's GraphQL `mergeQueueEntry`, verifies every queue entry included through
+For `merge_group`, the policy parses the queue head ref and head PR's GraphQL
+`mergeQueueEntry`, verifies every queue entry included through
 that position, and classifies only the current head PR. An earlier generated
 projection never overrides a source PR's stricter policy. Manual and post-merge
 fallbacks resolve the exact `github.sha` through the read-only
-associated-pull-request endpoint. Each lane reapplies the same contract;
-missing or malformed origin evidence fails closed.
+associated-pull-request endpoint. Generated classification requires exactly one
+associated PR; mixed generated and source origins fail closed. Missing or
+malformed origin evidence fails closed.
 Grant only `pull-requests: read`; these lookups neither authorize the actor nor
 provide a write credential.
 

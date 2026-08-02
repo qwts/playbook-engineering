@@ -59,7 +59,8 @@ authorship alone, or a generic "automation PR" category.
   earlier generated projection cannot weaken a source PR. Manual and post-merge
   fallback lanes resolve the exact commit's associated PR. Both use
   `pull-requests: read`, reapply the reviewed projection identity, and fail
-  closed on missing evidence.
+  closed on missing evidence. A generated classification requires exactly one
+  associated PR; mixed generated and source origins are rejected as ambiguous.
 
 For Changesets repositories, version planning, tag planning, and release
 verification all read the semantic `releases.length` emitted by

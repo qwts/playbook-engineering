@@ -271,6 +271,34 @@ test('manual and post-merge lanes retain the originating generated projection', 
   }
 });
 
+test('manual and post-merge lanes reject mixed generated and source origins', () => {
+  const lifecycle = releaseLifecycleFor(releaseCatalog, 'qwts/overlook');
+  const generated = releasePullRequest({
+    author: 'chores-dumb[bot]',
+    headRef: 'changeset-release/main',
+  }).pull_request;
+  const source = releasePullRequest({ headRef: 'codex/source-change' }).pull_request;
+  for (const eventName of ['workflow_dispatch', 'push']) {
+    assert.throws(
+      () => releaseOutputs({
+        eventName,
+        event: {},
+        repository: 'qwts/overlook',
+        lifecycle,
+        pullRequests: [generated, source],
+      }),
+      /generated release projection origin is ambiguous/,
+    );
+    assert.equal(releaseOutputs({
+      eventName,
+      event: {},
+      repository: 'qwts/overlook',
+      lifecycle,
+      pullRequests: [source, source],
+    }).release_gate_mode, 'source-policy');
+  }
+});
+
 test('manual and post-merge lanes resolve associated pull requests through the exact commit SHA', async () => {
   const lifecycle = releaseLifecycleFor(releaseCatalog, 'qwts/overlook');
   const projection = releasePullRequest({

@@ -18,6 +18,7 @@ test('Overlook generated-release golden task preserves the fleet invariant', () 
     /reviewed repository, base, head, and author identity/u,
     /every constituent queue PR/u,
     /classify only its current head/u,
+    /fail-closed exact-SHA manual and post-merge fallbacks that reject mixed origins/u,
     /zero semantic releases/u,
     /exact-SHA CI/u,
     /both actor fields/u,
