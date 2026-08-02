@@ -6,9 +6,6 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { readAgentIdentity } from '../agent-identity.mjs';
-import { helperSlug } from '../worktree-token.mjs';
-
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const STARTUP = path.join(ROOT, '.codex', 'scripts', 'ensure-identity.sh');
 const roots = [];
@@ -23,31 +20,38 @@ function fixture() {
   const home = path.join(root, 'home');
   const repo = path.join(root, 'repo');
   const worktree = path.join(root, 'worktree');
-  const stateDir = path.join(root, 'state');
   const globalConfig = path.join(root, 'gitconfig');
   const app = 'qwts-codex-sol-agent';
   const env = {
     ...process.env,
     HOME: home,
     GIT_CONFIG_GLOBAL: globalConfig,
-    QWTS_AGENT_STATE_HOME: stateDir,
   };
   for (const key of Object.keys(env)) {
     if (/^(CODEX|CLAUDE|AI_AGENT|QWTS_AGENT|GH_AGENT_APP)/.test(key)) delete env[key];
   }
-  env.QWTS_AGENT_STATE_HOME = stateDir;
-
   mkdirSync(path.join(home, '.config', app), { recursive: true });
   mkdirSync(path.join(home, '.local', 'bin'), { recursive: true });
-  mkdirSync(path.join(home, '.local', 'share', 'playbook-engineering', 'hooks'), { recursive: true });
+  mkdirSync(path.join(home, '.local', 'share', 'agent-bot', 'hooks'), { recursive: true });
   writeFileSync(
-    path.join(home, '.local', 'share', 'playbook-engineering', 'hooks', 'prepare-commit-msg'),
+    path.join(home, '.local', 'share', 'agent-bot', 'hooks', 'prepare-commit-msg'),
     '#!/bin/sh\nexit 0\n',
     { mode: 0o755 },
   );
   writeFileSync(
-    path.join(home, '.local', 'bin', 'playbook-setup-worktree'),
-    `#!/bin/sh\nexec node ${JSON.stringify(path.join(ROOT, 'tools', 'agent-bot', 'setup-worktree.mjs'))} "$@"\n`,
+    path.join(home, '.local', 'bin', 'agent-bot'),
+    `#!/bin/sh
+[ "$1" = "setup-worktree" ] || exit 64
+printf '%s\\n' "$*" >"$HOME/agent-bot-invocation"
+git config extensions.worktreeConfig true
+git config --worktree agentBot.app "$GH_AGENT_APP"
+git config --worktree agentBot.agentId agent_00000000-0000-4000-8000-000000000001
+git config --worktree user.name "$GH_AGENT_APP[bot]"
+git config --worktree credential.helper "!agent-bot credential $GH_AGENT_APP"
+git config --worktree core.hooksPath "$HOME/.local/share/agent-bot/hooks"
+if [ -n "$CODEX_THREAD_ID" ]; then state='transcript bound'; else state='transcript pending'; fi
+echo "worktree configured for $GH_AGENT_APP[bot] as agent_00000000-0000-4000-8000-000000000001 ($state)"
+`,
     { mode: 0o755 },
   );
   writeFileSync(path.join(home, '.config', app, 'bot-uid'), '309211430\n');
@@ -63,13 +67,13 @@ function fixture() {
     cwd: repo,
     env,
   });
-  return { app, env, stateDir, worktree };
+  return { app, env, worktree };
 }
 
 test('Codex startup repairs a worktree created before harness markers exist', () => {
-  const { app, env, stateDir, worktree } = fixture();
+  const { app, env, worktree } = fixture();
   assert.throws(
-    () => execFileSync('git', ['config', '--get', 'qwts.agentId'], { cwd: worktree, env }),
+    () => execFileSync('git', ['config', '--get', 'agentBot.agentId'], { cwd: worktree, env }),
     /Command failed/,
   );
 
@@ -80,13 +84,13 @@ test('Codex startup repairs a worktree created before harness markers exist', ()
   };
   execFileSync('bash', [STARTUP], { cwd: worktree, env: startupEnv, encoding: 'utf8' });
 
-  const firstId = execFileSync('git', ['config', '--get', 'qwts.agentId'], {
+  const firstId = execFileSync('git', ['config', '--get', 'agentBot.agentId'], {
     cwd: worktree,
     env,
     encoding: 'utf8',
   }).trim();
   assert.equal(
-    execFileSync('git', ['config', '--worktree', '--get', 'qwts.agentApp'], {
+    execFileSync('git', ['config', '--worktree', '--get', 'agentBot.app'], {
       cwd: worktree,
       env,
       encoding: 'utf8',
@@ -106,28 +110,23 @@ test('Codex startup repairs a worktree created before harness markers exist', ()
     env,
     encoding: 'utf8',
   }).trim().split('\n');
-  assert.equal(helperSlug(helpers.at(-1)), app);
-  assert.match(helpers.at(-1), /\.local\/bin\/playbook-git-credential-bot/);
-  assert.doesNotMatch(helpers.at(-1), /playbook-engineering\/tools/);
+  assert.equal(helpers.at(-1), `!agent-bot credential ${app}`);
   assert.equal(
     execFileSync('git', ['config', '--worktree', '--get', 'core.hooksPath'], {
       cwd: worktree,
       env,
       encoding: 'utf8',
     }).trim(),
-    path.join(env.HOME, '.local', 'share', 'playbook-engineering', 'hooks'),
+    path.join(env.HOME, '.local', 'share', 'agent-bot', 'hooks'),
   );
-  const record = readAgentIdentity(firstId, { stateDir });
-  assert.equal(record.github.appSlug, app);
-  assert.deepEqual(record.transcript, {
-    provider: 'codex',
-    id: 'thread-sol-1',
-    sha256: null,
-  });
+  assert.equal(
+    execFileSync('cat', [path.join(env.HOME, 'agent-bot-invocation')], { encoding: 'utf8' }).trim(),
+    'setup-worktree',
+  );
 
   execFileSync('bash', [STARTUP], { cwd: worktree, env: startupEnv });
   assert.equal(
-    execFileSync('git', ['config', '--get', 'qwts.agentId'], {
+    execFileSync('git', ['config', '--get', 'agentBot.agentId'], {
       cwd: worktree,
       env,
       encoding: 'utf8',
@@ -138,19 +137,19 @@ test('Codex startup repairs a worktree created before harness markers exist', ()
 });
 
 test('Codex startup accepts a transcript-pending identity before the task exists', () => {
-  const { app, env, stateDir, worktree } = fixture();
+  const { app, env, worktree } = fixture();
   const result = spawnSync('bash', [STARTUP], {
     cwd: worktree,
     env: { ...env, GH_AGENT_APP: app },
     encoding: 'utf8',
   });
   assert.equal(result.status, 0, result.stderr);
-  const id = execFileSync('git', ['config', '--worktree', '--get', 'qwts.agentId'], {
+  const id = execFileSync('git', ['config', '--worktree', '--get', 'agentBot.agentId'], {
     cwd: worktree,
     env,
     encoding: 'utf8',
   }).trim();
-  assert.equal(readAgentIdentity(id, { stateDir }).transcript, null);
+  assert.equal(id, 'agent_00000000-0000-4000-8000-000000000001');
   assert.match(result.stdout, /transcript pending/);
 });
 
@@ -173,11 +172,9 @@ test('Codex startup cannot be satisfied by identity values outside worktree scop
     env,
   });
   execFileSync('git', ['config', '--global', 'core.hooksPath', fakeHooks], { env });
-  writeFileSync(
-    path.join(env.HOME, '.local', 'bin', 'playbook-setup-worktree'),
-    '#!/bin/sh\nexit 0\n',
-    { mode: 0o755 },
-  );
+  writeFileSync(path.join(env.HOME, '.local', 'bin', 'agent-bot'), '#!/bin/sh\nexit 0\n', {
+    mode: 0o755,
+  });
 
   const result = spawnSync('bash', [STARTUP], {
     cwd: worktree,
@@ -189,5 +186,30 @@ test('Codex startup cannot be satisfied by identity values outside worktree scop
     encoding: 'utf8',
   });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /setup completed without a qwts\.agentId/);
+  assert.match(result.stderr, /setup completed without an agentBot\.agentId/);
+});
+
+test('Codex startup retains read-only compatibility with legacy worktree pins', () => {
+  const { app, env, worktree } = fixture();
+  writeFileSync(
+    path.join(env.HOME, '.local', 'bin', 'agent-bot'),
+    `#!/bin/sh
+[ "$1" = "setup-worktree" ] || exit 64
+git config extensions.worktreeConfig true
+git config --worktree qwts.agentApp "$GH_AGENT_APP"
+git config --worktree qwts.agentId agent_00000000-0000-4000-8000-000000000002
+git config --worktree user.name "$GH_AGENT_APP[bot]"
+git config --worktree credential.helper "!agent-bot credential $GH_AGENT_APP"
+git config --worktree core.hooksPath "$HOME/.local/share/agent-bot/hooks"
+`,
+    { mode: 0o755 },
+  );
+
+  const result = spawnSync('bash', [STARTUP], {
+    cwd: worktree,
+    env: { ...env, GH_AGENT_APP: app },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, new RegExp(`${app}\\[bot\\].*agent_00000000`));
 });
