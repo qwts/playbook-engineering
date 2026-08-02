@@ -70,7 +70,8 @@ closed before a tag or release. Reject raw `.changeset` file-presence checks in
 all three lanes. Reuse the
 [`changeset-release-count` action](../../.github/actions/changeset-release-count/action.yml)
 rather than maintaining three inline parsers. After a generated projection has
-consumed every non-README input, the action returns zero directly; it never
+consumed every non-README input, the action returns zero only without
+`.changeset/pre.json`; prerelease exit state runs Changesets status. It never
 requires a manual empty marker, and repeated force-regeneration remains safe.
 
 ## Required checks and publishers

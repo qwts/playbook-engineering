@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -10,8 +10,12 @@ export function changesetInputs(root) {
     .map((entry) => entry.name);
 }
 
+export function hasPrereleaseState(root) {
+  return existsSync(path.join(root, '.changeset', 'pre.json'));
+}
+
 export function semanticReleaseCount({ root, statusFile, runStatus = defaultRunStatus }) {
-  if (changesetInputs(root).length === 0) return 0;
+  if (changesetInputs(root).length === 0 && !hasPrereleaseState(root)) return 0;
   runStatus(statusFile, root);
   const status = JSON.parse(readFileSync(statusFile, 'utf8'));
   if (!Array.isArray(status.releases)) throw new Error('Changesets status has no releases array');

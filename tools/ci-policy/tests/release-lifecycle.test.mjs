@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import {
   changesetInputs,
+  hasPrereleaseState,
   semanticReleaseCount,
 } from '../../../.github/actions/changeset-release-count/semantic-release-count.mjs';
 
@@ -36,6 +37,19 @@ test('present changeset inputs use semantic Changesets output', () => {
   const statusFile = path.join(root, 'status.json');
   writeFileSync(path.join(root, '.changeset', 'change.md'), '---\n"example": patch\n---\n\nFix.\n');
   assert.deepEqual(changesetInputs(root), ['change.md']);
+  const count = semanticReleaseCount({
+    root,
+    statusFile,
+    runStatus: (output) => writeFileSync(output, JSON.stringify({ releases: [{ name: 'example' }] })),
+  });
+  assert.equal(count, 1);
+});
+
+test('prerelease exit state uses semantic Changesets output without markdown inputs', () => {
+  const root = changesetRoot();
+  const statusFile = path.join(root, 'status.json');
+  writeFileSync(path.join(root, '.changeset', 'pre.json'), JSON.stringify({ mode: 'exit' }));
+  assert.equal(hasPrereleaseState(root), true);
   const count = semanticReleaseCount({
     root,
     statusFile,

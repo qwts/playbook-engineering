@@ -131,9 +131,9 @@ lifecycle after the immutable policy action identifies it from
 Generation automation validates its deterministic version diff and dispatches
 no extra equivalent CI run. It must prove semantic `releases.length` is zero,
 but it need not retain Changesets already consumed into version and changelog
-output. With no non-README Changeset inputs left, the shared semantic counter
-reports zero without requiring an empty marker; present inputs still run
-`changeset status --output`, and malformed or positive state fails closed.
+output. Absent non-README inputs and `.changeset/pre.json`, the counter reports
+zero without an empty marker. Either input, including prerelease `mode: "exit"`,
+runs `changeset status --output`; malformed or positive state fails closed.
 
 The projection classification is not a workflow input. Do not add a branch-only
 exception or PR-controlled flag. The reviewed catalog must match the GitHub

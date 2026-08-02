@@ -22,7 +22,8 @@ test('all Changesets lanes share one semantic release-count contract', () => {
   assert.match(action, /git fetch --no-tags --depth=1 origin/u);
   assert.match(counter, /'changeset', 'status', '--output'/u);
   assert.match(counter, /status\.releases\.length/u);
-  assert.match(counter, /changesetInputs\(root\)\.length === 0/u);
+  assert.match(counter, /changesetInputs\(root\)\.length === 0 && !hasPrereleaseState\(root\)/u);
+  assert.match(contract, /prerelease (?:`mode: "exit"`|exit state)/u);
   assert.doesNotMatch(action, /find \.changeset|\.changeset\/\*\.md/u);
 });
 
