@@ -1,0 +1,24 @@
+{
+  "id": "overlook-generated-release-projection",
+  "title": "Preserve source release intent without blocking its generated projection",
+  "regressionEvidence": {
+    "pullRequest": "qwts/overlook#870",
+    "commit": "260fa140e0bccf643b4e623a79fbbcc4edff9d8a"
+  },
+  "prompt": "Repair governed CI after a generated Version packages PR consumed reviewed Changesets into package.json and CHANGELOG.md, then failed because the complete suite still required those source files.",
+  "requiredOutcomes": [
+    "Inventory the repository release mechanism before choosing a metadata gate.",
+    "Keep the source PR's repository-specific release-input contract fail closed.",
+    "Classify the projection only from reviewed repository, base, head, and author identity, applying the policy of the pull request the run actually belongs to.",
+    "Fail closed on ambiguous origin evidence, and treat an absent origin as missing release context rather than a policy failure.",
+    "Require zero semantic releases after projection generation without an empty marker, while prerelease exit state still runs semantic status.",
+    "Preserve exact-SHA CI, stable contexts, CodeQL, reviews, packaging, signing, and release integrity.",
+    "Reject unauthorized actors and forks and check both actor fields."
+  ],
+  "forbiddenOutcomes": [
+    "Treat release metadata file presence as a universal PR invariant.",
+    "Trust a branch-only exception or a PR-controlled flag.",
+    "Exempt Dependabot or ordinary automation from unrelated gates.",
+    "Use an empty Changeset marker to keep regenerated release branches green."
+  ]
+}

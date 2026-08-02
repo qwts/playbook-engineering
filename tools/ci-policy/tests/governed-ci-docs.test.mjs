@@ -9,6 +9,7 @@ test('all Changesets lanes share one semantic release-count contract', () => {
   const rollout = read('docs/reference/governed-ci-rollout.md');
   const release = read('docs/sop/release-and-versioning.md');
   const action = read('.github/actions/changeset-release-count/action.yml');
+  const counter = read('.github/actions/changeset-release-count/semantic-release-count.mjs');
   const contract = `${policy}\n${rollout}`;
 
   for (const lane of ['Version planning', 'tag planning', 'release verification']) {
@@ -19,9 +20,54 @@ test('all Changesets lanes share one semantic release-count contract', () => {
   assert.match(contract, /a positive count fails\s+closed/u);
   assert.match(release, /may substitute `find \.changeset`, a file count/u);
   assert.match(action, /git fetch --no-tags --depth=1 origin/u);
-  assert.match(action, /npx --no-install changeset status --output/u);
-  assert.match(action, /\.releases\.length/u);
+  assert.match(counter, /'changeset', 'status', '--output'/u);
+  assert.match(counter, /status\.releases\.length/u);
   assert.doesNotMatch(action, /find \.changeset|\.changeset\/\*\.md/u);
+});
+
+// The wording of the release-lifecycle policy is reviewed in the PR. What is pinned here is
+// that exactly one document owns it and that the others point at it instead of restating it.
+test('one document owns the generated-projection contract', () => {
+  const policy = read('docs/reference/ci-execution-policy.md');
+  const consumers = ['governed-ci-rollout', 'governed-ci-release-lifecycle-fleet']
+    .map((name) => read(`docs/reference/${name}.md`))
+    .concat(read('docs/decisions/ENG-0004-centralize-shared-cicd.md'));
+
+  assert.match(policy, /`release-lifecycles\.json`/u);
+  assert.match(policy, /`pull-requests: read`/u);
+  assert.match(policy, /both `github\.actor` and `github\.triggering_actor`/u);
+  assert.match(policy, /never required to retain the\s+Changesets it consumed/u);
+
+  for (const consumer of consumers) {
+    assert.match(consumer, /ci-execution-policy\.md/u, 'each consumer links the owning policy');
+    assert.doesNotMatch(
+      consumer,
+      /base ref, head ref, canonical head repository, and author/u,
+      'the projection identity tuple is restated outside the owning policy',
+    );
+  }
+});
+
+test('the release lifecycle catalog covers the governed manifest exactly once', () => {
+  const manifest = JSON.parse(read('governance/repos.json'));
+  const catalog = JSON.parse(read('governance/release-lifecycles.json'));
+  const fleet = read('docs/reference/governed-ci-release-lifecycle-fleet.md');
+  const governed = manifest.repos.filter((entry) => ['active', 'onboarding'].includes(entry.status));
+
+  assert.equal(catalog.repositories.length, governed.length);
+  for (const repo of governed) {
+    const entries = catalog.repositories.filter((entry) => entry.repository === `qwts/${repo.name}`);
+    assert.equal(entries.length, 1, `${repo.name} must appear in the catalog exactly once`);
+    const [{ metadataSystem, generatedProjection }] = entries;
+    assert.ok(fleet.includes(`\`${repo.name}\``), `${repo.name} has no published disposition`);
+    if (metadataSystem === 'none') {
+      assert.equal(generatedProjection, null, `${repo.name} has no release system but names a projection`);
+      continue;
+    }
+    for (const field of ['baseRef', 'headRef', 'author']) {
+      assert.ok(generatedProjection?.[field], `${repo.name} projection identity is missing ${field}`);
+    }
+  }
 });
 
 test('user-owned fallback preserves strict exact-SHA evidence and merge methods', () => {

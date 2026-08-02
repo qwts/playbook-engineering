@@ -1,5 +1,5 @@
 name: CI policy
-description: Authorize governed workflow actors and classify CI lifecycle runs.
+description: Authorize governed actors and classify CI and release-projection lifecycle runs.
 
 inputs:
   authorization-only:
@@ -17,6 +17,21 @@ outputs:
   run_post_merge:
     description: Whether the short post-merge lane must run
     value: ${{ steps.classify.outputs.run_post_merge }}
+  pull_request_kind:
+    description: change-pr, generated-release-projection, or not-a-pull-request
+    value: ${{ steps.classify.outputs.pull_request_kind }}
+  generated_release_projection:
+    description: Whether reviewed lifecycle configuration identifies this PR as generated release output
+    value: ${{ steps.classify.outputs.generated_release_projection }}
+  release_metadata_system:
+    description: The repository's reviewed release metadata system
+    value: ${{ steps.classify.outputs.release_metadata_system }}
+  source_input_policy:
+    description: The repository-specific source PR release-input policy identifier
+    value: ${{ steps.classify.outputs.source_input_policy }}
+  release_gate_mode:
+    description: not-applicable, source-policy, generated-projection, or no-source-context
+    value: ${{ steps.classify.outputs.release_gate_mode }}
 
 runs:
   using: composite
@@ -29,6 +44,10 @@ runs:
         CI_POLICY_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
         CI_POLICY_EVENT_NAME: ${{ github.event_name }}
         CI_POLICY_EVENT_PATH: ${{ github.event_path }}
+        CI_POLICY_REPOSITORY: ${{ github.repository }}
+        CI_POLICY_SHA: ${{ github.sha }}
+        CI_POLICY_API_URL: ${{ github.api_url }}
+        CI_POLICY_TOKEN: ${{ github.token }}
         CI_POLICY_REF: ${{ github.ref }}
         CI_POLICY_AUTHORIZATION_ONLY: ${{ inputs.authorization-only }}
       run: node "${{ github.action_path }}/classify.mjs"
