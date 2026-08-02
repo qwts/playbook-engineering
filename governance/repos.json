@@ -72,7 +72,7 @@
       "name": "codex-rules-editor",
       "visibility": "public",
       "publish": true,
-      "status": "onboarding",
+      "status": "active",
       "sharedCi": false,
       "delta": "",
       "note": ""
