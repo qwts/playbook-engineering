@@ -9,6 +9,11 @@ This baseline comes from
 [ENG-0008](../decisions/ENG-0008-shared-sop-inheritance.md). Repositories map
 existing gates onto its lanes; only timing and deduplication change.
 
+Release-input policy is repository-specific. A source PR supplies the inputs
+required by that repository; a generated release projection consumes them and
+proves the resulting release state. CI never requires a generated projection
+to retain inputs it was designed to consume.
+
 ## Runtime actor boundary
 
 Allowed runtime actors are:
@@ -56,6 +61,9 @@ lane unless a separate reviewed decision explicitly removes it.
 | Draft PR opened or updated | Do not start GitHub Actions automatically. Before marking ready, the agent runs the repository's agreed local gates, including lint, formatting check, typecheck, unit tests, and docs-gov where configured; a missing category is recorded as not applicable. After the branch is pushed, the agent may explicitly dispatch the complete suite for the exact feature-branch SHA and wait for success. |
 | PR marked ready | Verify whether the exact PR-head SHA already has a successful manual complete-suite run. Reuse that evidence and report the stable required gate without rerunning expensive jobs; otherwise run every agreed complete-suite gate. |
 | Ready PR updated | Cancel the older PR run. Reuse successful complete-suite evidence only when it names the new exact SHA; otherwise execute every complete-suite gate against the new merge candidate. |
+| Source or change PR | Apply the repository's existing release-input contract. Do not invent Changesets or another metadata requirement in a repository that does not use it. |
+| Generated release projection | Classify from reviewed repository, base, head, and author configuration. Exempt only consumed-input presence; require deterministic version output, zero pending semantic releases, and every other ready-PR gate. |
+| Ordinary automation PR | Apply its normal repository contract. Bot authorship, an updater branch, or a familiar branch suffix does not grant the generated-release exception. |
 | PR enters the merge queue | Run every complete-suite gate against the `merge_group` SHA. Earlier evidence cannot replace validation with current `main` and prior queued changes. |
 | Queue merge or push to `main` | If that exact SHA has successful merge-group evidence, run only a short smoke/integration check. Otherwise execute every complete-suite gate as the fail-safe. |
 | Manual dispatch | Used for exact-SHA preflight validation before PR promotion, diagnostics, release recovery, workflow testing, and an explicit rerun. A CI dispatch defaults to the complete suite. |
@@ -112,9 +120,26 @@ deletes an agreed validation to make branch protection pass.
 
 ## Changesets, version PRs, and releases
 
-A changesets or version-packages PR follows the same lifecycle: validate its
-head, then its merge-group candidate. Generation automation validates only its
-deterministic version diff and dispatches no extra equivalent CI run.
+A source PR in a Changesets repository follows that repository's reviewed
+release-input contract. The contract may require a Changeset only for shipping
+changes, permit an explicit no-release-impact path, or use another local rule.
+The migration does not replace that rule with raw file presence.
+
+A generated Version packages PR follows the same ready-head and exact-SHA
+lifecycle after the immutable policy action identifies it from
+[`governance/release-lifecycles.json`](../../governance/release-lifecycles.json).
+Generation automation validates its deterministic version diff and dispatches
+no extra equivalent CI run. It must prove semantic `releases.length` is zero,
+but it need not retain Changesets already consumed into version and changelog
+output. With no non-README Changeset inputs left, the shared semantic counter
+reports zero without requiring an empty marker; present inputs still run
+`changeset status --output`, and malformed or positive state fails closed.
+
+The projection classification is not a workflow input. Do not add a branch-only
+exception or PR-controlled flag. The reviewed catalog must match the GitHub
+event's repository, base ref, head ref, canonical head repository, and PR
+author. Actor authorization still checks both
+`github.actor` and `github.triggering_actor`, and public forks remain refused.
 
 Tagging and release workflows consume the successful complete-suite evidence
 for that exact commit instead of rerunning generic lint, format, typecheck,

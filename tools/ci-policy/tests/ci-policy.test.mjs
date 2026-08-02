@@ -6,15 +6,37 @@ import {
   allowedActorsFromRoster,
   authorizeRun,
   classifyRun,
+  isGeneratedReleaseProjection,
   isAllowedActor,
   isNativeMergeQueueMainPush,
   outputsFor,
+  releaseGateOutcome,
+  releaseLifecycleFor,
+  releaseOutputs,
 } from '../../../.github/actions/ci-policy/classify.mjs';
 
 const pullRequest = (draft, fork = false) => ({ pull_request: { draft, head: { repo: { fork } } } });
 const roster = JSON.parse(readFileSync(new URL('../../../governance/agents.json', import.meta.url), 'utf8'));
+const releaseCatalog = JSON.parse(
+  readFileSync(new URL('../../../governance/release-lifecycles.json', import.meta.url), 'utf8'),
+);
 const allowedActors = allowedActorsFromRoster(roster);
 const classify = (options) => classifyRun({ allowedActors, ...options });
+
+const releasePullRequest = ({
+  author = 'qwts',
+  baseRef = 'main',
+  headRef = 'codex/feature',
+  headRepository = 'qwts/overlook',
+  fork = false,
+} = {}) => ({
+  pull_request: {
+    draft: false,
+    user: { login: author },
+    base: { ref: baseRef },
+    head: { ref: headRef, repo: { fork, full_name: headRepository } },
+  },
+});
 
 test('the human, named automation, and active roster Apps are authorized', () => {
   for (const actor of [
@@ -184,6 +206,81 @@ test('fork PRs, unauthorized actors, and unsupported triggers fail closed', () =
   assert.throws(() => classify({ actor: 'qwts', eventName: 'schedule', event: {} }), /not a governed CI trigger/);
 });
 
+test('reviewed repository lifecycle data classifies only the trusted generated projection', () => {
+  const lifecycle = releaseLifecycleFor(releaseCatalog, 'qwts/overlook');
+  const trusted = {
+    eventName: 'pull_request',
+    event: releasePullRequest({ author: 'chores-dumb[bot]', headRef: 'changeset-release/main' }),
+    repository: 'qwts/overlook',
+    lifecycle,
+  };
+  assert.equal(isGeneratedReleaseProjection(trusted), true);
+  assert.deepEqual(releaseOutputs(trusted), {
+    pull_request_kind: 'generated-release-projection',
+    generated_release_projection: 'true',
+    release_metadata_system: 'changesets',
+    source_input_policy: 'behavior-change-changeset-or-reviewed-rationale',
+    release_gate_mode: 'generated-projection',
+  });
+
+  for (const event of [
+    releasePullRequest({ headRef: 'changeset-release/main' }),
+    releasePullRequest({ author: 'chores-dumb[bot]', headRef: 'changeset-release/main', headRepository: 'octocat/overlook', fork: true }),
+    releasePullRequest({ author: 'chores-dumb[bot]', headRef: 'release/main' }),
+  ]) {
+    assert.equal(isGeneratedReleaseProjection({ ...trusted, event }), false);
+  }
+});
+
+test('ordinary automation is not a generated-release exception', () => {
+  const lifecycle = releaseLifecycleFor(releaseCatalog, 'qwts/overlook');
+  const outputs = releaseOutputs({
+    eventName: 'pull_request',
+    event: releasePullRequest({ author: 'dependabot[bot]', headRef: 'dependabot/npm_and_yarn/example' }),
+    repository: 'qwts/overlook',
+    lifecycle,
+  });
+  assert.equal(outputs.pull_request_kind, 'change-pr');
+  assert.equal(outputs.generated_release_projection, 'false');
+  assert.equal(outputs.release_gate_mode, 'source-policy');
+});
+
+test('source inputs and generated projections follow distinct release gates', () => {
+  const source = {
+    metadataSystem: 'changesets',
+    generatedReleaseProjection: false,
+    sourceRequirementApplies: true,
+    semanticReleaseCount: null,
+  };
+  assert.equal(releaseGateOutcome({ ...source, sourceInputsValid: true }), 'pass-source-inputs');
+  assert.equal(releaseGateOutcome({ ...source, sourceInputsValid: false }), 'fail-source-inputs');
+  assert.equal(
+    releaseGateOutcome({ ...source, sourceRequirementApplies: false, sourceInputsValid: false }),
+    'pass-source-inputs-not-required',
+  );
+  assert.equal(
+    releaseGateOutcome({ ...source, generatedReleaseProjection: true, semanticReleaseCount: 0 }),
+    'pass-generated-projection',
+  );
+  assert.equal(
+    releaseGateOutcome({ ...source, generatedReleaseProjection: true, semanticReleaseCount: 1 }),
+    'fail-generated-pending-releases',
+  );
+  assert.equal(releaseGateOutcome({ ...source, metadataSystem: 'none' }), 'not-applicable');
+});
+
+test('unauthorized bots and forks cannot claim the generated projection path', () => {
+  const event = releasePullRequest({ author: 'chores-dumb[bot]', headRef: 'changeset-release/main' });
+  assert.throws(
+    () => classify({ actor: 'renovate[bot]', triggeringActor: 'renovate[bot]', eventName: 'pull_request', event }),
+    /not authorized/,
+  );
+  assert.throws(
+    () => classify({ actor: 'qwts', eventName: 'pull_request', event: releasePullRequest({ author: 'chores-dumb[bot]', headRef: 'changeset-release/main', headRepository: 'octocat/overlook', fork: true }) }),
+    /fork/,
+  );
+});
+
 test('the reference workflow preserves governed gates and skips draft jobs', () => {
   const workflow = readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8');
   assert.match(workflow, /github\.event\.pull_request\.draft == false/);
@@ -206,6 +303,8 @@ test('the reference workflow preserves governed gates and skips draft jobs', () 
   assert.match(workflow, /^  codeql:$/m);
   assert.match(workflow, /uses: \.\/\.github\/workflows\/codeql\.yml/);
   assert.match(workflow, /needs\.policy\.outputs\.run_post_merge == 'true'/);
+  assert.match(workflow, /generated_release_projection: \$\{\{ steps\.policy\.outputs\.generated_release_projection \}\}/);
+  assert.match(workflow, /release_gate_mode: \$\{\{ steps\.policy\.outputs\.release_gate_mode \}\}/);
   assert.match(workflow, /CODEQL: \$\{\{ needs\.codeql\.result \}\}/);
   assert.match(workflow, /test "\$CODEQL" = success/);
   assert.match(workflow, /queue\|manual\)/);

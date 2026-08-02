@@ -2,6 +2,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const ROSTER_URL = new URL('../../../governance/agents.json', import.meta.url);
+const RELEASE_LIFECYCLES_URL = new URL('../../../governance/release-lifecycles.json', import.meta.url);
 const MERGE_QUEUE_ACTOR = 'github-merge-queue[bot]';
 
 export function allowedActorsFromRoster(roster) {
@@ -23,6 +24,62 @@ export function isNativeMergeQueueMainPush({ actor, triggeringActor, eventName, 
     eventName === 'push' &&
     ref === 'refs/heads/main'
   );
+}
+
+export function releaseLifecycleFor(catalog, repository) {
+  if (catalog?.schemaVersion !== 1 || !Array.isArray(catalog.repositories)) {
+    throw new Error('release lifecycle catalog is malformed');
+  }
+  const matches = catalog.repositories.filter((entry) => entry.repository === repository);
+  if (matches.length !== 1) {
+    throw new Error(`release lifecycle for ${repository || '<empty>'} is not uniquely configured`);
+  }
+  return matches[0];
+}
+
+export function isGeneratedReleaseProjection({ eventName, event, repository, lifecycle }) {
+  const projection = lifecycle.generatedProjection;
+  const pullRequest = event.pull_request;
+  if (eventName !== 'pull_request' || !projection || !pullRequest) return false;
+  return (
+    pullRequest.base?.ref === projection.baseRef &&
+    pullRequest.head?.ref === projection.headRef &&
+    pullRequest.head?.repo?.full_name === repository &&
+    pullRequest.user?.login === projection.author
+  );
+}
+
+export function releaseOutputs(options) {
+  const generated = isGeneratedReleaseProjection(options);
+  const metadataSystem = options.lifecycle.metadataSystem;
+  return {
+    pull_request_kind:
+      options.eventName !== 'pull_request'
+        ? 'not-a-pull-request'
+        : generated
+          ? 'generated-release-projection'
+          : 'change-pr',
+    generated_release_projection: String(generated),
+    release_metadata_system: metadataSystem,
+    source_input_policy: options.lifecycle.sourceInputPolicy,
+    release_gate_mode:
+      metadataSystem === 'none' ? 'not-applicable' : generated ? 'generated-projection' : 'source-policy',
+  };
+}
+
+export function releaseGateOutcome({
+  metadataSystem,
+  generatedReleaseProjection,
+  sourceRequirementApplies,
+  sourceInputsValid,
+  semanticReleaseCount,
+}) {
+  if (metadataSystem === 'none') return 'not-applicable';
+  if (generatedReleaseProjection) {
+    return semanticReleaseCount === 0 ? 'pass-generated-projection' : 'fail-generated-pending-releases';
+  }
+  if (!sourceRequirementApplies) return 'pass-source-inputs-not-required';
+  return sourceInputsValid ? 'pass-source-inputs' : 'fail-source-inputs';
 }
 
 export function authorizeRun({ actor, triggeringActor = actor, allowedActors, eventName, event, ref }) {
@@ -71,29 +128,34 @@ export function classifyRun(options) {
   throw new Error(`event ${eventName || '<empty>'} on ${ref || '<empty>'} is not a governed CI trigger`);
 }
 
-export function outputsFor(mode) {
+export function outputsFor(mode, release = {}) {
   return {
     mode,
     run_full: String(mode === 'full' || mode === 'queue' || mode === 'manual'),
     run_post_merge: String(mode === 'post-merge'),
+    ...release,
   };
 }
 
 function main() {
   const event = JSON.parse(readFileSync(process.env.CI_POLICY_EVENT_PATH, 'utf8'));
   const roster = JSON.parse(readFileSync(ROSTER_URL, 'utf8'));
+  const catalog = JSON.parse(readFileSync(RELEASE_LIFECYCLES_URL, 'utf8'));
   const options = {
     actor: process.env.CI_POLICY_ACTOR,
     triggeringActor: process.env.CI_POLICY_TRIGGERING_ACTOR,
     allowedActors: allowedActorsFromRoster(roster),
     eventName: process.env.CI_POLICY_EVENT_NAME,
     event,
+    repository: process.env.CI_POLICY_REPOSITORY,
     ref: process.env.CI_POLICY_REF,
   };
+  const lifecycle = releaseLifecycleFor(catalog, options.repository);
   const authorizationOnly = process.env.CI_POLICY_AUTHORIZATION_ONLY === 'true';
   const mode = authorizationOnly ? 'authorized' : classifyRun(options);
   if (authorizationOnly) authorizeRun(options);
-  const output = Object.entries(outputsFor(mode)).map(([key, value]) => `${key}=${value}`).join('\n');
+  const release = releaseOutputs({ ...options, lifecycle });
+  const output = Object.entries(outputsFor(mode, release)).map(([key, value]) => `${key}=${value}`).join('\n');
   appendFileSync(process.env.GITHUB_OUTPUT, `${output}\n`);
 }
 

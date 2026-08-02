@@ -62,6 +62,13 @@ satisfy a repository PR gate, but they do not open or refresh a Version packages
 PR, block stranded-tag recovery, or make release verification reject an
 otherwise valid source.
 
+Source and generated PRs are different lifecycle objects. A source PR follows
+the repository's existing rule for when release intent is required. A generated
+Version packages PR has already consumed that intent into its version and
+changelog diff; it proves deterministic generation and zero pending semantic
+releases without retaining or manufacturing an empty input file. The exception
+does not apply to ordinary bot or dependency PRs.
+
 Version planning, tag planning, and release verification all consume the same
 semantic release count produced by `changeset status --output`. A positive
 `releases.length` fails closed before tagging or publishing. None of those lanes
@@ -87,6 +94,8 @@ changelog updated, then let consumers re-point. A shared change never moves a
 
 ## Changelog
 
+- 2026-08-02 — distinguished source release inputs from generated release
+  projections and prohibited empty marker files as a regeneration workaround.
 - 2026-08-01 — distinguish semantic Changesets releases from governance-only
   files and require dependency remediation to preserve traced tool exceptions.
 - 2026-07-31 — required version PRs to receive one complete-suite validation

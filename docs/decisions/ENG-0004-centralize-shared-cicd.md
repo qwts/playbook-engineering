@@ -193,6 +193,39 @@ credential boundary. The existing PR concurrency contract remains unchanged.
 The [CI policy](../reference/ci-execution-policy.md) and
 [rollout checklist](../reference/governed-ci-rollout.md) define these controls.
 
+## Amendment — 2026-08-02: source inputs and generated release projections
+
+This amendment resolves
+[#134](https://github.com/qwts/playbook-engineering/issues/134). In
+`qwts/overlook#870`, commit `260fa140` applied the repository's Changesets
+presence check to every complete suite. A generated Version packages PR then
+failed after its reviewed Changesets had been intentionally consumed into
+`package.json` and `CHANGELOG.md`. Retaining an empty Changeset only masked the
+defect until automation regenerated the branch.
+
+Governed CI now distinguishes three cases:
+
+1. A source or change PR follows its repository's existing release-input
+   contract. Repositories without a Changesets-style system gain no new gate.
+2. A generated release projection is trusted automation output after those
+   inputs are consumed. It proves deterministic generation and zero remaining
+   semantic releases, but need not retain the consumed input files.
+3. Ordinary automation, including dependency and updater PRs, receives no
+   generated-release exception merely because a bot authored it.
+
+The immutable CI-policy action classifies a generated projection only from the
+reviewed release-lifecycle catalog plus GitHub-owned repository, base, head,
+and PR-author fields. A branch-only exception or PR-controlled flag is not a
+trust boundary. Both runtime actor fields and fork status remain independently
+enforced.
+
+The exception is limited to consumed-input presence. Exact-head and rewritten-
+SHA fallback CI, stable contexts, Advanced CodeQL, reviews, syntax validation,
+version consistency, packaging, signing, provenance, release integrity, and
+main-promotion controls remain unchanged. The fleet disposition and per-repo
+rollout commands are recorded in the
+[release-lifecycle fleet handoff](../reference/governed-ci-release-lifecycle-fleet.md).
+
 ## References
 
 - [ENG-0003](ENG-0003-repo-is-documentation-source-of-truth.md) established this repo as the cross-repo home for shared engineering assets; this extends that from documents to CI/CD.

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "repositories": [
+    {
+      "repository": "qwts/playbook-engineering",
+      "metadataSystem": "none",
+      "sourceInputPolicy": "not-applicable",
+      "generatedProjection": null
+    },
+    {
+      "repository": "qwts/overlook",
+      "metadataSystem": "changesets",
+      "sourceInputPolicy": "behavior-change-changeset-or-reviewed-rationale",
+      "generatedProjection": {
+        "baseRef": "main",
+        "headRef": "changeset-release/main",
+        "author": "chores-dumb[bot]"
+      }
+    },
+    {
+      "repository": "qwts/image-trail",
+      "metadataSystem": "changesets",
+      "sourceInputPolicy": "product-source-changeset-or-no-version-impact",
+      "generatedProjection": {
+        "baseRef": "main",
+        "headRef": "changeset-release/main",
+        "author": "chores-dumb[bot]"
+      }
+    },
+    {
+      "repository": "qwts/cartograph",
+      "metadataSystem": "changesets",
+      "sourceInputPolicy": "shipped-change-changeset",
+      "generatedProjection": {
+        "baseRef": "main",
+        "headRef": "changeset-release/main",
+        "author": "chores-dumb[bot]"
+      }
+    },
+    {
+      "repository": "qwts/bookmarkit",
+      "metadataSystem": "changesets",
+      "sourceInputPolicy": "user-visible-change-changeset",
+      "generatedProjection": {
+        "baseRef": "main",
+        "headRef": "changeset-release/main",
+        "author": "chores-dumb[bot]"
+      }
+    },
+    {
+      "repository": "qwts/quorum",
+      "metadataSystem": "none",
+      "sourceInputPolicy": "not-applicable",
+      "generatedProjection": null
+    },
+    {
+      "repository": "qwts/agent-bot-identity",
+      "metadataSystem": "none",
+      "sourceInputPolicy": "not-applicable",
+      "generatedProjection": null
+    },
+    {
+      "repository": "qwts/codex-rules-editor",
+      "metadataSystem": "none",
+      "sourceInputPolicy": "not-applicable",
+      "generatedProjection": null
+    },
+    {
+      "repository": "qwts/playbook-dashboard",
+      "metadataSystem": "none",
+      "sourceInputPolicy": "not-applicable",
+      "generatedProjection": null
+    }
+  ]
+}

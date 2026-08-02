@@ -9,6 +9,7 @@ test('all Changesets lanes share one semantic release-count contract', () => {
   const rollout = read('docs/reference/governed-ci-rollout.md');
   const release = read('docs/sop/release-and-versioning.md');
   const action = read('.github/actions/changeset-release-count/action.yml');
+  const counter = read('.github/actions/changeset-release-count/semantic-release-count.mjs');
   const contract = `${policy}\n${rollout}`;
 
   for (const lane of ['Version planning', 'tag planning', 'release verification']) {
@@ -19,9 +20,36 @@ test('all Changesets lanes share one semantic release-count contract', () => {
   assert.match(contract, /a positive count fails\s+closed/u);
   assert.match(release, /may substitute `find \.changeset`, a file count/u);
   assert.match(action, /git fetch --no-tags --depth=1 origin/u);
-  assert.match(action, /npx --no-install changeset status --output/u);
-  assert.match(action, /\.releases\.length/u);
+  assert.match(counter, /'changeset', 'status', '--output'/u);
+  assert.match(counter, /status\.releases\.length/u);
+  assert.match(counter, /changesetInputs\(root\)\.length === 0/u);
   assert.doesNotMatch(action, /find \.changeset|\.changeset\/\*\.md/u);
+});
+
+test('release lifecycle policy distinguishes source inputs from generated projections', () => {
+  const policy = read('docs/reference/ci-execution-policy.md');
+  const rollout = read('docs/reference/governed-ci-rollout.md');
+  const release = read('docs/sop/release-and-versioning.md');
+  const fleet = read('docs/reference/governed-ci-release-lifecycle-fleet.md');
+  const contract = `${policy}\n${rollout}\n${release}\n${fleet}`;
+
+  assert.match(contract, /source PR supplies the inputs/u);
+  assert.match(contract, /generated release projection/u);
+  assert.match(contract, /need not retain Changesets already consumed/u);
+  assert.match(contract, /branch-only\s+exception or PR-controlled flag/u);
+  assert.match(contract, /both\s+`github\.actor` and `github\.triggering_actor`/u);
+  assert.match(contract, /repeated force-regeneration remains safe/u);
+  assert.match(fleet, /`qwts\/overlook#870`/u);
+  assert.match(fleet, /`260fa140`/u);
+});
+
+test('release lifecycle fleet handoff covers the governed manifest', () => {
+  const manifest = JSON.parse(read('governance/repos.json'));
+  const fleet = read('docs/reference/governed-ci-release-lifecycle-fleet.md');
+  for (const repo of manifest.repos.filter((entry) => ['active', 'onboarding'].includes(entry.status))) {
+    assert.ok(fleet.includes(`\`${repo.name}\``), `${repo.name} is absent from the fleet handoff`);
+  }
+  for (const publisher of ['57789', '15368']) assert.match(fleet, new RegExp(publisher, 'u'));
 });
 
 test('user-owned fallback preserves strict exact-SHA evidence and merge methods', () => {

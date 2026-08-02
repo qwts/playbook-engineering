@@ -31,8 +31,13 @@
       },
       {
         "path": "docs/decisions/ENG-0004-centralize-shared-cicd.md",
-        "budget": 2800,
-        "reason": "accepted ENG records are amended or superseded rather than rewritten, so the owner-aware rollout amendment must remain with the original lifecycle decision; the detailed operational contract is split into governed-ci-rollout.md"
+        "budget": 3400,
+        "reason": "accepted ENG records are amended or superseded rather than rewritten, so the owner-aware and generated-release amendments must remain with the original lifecycle decision; detailed operational and fleet contracts are split into governed-ci-rollout.md and governed-ci-release-lifecycle-fleet.md"
+      },
+      {
+        "path": "docs/reference/ci-execution-policy.md",
+        "budget": 3200,
+        "reason": "this is the single authoritative event-to-gate contract consumed across the fleet; implementation handoffs and repository-specific evidence are split into governed-ci-rollout.md and governed-ci-release-lifecycle-fleet.md"
       }
     ],
     "contextSets": []
