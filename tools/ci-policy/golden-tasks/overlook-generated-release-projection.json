@@ -9,7 +9,7 @@
   "requiredOutcomes": [
     "Inventory the repository release mechanism before choosing a metadata gate.",
     "Keep the source PR's repository-specific release-input contract fail closed.",
-    "Classify generated release projections from reviewed repository, base, head, and author identity, including exact-SHA queue, manual, and post-merge fallbacks.",
+    "Classify generated release projections from reviewed repository, base, head, and author identity, including every constituent queue PR plus exact-SHA manual and post-merge fallbacks.",
     "Require zero semantic releases after projection generation without an empty marker.",
     "Preserve exact-SHA CI, stable contexts, CodeQL, reviews, packaging, signing, and release integrity.",
     "Reject unauthorized actors and forks and check both actor fields."

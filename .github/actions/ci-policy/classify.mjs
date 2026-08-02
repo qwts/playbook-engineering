@@ -1,11 +1,10 @@
 import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { resolveReleasePullRequests } from './release-origin.mjs';
 
 const ROSTER_URL = new URL('../../../governance/agents.json', import.meta.url);
 const RELEASE_LIFECYCLES_URL = new URL('../../../governance/release-lifecycles.json', import.meta.url);
 const MERGE_QUEUE_ACTOR = 'github-merge-queue[bot]';
-const FULL_SHA = /^[0-9a-f]{40}$/u;
-const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 
 export function allowedActorsFromRoster(roster) {
   if (!Array.isArray(roster?.agents)) throw new Error('agent roster is malformed');
@@ -80,37 +79,6 @@ export function releaseOutputs(options) {
             ? 'source-policy'
             : 'no-source-context',
   };
-}
-
-export async function listPullRequestsForCommit({ repository, sha, apiUrl, token, fetchImpl = fetch }) {
-  if (!REPOSITORY.test(repository || '')) throw new Error('repository is invalid for release-origin lookup');
-  if (!FULL_SHA.test(sha || '')) throw new Error('commit SHA is invalid for release-origin lookup');
-  if (!apiUrl || !token) throw new Error('GitHub API context is missing for release-origin lookup');
-  const url = new URL(`/repos/${repository}/commits/${sha}/pulls?per_page=100`, apiUrl);
-  const response = await fetchImpl(url, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token}`,
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
-  });
-  if (!response.ok) throw new Error(`release-origin lookup failed with HTTP ${response.status}`);
-  const pullRequests = await response.json();
-  if (!Array.isArray(pullRequests)) throw new Error('release-origin lookup returned malformed data');
-  return pullRequests;
-}
-
-export async function resolveReleasePullRequests(options) {
-  if (options.eventName === 'pull_request') {
-    if (!options.event.pull_request) throw new Error('pull_request event has no pull request payload');
-    return [options.event.pull_request];
-  }
-  if (options.lifecycle.metadataSystem === 'none') return [];
-  const pullRequests = await listPullRequestsForCommit(options);
-  if (pullRequests.length === 0) {
-    throw new Error(`no pull request is associated with governed commit ${options.sha}`);
-  }
-  return pullRequests;
 }
 
 export function releaseGateOutcome({
@@ -207,6 +175,7 @@ async function main() {
         lifecycle,
         sha: process.env.CI_POLICY_SHA,
         apiUrl: process.env.CI_POLICY_API_URL,
+        graphqlUrl: process.env.CI_POLICY_GRAPHQL_URL,
         token: process.env.CI_POLICY_TOKEN,
       });
   const release = releaseOutputs({ ...options, lifecycle, pullRequests });

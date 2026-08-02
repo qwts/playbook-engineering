@@ -47,6 +47,7 @@ runs:
         CI_POLICY_REPOSITORY: ${{ github.repository }}
         CI_POLICY_SHA: ${{ github.sha }}
         CI_POLICY_API_URL: ${{ github.api_url }}
+        CI_POLICY_GRAPHQL_URL: ${{ github.graphql_url }}
         CI_POLICY_TOKEN: ${{ github.token }}
         CI_POLICY_REF: ${{ github.ref }}
         CI_POLICY_AUTHORIZATION_ONLY: ${{ inputs.authorization-only }}

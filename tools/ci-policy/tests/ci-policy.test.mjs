@@ -9,13 +9,17 @@ import {
   isGeneratedReleaseProjection,
   isAllowedActor,
   isNativeMergeQueueMainPush,
-  listPullRequestsForCommit,
   outputsFor,
   releaseGateOutcome,
   releaseLifecycleFor,
   releaseOutputs,
-  resolveReleasePullRequests,
 } from '../../../.github/actions/ci-policy/classify.mjs';
+import {
+  listMergeGroupPullRequests,
+  listPullRequestsForCommit,
+  mergeGroupHeadPullRequest,
+  resolveReleasePullRequests,
+} from '../../../.github/actions/ci-policy/release-origin.mjs';
 
 const pullRequest = (draft, fork = false) => ({ pull_request: { draft, head: { repo: { fork } } } });
 const roster = JSON.parse(readFileSync(new URL('../../../governance/agents.json', import.meta.url), 'utf8'));
@@ -267,7 +271,7 @@ test('exact-SHA lifecycle lanes retain the originating generated projection', ()
   }
 });
 
-test('non-PR lanes resolve associated pull requests through the exact commit SHA', async () => {
+test('manual and post-merge lanes resolve associated pull requests through the exact commit SHA', async () => {
   const lifecycle = releaseLifecycleFor(releaseCatalog, 'qwts/overlook');
   const projection = releasePullRequest({
     author: 'chores-dumb[bot]',
@@ -275,7 +279,7 @@ test('non-PR lanes resolve associated pull requests through the exact commit SHA
   }).pull_request;
   const requests = [];
   const options = {
-    eventName: 'merge_group',
+    eventName: 'workflow_dispatch',
     event: {},
     repository: 'qwts/overlook',
     lifecycle,
@@ -293,6 +297,81 @@ test('non-PR lanes resolve associated pull requests through the exact commit SHA
     `https://api.github.example/repos/qwts/overlook/commits/${'a'.repeat(40)}/pulls?per_page=100`,
   );
   assert.equal(requests[0].init.headers.Authorization, 'Bearer test-token');
+});
+
+test('merge groups resolve every constituent pull request from queue evidence', async () => {
+  const lifecycle = releaseLifecycleFor(releaseCatalog, 'qwts/overlook');
+  const event = {
+    merge_group: { head_ref: 'refs/heads/gh-readonly-queue/main/pr-116-e8c01cbc4c17' },
+  };
+  assert.deepEqual(mergeGroupHeadPullRequest(event), { baseRef: 'main', number: 116 });
+  const requests = [];
+  const options = {
+    eventName: 'merge_group',
+    event,
+    repository: 'qwts/overlook',
+    lifecycle,
+    graphqlUrl: 'https://api.github.example/graphql',
+    token: 'test-token',
+    fetchImpl: async (url, init) => {
+      requests.push({ url: String(url), body: JSON.parse(init.body) });
+      const after = requests.at(-1).body.variables.after;
+      return {
+        ok: true,
+        json: async () => ({
+          data: {
+            repository: {
+              pullRequest: {
+                mergeQueueEntry: {
+                  position: 2,
+                  mergeQueue: {
+                    entries: {
+                      nodes: after
+                        ? [
+                            {
+                              position: 2,
+                              pullRequest: {
+                                number: 116,
+                                baseRefName: 'main',
+                                headRefName: 'changeset-release/main',
+                                headRepository: { nameWithOwner: 'qwts/overlook' },
+                                author: { __typename: 'Bot', login: 'chores-dumb' },
+                              },
+                            },
+                            { position: 3, pullRequest: { number: 117 } },
+                          ]
+                        : [
+                            {
+                              position: 1,
+                              pullRequest: {
+                                number: 115,
+                                baseRefName: 'main',
+                                headRefName: 'codex/source-change',
+                                headRepository: { nameWithOwner: 'qwts/overlook' },
+                                author: { __typename: 'User', login: 'qwts' },
+                              },
+                            },
+                          ],
+                      pageInfo: after
+                        ? { hasNextPage: false, endCursor: null }
+                        : { hasNextPage: true, endCursor: 'queue-cursor' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }),
+      };
+    },
+  };
+  const pullRequests = await listMergeGroupPullRequests(options);
+  assert.equal(pullRequests.length, 2);
+  assert.equal(pullRequests[1].user.login, 'chores-dumb[bot]');
+  assert.equal(requests[0].url, options.graphqlUrl);
+  assert.equal(requests[0].body.variables.number, 116);
+  assert.equal(requests[1].body.variables.after, 'queue-cursor');
+  assert.equal(releaseOutputs({ ...options, pullRequests }).release_gate_mode, 'generated-projection');
 });
 
 test('release-origin lookup fails closed on missing or malformed evidence', async () => {
@@ -318,7 +397,28 @@ test('release-origin lookup fails closed on missing or malformed evidence', asyn
       lifecycle: releaseLifecycleFor(releaseCatalog, 'qwts/overlook'),
       fetchImpl: async () => ({ ok: true, json: async () => [] }),
     }),
-    /no pull request is associated/,
+    /no pull request origin is available/,
+  );
+  await assert.rejects(
+    () => listMergeGroupPullRequests({
+      ...base,
+      event: { merge_group: { head_ref: 'refs/heads/not-a-queue' } },
+      graphqlUrl: 'https://api.github.example/graphql',
+      fetchImpl: async () => ({ ok: true, json: async () => ({}) }),
+    }),
+    /head ref .* is malformed/,
+  );
+  await assert.rejects(
+    () => listMergeGroupPullRequests({
+      ...base,
+      event: { merge_group: { head_ref: 'refs/heads/gh-readonly-queue/main/pr-116-abc123' } },
+      graphqlUrl: 'https://api.github.example/graphql',
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ errors: [{ message: 'queue entry unavailable' }] }),
+      }),
+    }),
+    /GraphQL lookup returned errors/,
   );
 });
 
@@ -360,6 +460,10 @@ test('unauthorized bots and forks cannot claim the generated projection path', (
 
 test('the reference workflow preserves governed gates and skips draft jobs', () => {
   const workflow = readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const policyAction = readFileSync(
+    new URL('../../../.github/actions/ci-policy/action.yml', import.meta.url),
+    'utf8',
+  );
   assert.match(workflow, /github\.event\.pull_request\.draft == false/);
   assert.match(
     workflow,
@@ -383,6 +487,7 @@ test('the reference workflow preserves governed gates and skips draft jobs', () 
   assert.match(workflow, /generated_release_projection: \$\{\{ steps\.policy\.outputs\.generated_release_projection \}\}/);
   assert.match(workflow, /release_gate_mode: \$\{\{ steps\.policy\.outputs\.release_gate_mode \}\}/);
   assert.match(workflow, /^  pull-requests: read$/m);
+  assert.match(policyAction, /CI_POLICY_GRAPHQL_URL: \$\{\{ github\.graphql_url \}\}/);
   assert.match(workflow, /CODEQL: \$\{\{ needs\.codeql\.result \}\}/);
   assert.match(workflow, /test "\$CODEQL" = success/);
   assert.match(workflow, /queue\|manual\)/);
