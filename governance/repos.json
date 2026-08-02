@@ -63,7 +63,7 @@
       "name": "agent-bot-identity",
       "visibility": "public",
       "publish": true,
-      "status": "onboarding",
+      "status": "active",
       "sharedCi": false,
       "delta": "",
       "note": "Extracted from this repo's tools/agent-bot (ENG-0016) as a standalone, shareable tool."
