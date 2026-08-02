@@ -30,7 +30,7 @@ outputs:
     description: The repository-specific source PR release-input policy identifier
     value: ${{ steps.classify.outputs.source_input_policy }}
   release_gate_mode:
-    description: not-applicable, source-policy, or generated-projection
+    description: not-applicable, source-policy, generated-projection, or no-source-context
     value: ${{ steps.classify.outputs.release_gate_mode }}
 
 runs:
@@ -45,6 +45,9 @@ runs:
         CI_POLICY_EVENT_NAME: ${{ github.event_name }}
         CI_POLICY_EVENT_PATH: ${{ github.event_path }}
         CI_POLICY_REPOSITORY: ${{ github.repository }}
+        CI_POLICY_SHA: ${{ github.sha }}
+        CI_POLICY_API_URL: ${{ github.api_url }}
+        CI_POLICY_TOKEN: ${{ github.token }}
         CI_POLICY_REF: ${{ github.ref }}
         CI_POLICY_AUTHORIZATION_ONLY: ${{ inputs.authorization-only }}
       run: node "${{ github.action_path }}/classify.mjs"

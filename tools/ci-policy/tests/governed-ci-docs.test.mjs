@@ -39,6 +39,9 @@ test('release lifecycle policy distinguishes source inputs from generated projec
   assert.match(contract, /branch-only\s+exception or PR-controlled flag/u);
   assert.match(contract, /both\s+`github\.actor` and `github\.triggering_actor`/u);
   assert.match(contract, /repeated force-regeneration remains safe/u);
+  assert.match(contract, /exact `github\.sha` through GitHub's read-only\s+associated-pull-request endpoint/u);
+  assert.match(contract, /`pull-requests: read`/u);
+  assert.match(contract, /Missing or malformed origin evidence fails closed/u);
   assert.match(fleet, /`qwts\/overlook#870`/u);
   assert.match(fleet, /`260fa140`/u);
 });

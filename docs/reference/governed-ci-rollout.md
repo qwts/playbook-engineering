@@ -54,6 +54,9 @@ authorship alone, or a generic "automation PR" category.
   release projections skip only consumed-input presence and still run syntax,
   deterministic generation, version consistency, exact-SHA, CodeQL, packaging,
   signing, and integrity gates.
+- Queue, manual, and post-merge fallback lanes resolve the exact commit's
+  associated PR with `pull-requests: read`, then reapply the same reviewed
+  projection identity. Missing origin evidence fails closed.
 
 For Changesets repositories, version planning, tag planning, and release
 verification all read the semantic `releases.length` emitted by

@@ -140,6 +140,11 @@ exception or PR-controlled flag. The reviewed catalog must match the GitHub
 event's repository, base ref, head ref, canonical head repository, and PR
 author. Actor authorization still checks both
 `github.actor` and `github.triggering_actor`, and public forks remain refused.
+For `merge_group`, manual, and post-merge fallback runs, the policy resolves the
+exact `github.sha` through GitHub's read-only associated-pull-request endpoint
+and reapplies that contract. Missing or malformed origin evidence fails closed.
+Grant only `pull-requests: read`; this lookup does not authorize the actor or
+provide a write credential.
 
 Tagging and release workflows consume the successful complete-suite evidence
 for that exact commit instead of rerunning generic lint, format, typecheck,

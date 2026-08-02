@@ -9,10 +9,12 @@ import {
   isGeneratedReleaseProjection,
   isAllowedActor,
   isNativeMergeQueueMainPush,
+  listPullRequestsForCommit,
   outputsFor,
   releaseGateOutcome,
   releaseLifecycleFor,
   releaseOutputs,
+  resolveReleasePullRequests,
 } from '../../../.github/actions/ci-policy/classify.mjs';
 
 const pullRequest = (draft, fork = false) => ({ pull_request: { draft, head: { repo: { fork } } } });
@@ -245,6 +247,81 @@ test('ordinary automation is not a generated-release exception', () => {
   assert.equal(outputs.release_gate_mode, 'source-policy');
 });
 
+test('exact-SHA lifecycle lanes retain the originating generated projection', () => {
+  const lifecycle = releaseLifecycleFor(releaseCatalog, 'qwts/overlook');
+  const projection = releasePullRequest({
+    author: 'chores-dumb[bot]',
+    headRef: 'changeset-release/main',
+  }).pull_request;
+  for (const eventName of ['merge_group', 'workflow_dispatch', 'push']) {
+    const outputs = releaseOutputs({
+      eventName,
+      event: {},
+      repository: 'qwts/overlook',
+      lifecycle,
+      pullRequests: [projection],
+    });
+    assert.equal(outputs.pull_request_kind, 'generated-release-projection');
+    assert.equal(outputs.generated_release_projection, 'true');
+    assert.equal(outputs.release_gate_mode, 'generated-projection');
+  }
+});
+
+test('non-PR lanes resolve associated pull requests through the exact commit SHA', async () => {
+  const lifecycle = releaseLifecycleFor(releaseCatalog, 'qwts/overlook');
+  const projection = releasePullRequest({
+    author: 'chores-dumb[bot]',
+    headRef: 'changeset-release/main',
+  }).pull_request;
+  const requests = [];
+  const options = {
+    eventName: 'merge_group',
+    event: {},
+    repository: 'qwts/overlook',
+    lifecycle,
+    sha: 'a'.repeat(40),
+    apiUrl: 'https://api.github.example',
+    token: 'test-token',
+    fetchImpl: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return { ok: true, json: async () => [projection] };
+    },
+  };
+  assert.deepEqual(await resolveReleasePullRequests(options), [projection]);
+  assert.equal(
+    requests[0].url,
+    `https://api.github.example/repos/qwts/overlook/commits/${'a'.repeat(40)}/pulls?per_page=100`,
+  );
+  assert.equal(requests[0].init.headers.Authorization, 'Bearer test-token');
+});
+
+test('release-origin lookup fails closed on missing or malformed evidence', async () => {
+  const base = {
+    repository: 'qwts/overlook',
+    sha: 'b'.repeat(40),
+    apiUrl: 'https://api.github.example',
+    token: 'test-token',
+  };
+  await assert.rejects(
+    () => listPullRequestsForCommit({ ...base, fetchImpl: async () => ({ ok: false, status: 403 }) }),
+    /HTTP 403/,
+  );
+  await assert.rejects(
+    () => listPullRequestsForCommit({ ...base, fetchImpl: async () => ({ ok: true, json: async () => ({}) }) }),
+    /malformed data/,
+  );
+  await assert.rejects(
+    () => resolveReleasePullRequests({
+      ...base,
+      eventName: 'push',
+      event: {},
+      lifecycle: releaseLifecycleFor(releaseCatalog, 'qwts/overlook'),
+      fetchImpl: async () => ({ ok: true, json: async () => [] }),
+    }),
+    /no pull request is associated/,
+  );
+});
+
 test('source inputs and generated projections follow distinct release gates', () => {
   const source = {
     metadataSystem: 'changesets',
@@ -305,6 +382,7 @@ test('the reference workflow preserves governed gates and skips draft jobs', () 
   assert.match(workflow, /needs\.policy\.outputs\.run_post_merge == 'true'/);
   assert.match(workflow, /generated_release_projection: \$\{\{ steps\.policy\.outputs\.generated_release_projection \}\}/);
   assert.match(workflow, /release_gate_mode: \$\{\{ steps\.policy\.outputs\.release_gate_mode \}\}/);
+  assert.match(workflow, /^  pull-requests: read$/m);
   assert.match(workflow, /CODEQL: \$\{\{ needs\.codeql\.result \}\}/);
   assert.match(workflow, /test "\$CODEQL" = success/);
   assert.match(workflow, /queue\|manual\)/);

@@ -16,6 +16,7 @@ test('Overlook generated-release golden task preserves the fleet invariant', () 
   for (const expectation of [
     /repository-specific release-input contract/u,
     /reviewed repository, base, head, and author identity/u,
+    /exact-SHA queue, manual, and post-merge fallbacks/u,
     /zero semantic releases/u,
     /exact-SHA CI/u,
     /both actor fields/u,
