@@ -1,130 +1,73 @@
-# Agent bot identities — setup and usage
+# Agent bot identity governance
 
-How agents author commits and PRs as their own `[bot]` identity instead of
-`qwts`, so the approving human review the
-[branch/PR/review SOP](../sop/branch-pr-review.md) requires is possible at all.
-Decision and rationale: [ENG-0016](../decisions/ENG-0016-agent-pr-bot-identity.md).
+The `qwts` organization uses one GitHub App per agent so bot-authored pull
+requests remain eligible for the human approval required by the
+[branch, PR, and review SOP](../sop/branch-pr-review.md). This repository owns
+the roster and policy; the standalone
+[`agent-bot-identity`](https://github.com/qwts/agent-bot-identity/tree/9ff7ce00b6a6945c7f249cf7a6ebf37cf58e86ee)
+repository owns runtime code, installation, hooks, token minting, and
+troubleshooting ([ENG-0128](../decisions/ENG-0128-agent-bot-runtime-ownership.md)).
 
-There is **one GitHub App per agent**, so authorship in history tells you which
-agent produced a change. Identity resolves in two levels
-([ENG-0079](../decisions/ENG-0079-per-agent-identity.md)): the **harness** is
-detected (`qwts-claude-agent`, `qwts-codex-agent`, `qwts-cursor-agent`,
-`qwts-vscode-agent`), and a **pin refines it to one agent within that harness**
-— one per model: `qwts-claude-fable-agent`, `qwts-claude-haiku-agent`,
-`qwts-claude-opus-agent`, `qwts-claude-sonnet-agent`, `qwts-codex-luna-agent`,
-`qwts-codex-sol-agent`, `qwts-codex-terra-agent`. The environment identifies the
-harness, not its model, so the model-level identity is always a pin.
+## Organization identity model
 
-Every identity is registered in [`governance/agents.json`](../../governance/agents.json).
-Drift verifies that roster, so an unregistered App is not watched. Examples
-use `qwts-claude-agent`; every step repeats per App.
+- Every independently attributable agent that authors work has its own App.
+- Harness detection selects a default App; a worktree pin may refine it to a
+  model-level App ([ENG-0079](../decisions/ENG-0079-per-agent-identity.md)).
+- Agents use short-lived installation tokens. Humans never author through an
+  agent App, and agent Apps never approve pull requests.
+- Agent work happens in linked bot-territory worktrees. Primary checkouts stay
+  human territory ([ENG-0045](../decisions/ENG-0045-agent-environments-are-bot-territory.md)).
+- Conversation-level Agent IDs add audit provenance without granting authority
+  ([ENG-0081](../decisions/ENG-0081-transcript-bound-agent-execution-identities.md)).
 
-Conversation provenance is covered by
-[agent execution identity](agent-execution-identity.md) (ENG-0081).
+## Roster
 
-Operating the identities — creating each App, minting tokens, installing the
-`gh` shim, verifying, and failure modes — is
-[agent bot operations](agent-bot-operations.md). This document is the model and
-the worktree machinery that applies it.
-## Automating worktrees (tool-agnostic)
+[`governance/agents.json`](../../governance/agents.json) is the organization
+source of truth. Drift validates every active App against every active and
+onboarding governed repository; retired identities keep their rows but leave
+the active coverage set.
 
-Agents work in linked git worktrees, so the identity rides on the worktree and
-is applied by git itself — no per-tool or per-repo setup. Enable it from the
-clean playbook-engineering checkout:
+Current active identities:
 
-```bash
-node tools/agent-bot/playbook-launcher.mjs install
-playbook-install-hooks
+- Claude Code: `qwts-claude-agent`, `qwts-claude-fable-agent`,
+  `qwts-claude-haiku-agent`, `qwts-claude-opus-agent`, and
+  `qwts-claude-sonnet-agent`.
+- Codex: `qwts-codex-agent`, `qwts-codex-luna-agent`,
+  `qwts-codex-sol-agent`, and `qwts-codex-terra-agent`.
+- Other harnesses: `qwts-cursor-agent` and `qwts-vscode-agent`.
+
+Adding an App requires one roster row with its exact slug, harness, and active
+status. Removing access means retiring the row, revoking or narrowing the App,
+and verifying drift; never delete history to hide a former identity.
+
+## Permissions and installation coverage
+
+Each App is owned by `qwts`, installed only on selected repositories, and has:
+
+- Contents: read and write.
+- Pull requests: read and write.
+- Issues: read and write.
+- Metadata: read.
+
+No App receives approval authority, account-wide installation, user-to-server
+OAuth, or unrelated permissions. Every active App must be installed on every
+active and onboarding repository in `governance/repos.json`; a narrower scope
+is drift, not a per-agent exception.
+
+## Runtime contract
+
+Governed integrations invoke the installed executable by name or through an
+explicit `AGENT_BOT_BIN` override. They never import runtime modules or depend
+on a clone path. The stable contracts used here are:
+
+```text
+agent-bot setup-worktree
+agent-bot mint-token --app <slug> --json
+agent-bot claude-worktree-create
+agent-bot doctor
 ```
 
-That pins the checkout's exact commit and sets global `core.hooksPath` to
-stable wrappers under `~/.local/share/playbook-engineering/hooks`. Each
-wrapper verifies the pin before dispatching to this repo's
-[`hooks/`](../../tools/agent-bot/hooks/). Its `post-checkout` hook runs on
-`git worktree add` **regardless of which tool created the worktree** and calls
-`setup-worktree.mjs`, which:
-
-- **Detects which IDE is running** from the environment that tool sets on its
-  own (`CLAUDECODE`, `CODEX_*`, Cursor's bundle id, `TERM_PROGRAM=vscode`; see
-  [`detect-harness.mjs`](../../tools/agent-bot/detect-harness.mjs)) and picks
-  the matching bot.
-- Scoped via `extensions.worktreeConfig`, persists the resolved App as
-  `qwts.agentApp`, sets bot authorship, pins the current agent hooks while
-  proxying the full client hook surface to any displaced repository path,
-  disables commit signing, rewrites an SSH origin to HTTPS, and wires
-  `git-credential-bot.mjs` as the credential helper — every later `git push`
-  mints its own fresh token. Missing `~/.config/<slug>/private-key.pem` is
-  pulled from Proton Pass vault **Agent Identities** (item title = slug).
-
-The hook only touches *linked* worktrees (primary checkouts, and human shells
-with no IDE markers, stay the human's) and swallows errors so it never blocks
-a checkout. It chains to a repo-local `post-checkout` if one exists. An
-explicit `--app <slug>`, `GH_AGENT_APP`, or `git config qwts.agentApp`
-overrides detection.
-
-**Where the git-hook trigger cannot fire.** Two cases. A repo with its own
-repo-local `core.hooksPath` (husky: `.husky/_`) shadows the global path — and
-`.husky/_` is generated by `npm install`, absent in a fresh worktree, so `git
-worktree add` there runs **no hook at all**. And a harness that creates its
-worktree from a sandbox may be unable to write the *shared* git dir the
-`config.worktree` lives in: the checkout succeeds, the identity does not land.
-Codex [retries](../../.codex/scripts/ensure-identity.sh) during local setup,
-which may precede any task locator; identity checks remain conclusive while
-transcript metadata may stay pending. Manual repair remains idempotent:
-`playbook-setup-worktree`.
-
-## The Claude Code worktree hook (when git's hook is out of reach)
-
-Claude Code creates worktrees from a sandbox — the second case above. Its own
-`WorktreeCreate` hook runs *outside* that sandbox and before the session
-starts, so it is the one trigger that still lands the identity in time.
-[`.claude/settings.json`](../../.claude/settings.json) wires it to
-[`claude-worktree-create.mjs`](../../tools/agent-bot/claude-worktree-create.mjs),
-and is a [reconciled baseline file](../sop/repo-baseline-files.md): the same
-file is seeded into every governed repo, so a change here reaches all of them
-by PR, like the shared `.codex/` environment. Ungoverned repos take the
-identical command from `~/.claude/settings.json`, set once per machine.
-
-The hook **replaces** worktree creation — Claude Code expects back the path of
-a worktree the hook made, and has no fallback if it fails. So the script
-rebuilds what Claude Code would have done (`<root>/<repo>/<name>` on
-`claude/<name>`, branched fresh from the remote default branch), then runs
-`setup-worktree.mjs` inside it. The root follows the desktop app's own
-relocation preference, else `~/.claude/worktrees` — ENG-0045 bot territory
-either way; `AGENT_WORKTREE_ROOT` overrides. `worktree.symlinkDirectories` and
-`worktree.sparsePaths` are **not** applied: a repo needing them drops the hook
-and falls back to `post-checkout`. A failed identity step still yields a
-worktree, reported loudly — the `pre-commit` guard, not this hook, is what
-stops a `qwts` commit. The command uses the machine-local commit-pinned
-`playbook-claude-worktree-create` shim. If the selected checkout is missing,
-the launcher lists verified clones for explicit selection; with none,
-creation fails with a clone instruction rather than assuming a location.
-
-**Pinning one agent within a harness.** In the worktree:
-
-```bash
-git config --worktree qwts.agentApp qwts-claude-fable-agent
-QWTS_AGENT_TRANSCRIPT_PROVIDER=claude \
-QWTS_AGENT_TRANSCRIPT_ID=<session-id> \
-  playbook-setup-worktree
-```
-
-`setup-worktree.mjs` reads the pin ahead of detection (`--app` and
-`GH_AGENT_APP` still outrank both) and persists the resolved App as the
-worktree pin. Codex Sol uses `qwts-codex-sol-agent`; startup supplies its
-thread ID. Manual Claude setup must also pass the
-[transcript locator](agent-execution-identity.md); pending identities are not
-reused automatically.
-
-**Agents do not work in primary checkouts.** Per
-[ENG-0045](../decisions/ENG-0045-agent-environments-are-bot-territory.md),
-agent territory is any `.<tool>/worktrees/` path — the directory dictates the
-App —
-and primary clones are the human's, stock; a clone is never "pinned" to a bot
-identity. The machine-wide `pre-commit` guard enforces the agent side of the
-boundary: an agent-marked process attempting a human-attributed commit in a
-GitHub-remoted repo is blocked with the notice that agents may only commit
-within `.<tool>/worktrees/<repo>`.
-
-`mint-token.mjs` uses the same IDE detection, so the manual mint (per-task
-section) picks the right bot with no argument.
+The mint command's stdout is a credential and must be parsed without logging.
+Missing executables, nonzero exits, malformed JSON, and missing tokens fail
+closed. Installation and CLI details remain in the pinned standalone
+[README](https://github.com/qwts/agent-bot-identity/blob/9ff7ce00b6a6945c7f249cf7a6ebf37cf58e86ee/README.md).

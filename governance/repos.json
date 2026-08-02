@@ -66,7 +66,7 @@
       "status": "onboarding",
       "sharedCi": false,
       "delta": "",
-      "note": "Extracted from this repo's tools/agent-bot (ENG-0016) as a standalone, shareable tool."
+      "note": "Standalone source of truth for agent identity runtime code and operational mechanics (ENG-0128)."
     },
     {
       "name": "codex-rules-editor",

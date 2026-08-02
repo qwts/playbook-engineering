@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { mint } from '../agent-bot/mint-token.mjs';
+import { mintAgentToken } from './lib/agent-bot-client.mjs';
 import {
   CODEX_SOURCE_REPO,
   CODEX_SYNC_BOT,
@@ -63,7 +63,7 @@ export class GitHubClient {
   }
 }
 
-export async function installationToken({ apply, env = process.env, mintToken = mint } = {}) {
+export async function installationToken({ apply, env = process.env, mintToken = mintAgentToken } = {}) {
   if (env.GH_TOKEN) return env.GH_TOKEN;
   if (apply) {
     throw new Error(`--apply requires a GH_TOKEN for ${CODEX_SYNC_BOT}[bot]`);

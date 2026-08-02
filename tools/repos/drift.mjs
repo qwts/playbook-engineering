@@ -17,17 +17,17 @@
 //
 // Auth: a token with read access to the governed repos — GH_DRIFT_TOKEN, or
 // the ambient `gh auth token`. App coverage is queried with each App's own
-// installation token via tools/agent-bot (needs the per-App keys under
-// ~/.config/<slug>/).
+// installation token via the installed agent-bot CLI (needs the per-App keys
+// under ~/.config/<slug>/).
 
 import process from 'node:process';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { mint } from '../agent-bot/mint-token.mjs';
 import { BASELINE_FILES } from './lib/baseline-files.mjs';
 import { activeAgentSlugs, loadAgents, validateAgents } from './lib/agents.mjs';
+import { mintAgentToken } from './lib/agent-bot-client.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export { BASELINE_FILES };
@@ -68,17 +68,23 @@ export async function api(path, token) {
 }
 
 // One installation-repository listing per App; every repo check reads the set.
-export async function appCoverage(slugs = apps()) {
+export async function installationRepositories(
+  slug,
+  { mintToken = mintAgentToken, apiCall = api } = {},
+) {
+  const { token } = mintToken({ slug });
+  const names = new Set();
+  for (let page = 1; ; page += 1) {
+    const batch = await apiCall(`/installation/repositories?per_page=100&page=${page}`, token);
+    for (const repo of batch?.repositories ?? []) names.add(repo.name);
+    if (!batch || batch.repositories.length < 100) return names;
+  }
+}
+
+export async function appCoverage(slugs = apps(), dependencies) {
   const coverage = {};
   for (const slug of slugs) {
-    const { token } = await mint({ slug });
-    const names = new Set();
-    for (let page = 1; ; page += 1) {
-      const batch = await api(`/installation/repositories?per_page=100&page=${page}`, token);
-      for (const repo of batch?.repositories ?? []) names.add(repo.name);
-      if (!batch || batch.repositories.length < 100) break;
-    }
-    coverage[slug] = names;
+    coverage[slug] = await installationRepositories(slug, dependencies);
   }
   return coverage;
 }

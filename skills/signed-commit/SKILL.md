@@ -6,7 +6,7 @@ description: Push commits as a bot so GitHub marks them Verified, using the Git 
 # Signed commits as a bot
 
 `git commit` in an agent-bot worktree **cannot** produce a Verified commit.
-`setup-worktree.mjs` deliberately sets `commit.gpgsign=false`, because signing a
+`agent-bot setup-worktree` deliberately sets `commit.gpgsign=false`, because signing a
 bot's commit with the human's GPG/SSH key shows **Unverified** — the key does
 not match the bot's committer email. Bot worktrees have no signing key of their
 own (`gpg` is often absent; `git log --format=%G?` prints `N`).
@@ -35,7 +35,7 @@ Work normally — branch, edit, commit locally, run the repo's gates. Then repla
 the local commits with signed equivalents just before opening the PR:
 
 ```bash
-playbook-signed-commit
+node "$HOME/.claude/skills/signed-commit/scripts/signed-commit.mjs"
 ```
 
 It replays every commit from the merge-base to `HEAD` through
@@ -46,7 +46,7 @@ individually — messages and boundaries are preserved, not squashed.
 Preview without writing anything:
 
 ```bash
-playbook-signed-commit --dry-run
+node "$HOME/.claude/skills/signed-commit/scripts/signed-commit.mjs" --dry-run
 ```
 
 Flags: `--base <ref>`, `--branch <name>`, `--repo owner/name`,
@@ -117,7 +117,8 @@ The active account should be the expected `<slug>[bot]`, via `GH_TOKEN`.
 Only outside a configured worktree, or in CI:
 
 ```bash
-GH_TOKEN=$(playbook-mint-token) || exit 1
+AGENT_BOT="${AGENT_BOT_BIN:-agent-bot}"
+GH_TOKEN=$("$AGENT_BOT" mint-token) || exit 1
 export GH_TOKEN
 ```
 
@@ -128,9 +129,11 @@ failed mint must abort the task, never continue as the human.
 
 ### When something is broken
 
-Setup, the worktree hook, the shim, and the full failure-mode list live in
-[agent-bot-identity](../../docs/reference/agent-bot-identity.md). Read it there
-rather than restating it here (ENG-0006 item 1). The two that bite hardest:
+The qwts policy boundary lives in
+[agent bot identity governance](../../docs/reference/agent-bot-identity.md).
+Setup, hooks, the shim, and troubleshooting live in the standalone
+[`agent-bot-identity`](https://github.com/qwts/agent-bot-identity/tree/9ff7ce00b6a6945c7f249cf7a6ebf37cf58e86ee)
+runtime. The two failure modes that affect this skill most are:
 
 - A PR appears as the human despite a working shim → a **GitHub MCP connector**
   made it. Connectors carry the human's OAuth and bypass `git` and `gh`

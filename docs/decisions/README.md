@@ -80,6 +80,7 @@ principles; it does not waive the lower priorities.
 | [ENG-0045](ENG-0045-agent-environments-are-bot-territory.md) | Agent coding environments are bot territory; installed tooling is commit-pinned | Proposed |
 | [ENG-0079](ENG-0079-per-agent-identity.md) | Agent identity is per agent — the harness is detected, the agent is pinned | Proposed |
 | [ENG-0081](ENG-0081-transcript-bound-agent-execution-identities.md) | Agent execution identities bind bot actions to provider transcripts | Proposed |
+| [ENG-0128](ENG-0128-agent-bot-runtime-ownership.md) | Agent identity runtime ownership moves to agent-bot-identity | Proposed |
 
 ## Related
 

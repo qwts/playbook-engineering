@@ -55,7 +55,8 @@ This record settles the model permanently so it is never re-derived.
    dirty, missing, or advanced checkouts until the user explicitly selects a
    clean commit again. No installed integration embeds a checkout path.
 6. **The agent side of the boundary is enforced.** A machine-wide
-   `pre-commit` guard (`tools/agent-bot/hooks/pre-commit`, shipped with this
+   `pre-commit` guard (historically tools/agent-bot/hooks/pre-commit, now owned
+   by the runtime per [ENG-0128](ENG-0128-agent-bot-runtime-ownership.md), shipped with this
    record) blocks a commit when the process carries agent-only environment
    markers, the commit would be attributed to the human, and the repo has a
    GitHub remote — telling the agent it may only commit within
@@ -67,7 +68,8 @@ This record settles the model permanently so it is never re-derived.
 ## Consequences
 
 - Two implementation gaps become required work under this record: identity
-  resolution in `tools/agent-bot` must become path-first (today's merged code
+  resolution in tools/agent-bot (the historical local path superseded by
+  [ENG-0128](ENG-0128-agent-bot-runtime-ownership.md)) must become path-first (today's merged code
   resolves by environment markers), and the `gh` shim exists only as an
   unreviewed machine artifact until it lands here.
 - The human obligation in decision 3 is policy, not tooling — it is stated,
