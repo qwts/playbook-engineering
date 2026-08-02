@@ -26,8 +26,8 @@
       },
       {
         "path": "docs/reference/agent-bot-identity.md",
-        "budget": 1800,
-        "reason": "the identity model and the worktree machinery that applies it are only safe read together: territory, pinning, and the hook that persists them. Lowered from 3600 by the split its previous reason asked for \u2014 the operational half (App creation, mint, shim, verification, failure modes) moved to agent-bot-operations.md when registering the model-level Apps would have forced a third raise"
+        "budget": 1100,
+        "reason": "qwts roster, permissions, and the installed CLI boundary are one governance contract; runtime setup and troubleshooting moved to agent-bot-identity under ENG-0128"
       },
       {
         "path": "docs/decisions/ENG-0004-centralize-shared-cicd.md",

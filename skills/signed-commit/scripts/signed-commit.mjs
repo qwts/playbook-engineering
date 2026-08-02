@@ -6,8 +6,8 @@
  * show Verified. Commits made by `git commit` in a bot worktree cannot be:
  * agent-bot worktrees deliberately set commit.gpgsign=false, because signing a
  * bot commit with the human's GPG/SSH key shows Unverified (the key does not
- * match the bot's committer email). See playbook-engineering
- * docs/reference/agent-bot-identity.md.
+ * match the bot's committer email). See the agent-bot-identity runtime and
+ * playbook-engineering identity policy.
  *
  * Usage:
  *   node signed-commit.mjs [--base <ref>] [--branch <name>] [--repo owner/name]

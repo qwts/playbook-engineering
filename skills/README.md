@@ -20,7 +20,7 @@ symlink the skill directory into the harness so a `git pull` here updates every
 machine, rather than copying and drifting:
 
 ```bash
-PLAYBOOK_ROOT="$(playbook-engineering status | sed -n '1p')"
+PLAYBOOK_ROOT="$(git rev-parse --show-toplevel)"
 ln -sfn "$PLAYBOOK_ROOT/skills/<name>" ~/.claude/skills/<name>
 ```
 

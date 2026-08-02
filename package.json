@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "Software engineering planning and documentation",
   "scripts": {
-    "agent:identity": "node tools/agent-bot/agent-identity.mjs",
     "codex:approve": "node tools/repos/approve-codex-sync.mjs",
     "lint:markdown": "markdownlint docs/ skills/ AGENTS.md",
     "lint:markdown:fix": "markdownlint docs/ skills/ AGENTS.md --fix",
@@ -12,7 +11,7 @@
     "inventory": "node tools/dependency-inventory/inventory.mjs",
     "repos:bootstrap": "node tools/repos/bootstrap.mjs",
     "repos:check": "node tools/repos/repos.mjs check",
-    "test": "node --test tools/ci-policy/tests/ci-policy.test.mjs tools/ci-policy/tests/governed-ci-docs.test.mjs tools/docs-gov/tests/docs-gov.test.mjs tools/docs-eval/tests/docs-eval.test.mjs tools/repos/tests/repos.test.mjs tools/repos/tests/bootstrap.test.mjs tools/repos/tests/reconcile.test.mjs tools/repos/tests/agents.test.mjs tools/repos/tests/codex-sync.test.mjs tools/dependency-inventory/tests/inventory.test.mjs tools/agent-bot/tests/mint-token.test.mjs tools/agent-bot/tests/credential-helper.test.mjs tools/agent-bot/tests/detect-harness.test.mjs tools/agent-bot/tests/gh-shim.test.mjs tools/agent-bot/tests/setup-worktree.test.mjs tools/agent-bot/tests/resolve-agent.test.mjs tools/agent-bot/tests/agent-identity.test.mjs tools/agent-bot/tests/identity-hooks.test.mjs tools/agent-bot/tests/worktree-token.test.mjs tools/agent-bot/tests/claude-worktree-create.test.mjs tools/agent-bot/tests/codex-startup.test.mjs tools/agent-bot/tests/ensure-private-key.test.mjs tools/agent-bot/tests/install-hooks.test.mjs tools/agent-bot/tests/install-gh-shim.test.mjs tools/agent-bot/tests/playbook-launcher.test.mjs"
+    "test": "node --test tools/ci-policy/tests/ci-policy.test.mjs tools/ci-policy/tests/governed-ci-docs.test.mjs tools/docs-gov/tests/docs-gov.test.mjs tools/docs-eval/tests/docs-eval.test.mjs tools/repos/tests/repos.test.mjs tools/repos/tests/bootstrap.test.mjs tools/repos/tests/reconcile.test.mjs tools/repos/tests/agents.test.mjs tools/repos/tests/agent-bot-client.test.mjs tools/repos/tests/codex-sync.test.mjs tools/dependency-inventory/tests/inventory.test.mjs"
   },
   "devDependencies": {
     "markdownlint-cli": "^0.49.1"

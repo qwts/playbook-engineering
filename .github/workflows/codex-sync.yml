@@ -10,7 +10,7 @@ on:
       - '.claude/settings.json'
       - '.github/workflows/codex-sync.yml'
       - 'governance/repos.json'
-      - 'tools/agent-bot/mint-token.mjs'
+      - 'tools/repos/lib/agent-bot-client.mjs'
       - 'tools/repos/lib/baseline-files.mjs'
       - 'tools/repos/lib/codex-sync.mjs'
       - 'tools/repos/lib/manifest.mjs'

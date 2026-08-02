@@ -22,7 +22,7 @@
 //              README/LICENSE (deliberately per-repo).
 //
 // Run from this checkout — templates under governance/baseline/ resolve
-// against it (the playbook is the runtime source of truth).
+// against it (the playbook is the governance source of truth).
 
 import process from 'node:process';
 import { readFileSync } from 'node:fs';
@@ -30,8 +30,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { checkRepo, appCoverage, userToken, api } from './drift.mjs';
 import { plan, bumpReviewCount, canUseMergeQueue, defaultRuleset } from './lib/reconcile-plan.mjs';
-import { mint } from '../agent-bot/mint-token.mjs';
-import { resolveAgentSlug } from '../agent-bot/resolve-agent.mjs';
+import { mintAgentToken } from './lib/agent-bot-client.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SEED_BRANCH = 'governance/baseline-seed';
@@ -151,9 +150,7 @@ async function main() {
 
   const token = userToken();
   const coverage = await appCoverage();
-  // Pin-aware (ENG-0079): a pinned worktree opens its seed PR as the agent it
-  // commits as, not as the harness.
-  const slug = resolveAgentSlug();
+  let botToken;
 
   const report = [];
   for (const entry of entries) {
@@ -162,9 +159,10 @@ async function main() {
     if (apply) {
       if (p.settings.length) line.applied.push(...(await applySettings(manifest.account, entry.name, p.settings, token)));
       if (p.seeds.length) {
-        if (!slug) line.human.push('seed PR skipped: no agent resolved — pin one with qwts.agentApp, set GH_AGENT_APP, or run from an agent session');
-        else if (!coverage[slug]?.has(entry.name)) line.human.push(`seed PR skipped: ${slug} is not installed on ${entry.name}`);
-        else line.applied.push(await applySeeds(manifest.account, entry.name, p.seeds, (await mint({ slug })).token));
+        botToken ??= mintAgentToken().token;
+        const accessible = await api(`/repos/${manifest.account}/${entry.name}`, botToken);
+        if (!accessible) line.human.push('seed PR skipped: the resolved agent App is not installed on this repository');
+        else line.applied.push(await applySeeds(manifest.account, entry.name, p.seeds, botToken));
       }
     }
     report.push(line);

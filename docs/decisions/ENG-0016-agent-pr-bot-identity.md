@@ -33,7 +33,8 @@ missing workflow step.
    Metadata (read). The App is installed only on selected repositories, never
    account-wide.
 3. **Agents authenticate with short-lived installation tokens** minted by
-   `tools/agent-bot/mint-token.mjs`. The App's private key lives outside every
+   tools/agent-bot/mint-token.mjs (the historical local path superseded by
+   [ENG-0128](ENG-0128-agent-bot-runtime-ownership.md)). The App's private key lives outside every
    repository, per the no-secrets rule in the
    [agent conventions](../reference/agent-conventions.md).
 4. **The identities never cross:** the human does not author through the bot,

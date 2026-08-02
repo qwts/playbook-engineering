@@ -55,9 +55,9 @@ Each document includes navigation links, prerequisites, and cross-references to 
 - [Governed repositories](docs/reference/governed-repos.md) — which repos this playbook governs, and how to add or remove one; generated from the `governance/repos.json` manifest (ENG-0011).
 - [Shared SOPs](docs/sop/README.md) — org-wide standard operating procedures for how work moves, inherited by every repo (ENG-0008).
 - [Org-wide agent conventions](docs/reference/agent-conventions.md) — the shared agent working agreement every repo's `AGENTS.md` links to (ENG-0006).
-- [Agent bot identity](docs/reference/agent-bot-identity.md) — the GitHub App agents author PRs as, so a human can approve them (ENG-0016).
-- [Agent bot operations](docs/reference/agent-bot-operations.md) — creating each App, minting tokens, the `gh` shim, verification, failure modes.
-- [Agent execution identity](docs/reference/agent-execution-identity.md) — the private transcript-bound identity behind each agent conversation and its artifacts (ENG-0081).
+- [Agent bot identity governance](docs/reference/agent-bot-identity.md) — the qwts App roster, permissions, coverage, and integration contract (ENG-0016, ENG-0128).
+- [Agent bot organization operations](docs/reference/agent-bot-operations.md) — registration, verification, and incident expectations without duplicating the standalone runtime.
+- [Agent execution identity policy](docs/reference/agent-execution-identity.md) — the private transcript-bound identity and audit boundary behind each agent conversation (ENG-0081).
 - [Agentic primitives conformance checklist](docs/reference/agentic-primitives-conformance-checklist.md) — the ENG-0006 §6 checklist per-repo alignment issues link to.
 - [Shared agent skills](skills/README.md) — skills centralized here and installed into every agent harness, rather than copied per repo (ENG-0004, ENG-0006).
 - [Documentation governance](docs/reference/documentation-governance.md) — the `docs-gov` gate: deterministic checks that keep docs agent-readable, consumable by other repos as a reusable workflow.
