@@ -81,7 +81,7 @@
       "name": "playbook-dashboard",
       "visibility": "public",
       "publish": true,
-      "status": "onboarding",
+      "status": "active",
       "sharedCi": false,
       "delta": "",
       "note": "Public redacted fleet dashboard; reads this manifest as its own source of truth."

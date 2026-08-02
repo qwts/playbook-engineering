@@ -223,5 +223,5 @@ contents permission.
 | `quorum` | public | active | no | managed | — |
 | `agent-bot-identity` | public | active | no | managed | — |
 | `codex-rules-editor` | public | active | no | managed | — |
-| `playbook-dashboard` | public | onboarding | no | managed | — |
+| `playbook-dashboard` | public | active | no | managed | — |
 <!-- END GENERATED governed-repos -->
