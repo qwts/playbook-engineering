@@ -6,15 +6,41 @@ import {
   allowedActorsFromRoster,
   authorizeRun,
   classifyRun,
+  isGeneratedReleaseProjection,
   isAllowedActor,
   isNativeMergeQueueMainPush,
   outputsFor,
+  releaseLifecycleFor,
+  releaseOutputs,
 } from '../../../.github/actions/ci-policy/classify.mjs';
+import {
+  listPullRequestsForCommit,
+  mergeGroupHeadPullRequest,
+  resolveReleaseOrigins,
+} from '../../../.github/actions/ci-policy/release-origin.mjs';
 
 const pullRequest = (draft, fork = false) => ({ pull_request: { draft, head: { repo: { fork } } } });
 const roster = JSON.parse(readFileSync(new URL('../../../governance/agents.json', import.meta.url), 'utf8'));
+const releaseCatalog = JSON.parse(
+  readFileSync(new URL('../../../governance/release-lifecycles.json', import.meta.url), 'utf8'),
+);
 const allowedActors = allowedActorsFromRoster(roster);
 const classify = (options) => classifyRun({ allowedActors, ...options });
+
+const releasePullRequest = ({
+  author = 'qwts',
+  baseRef = 'main',
+  headRef = 'codex/feature',
+  headRepository = 'qwts/overlook',
+  fork = false,
+} = {}) => ({
+  pull_request: {
+    draft: false,
+    user: { login: author },
+    base: { ref: baseRef },
+    head: { ref: headRef, repo: { fork, full_name: headRepository } },
+  },
+});
 
 test('the human, named automation, and active roster Apps are authorized', () => {
   for (const actor of [
@@ -184,6 +210,171 @@ test('fork PRs, unauthorized actors, and unsupported triggers fail closed', () =
   assert.throws(() => classify({ actor: 'qwts', eventName: 'schedule', event: {} }), /not a governed CI trigger/);
 });
 
+const overlook = releaseLifecycleFor(releaseCatalog, 'qwts/overlook');
+const projection = releasePullRequest({
+  author: 'chores-dumb[bot]',
+  headRef: 'changeset-release/main',
+}).pull_request;
+const source = releasePullRequest({ headRef: 'codex/source-change' }).pull_request;
+const releaseRun = (overrides) => ({
+  eventName: 'pull_request',
+  repository: 'qwts/overlook',
+  lifecycle: overlook,
+  event: {},
+  pullRequests: [],
+  ...overrides,
+});
+
+test('only the reviewed projection identity classifies as generated release output', () => {
+  assert.deepEqual(releaseOutputs(releaseRun({ pullRequests: [projection] })), {
+    pull_request_kind: 'generated-release-projection',
+    generated_release_projection: 'true',
+    release_metadata_system: 'changesets',
+    source_input_policy: 'behavior-change-changeset-or-reviewed-rationale',
+    release_gate_mode: 'generated-projection',
+  });
+
+  // Each near miss varies exactly one field of the reviewed identity.
+  for (const [reason, pullRequest] of [
+    ['author', releasePullRequest({ headRef: 'changeset-release/main' })],
+    ['head ref', releasePullRequest({ author: 'chores-dumb[bot]', headRef: 'release/main' })],
+    ['base ref', releasePullRequest({ author: 'chores-dumb[bot]', headRef: 'changeset-release/main', baseRef: 'next' })],
+    ['head repository', releasePullRequest({ author: 'chores-dumb[bot]', headRef: 'changeset-release/main', headRepository: 'octocat/overlook', fork: true })],
+  ]) {
+    assert.equal(
+      isGeneratedReleaseProjection(releaseRun({ pullRequests: [pullRequest.pull_request] })),
+      false,
+      `a forged ${reason} must not classify as generated`,
+    );
+  }
+});
+
+test('ordinary automation and unconfigured repositories get no generated-release exception', () => {
+  const dependabot = releasePullRequest({
+    author: 'dependabot[bot]',
+    headRef: 'dependabot/npm_and_yarn/example',
+  }).pull_request;
+  assert.equal(releaseOutputs(releaseRun({ pullRequests: [dependabot] })).release_gate_mode, 'source-policy');
+
+  const unversioned = releaseLifecycleFor(releaseCatalog, 'qwts/playbook-engineering');
+  const outputs = releaseOutputs(releaseRun({ lifecycle: unversioned, pullRequests: [source] }));
+  assert.equal(outputs.generated_release_projection, 'false');
+  assert.equal(outputs.release_gate_mode, 'not-applicable');
+});
+
+test('the merge queue classifies its own head pull request, not the entries behind it', async () => {
+  const event = { merge_group: { head_ref: 'refs/heads/gh-readonly-queue/main/pr-116-e8c01cbc4c17' } };
+  assert.deepEqual(mergeGroupHeadPullRequest(event), { baseRef: 'main', number: 116 });
+  const requested = [];
+  const options = releaseRun({
+    eventName: 'merge_group',
+    event,
+    apiUrl: 'https://api.github.example',
+    token: 'test-token',
+    fetchImpl: async (url) => {
+      requested.push(String(url));
+      return { ok: true, json: async () => source };
+    },
+  });
+  const pullRequests = await resolveReleaseOrigins(options);
+  assert.deepEqual(requested, ['https://api.github.example/repos/qwts/overlook/pulls/116']);
+  assert.deepEqual(pullRequests, [source]);
+  // A generated projection queued ahead of this source PR is never fetched, so it cannot
+  // weaken the head PR's source policy.
+  assert.equal(releaseOutputs({ ...options, pullRequests }).release_gate_mode, 'source-policy');
+});
+
+test('manual and post-merge lanes classify the exact commit through its associated pull requests', async () => {
+  const commitLane = (pullRequests) => ({
+    ...releaseRun({ eventName: 'workflow_dispatch' }),
+    sha: 'a'.repeat(40),
+    apiUrl: 'https://api.github.example',
+    token: 'test-token',
+    fetchImpl: async () => ({ ok: true, json: async () => pullRequests }),
+  });
+
+  for (const eventName of ['workflow_dispatch', 'push']) {
+    const lane = { ...commitLane([projection]), eventName };
+    const pullRequests = await resolveReleaseOrigins(lane);
+    assert.equal(releaseOutputs({ ...lane, pullRequests }).release_gate_mode, 'generated-projection');
+
+    // Ambiguous origins fail closed; several source origins stay on source policy.
+    assert.throws(
+      () => releaseOutputs({ ...lane, pullRequests: [projection, source] }),
+      /generated release projection origin is ambiguous/,
+    );
+    assert.equal(
+      releaseOutputs({ ...lane, pullRequests: [source, source] }).release_gate_mode,
+      'source-policy',
+    );
+
+    // A commit with no associated PR is an absence of release context, not a policy failure:
+    // manual preflight before a PR exists must not break the lane.
+    assert.deepEqual(await resolveReleaseOrigins({ ...commitLane([]), eventName }), []);
+    assert.equal(releaseOutputs({ ...lane, pullRequests: [] }).release_gate_mode, 'no-source-context');
+  }
+});
+
+test('release-origin lookups fail closed on missing or malformed evidence', async () => {
+  const base = {
+    repository: 'qwts/overlook',
+    sha: 'b'.repeat(40),
+    apiUrl: 'https://api.github.example',
+    token: 'test-token',
+  };
+  const responses = {
+    forbidden: async () => ({ ok: false, status: 403 }),
+    notAnArray: async () => ({ ok: true, json: async () => ({}) }),
+    missingRefs: async () => ({ ok: true, json: async () => [{ number: 1 }] }),
+  };
+  await assert.rejects(() => listPullRequestsForCommit({ ...base, fetchImpl: responses.forbidden }), /HTTP 403/);
+  await assert.rejects(() => listPullRequestsForCommit({ ...base, fetchImpl: responses.notAnArray }), /malformed data/);
+  await assert.rejects(() => listPullRequestsForCommit({ ...base, fetchImpl: responses.missingRefs }), /malformed data/);
+  await assert.rejects(
+    () => listPullRequestsForCommit({ ...base, sha: 'not-a-sha', fetchImpl: responses.notAnArray }),
+    /commit SHA is invalid/,
+  );
+  await assert.rejects(
+    () => listPullRequestsForCommit({ ...base, token: '', fetchImpl: responses.notAnArray }),
+    /token is missing/,
+  );
+  await assert.rejects(
+    () => resolveReleaseOrigins({
+      ...base,
+      eventName: 'merge_group',
+      event: { merge_group: { head_ref: 'refs/heads/not-a-queue' } },
+      lifecycle: overlook,
+      fetchImpl: responses.notAnArray,
+    }),
+    /head ref .* is malformed/,
+  );
+});
+
+test('the release lifecycle catalog is uniquely configured per governed repository', () => {
+  assert.throws(() => releaseLifecycleFor(releaseCatalog, 'qwts/unlisted'), /not uniquely configured/);
+  assert.throws(() => releaseLifecycleFor({ schemaVersion: 2, repositories: [] }, 'qwts/overlook'), /malformed/);
+});
+
+test('unauthorized bots and forks cannot claim the generated projection path', () => {
+  const event = releasePullRequest({ author: 'chores-dumb[bot]', headRef: 'changeset-release/main' });
+  assert.throws(
+    () => classify({ actor: 'renovate[bot]', triggeringActor: 'renovate[bot]', eventName: 'pull_request', event }),
+    /not authorized/,
+  );
+  assert.throws(
+    () => classify({
+      actor: 'qwts',
+      eventName: 'pull_request',
+      event: releasePullRequest({
+        author: 'chores-dumb[bot]',
+        headRef: 'changeset-release/main',
+        headRepository: 'octocat/overlook',
+        fork: true,
+      }),
+    }),
+    /fork/,
+  );
+});
 test('the reference workflow preserves governed gates and skips draft jobs', () => {
   const workflow = readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8');
   assert.match(workflow, /github\.event\.pull_request\.draft == false/);
@@ -206,6 +397,9 @@ test('the reference workflow preserves governed gates and skips draft jobs', () 
   assert.match(workflow, /^  codeql:$/m);
   assert.match(workflow, /uses: \.\/\.github\/workflows\/codeql\.yml/);
   assert.match(workflow, /needs\.policy\.outputs\.run_post_merge == 'true'/);
+  assert.match(workflow, /generated_release_projection: \$\{\{ steps\.policy\.outputs\.generated_release_projection \}\}/);
+  assert.match(workflow, /release_gate_mode: \$\{\{ steps\.policy\.outputs\.release_gate_mode \}\}/);
+  assert.match(workflow, /^  pull-requests: read$/m);
   assert.match(workflow, /CODEQL: \$\{\{ needs\.codeql\.result \}\}/);
   assert.match(workflow, /test "\$CODEQL" = success/);
   assert.match(workflow, /queue\|manual\)/);

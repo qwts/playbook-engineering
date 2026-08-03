@@ -24,6 +24,14 @@ Classify the owner before selecting a merge lifecycle:
 
 Do not change enabled merge methods during this rollout.
 
+Inventory the release lifecycle before adding any metadata gate, and record the
+result in [`release-lifecycles.json`](../../governance/release-lifecycles.json):
+
+- the release/versioning mechanism and the source PR's existing input rule;
+- the generated projection's base ref, head ref, canonical repository, and
+  author, or `null` where the repository generates none; and
+- whether generation consumes the source inputs before opening its PR.
+
 ## Workflow contracts
 
 - Draft PR events start no jobs; local validation is recorded before promotion.
@@ -38,15 +46,23 @@ Do not change enabled merge methods during this rollout.
   removing any independent gate.
 - Advanced CodeQL runs through governed CI for every configured language and
   retains a default-branch scan.
+- Source PRs keep their repository-specific release-input rule; generated
+  release projections skip only consumed-input presence. The classification and
+  origin-resolution contract is in the
+  [CI policy](ci-execution-policy.md#changesets-version-prs-and-releases) — grant
+  the workflow `pull-requests: read` so the policy action can resolve it.
 
 For Changesets repositories, version planning, tag planning, and release
 verification all read the semantic `releases.length` emitted by
 `changeset status --output`. Empty or frontmatter-only governance changesets
 do not create Version packages PRs or block recovery; a positive count fails
 closed before a tag or release. Reject raw `.changeset` file-presence checks in
-all three lanes. Reuse the
+those three lanes — this governs release planning, not the separate gate a
+source PR passes to prove release intent. Reuse the
 [`changeset-release-count` action](../../.github/actions/changeset-release-count/action.yml)
-rather than maintaining three inline parsers.
+rather than maintaining three inline parsers; a generated projection that has
+consumed its inputs reports zero through it without a manual empty marker, so
+repeated force-regeneration remains safe.
 
 ## Required checks and publishers
 
@@ -134,9 +150,9 @@ drains is observation evidence, not a reason to weaken exact-SHA validation.
 
 ## Fleet inheritance after this policy lands
 
-The active repositories `overlook`, `image-trail`, `cartograph`, `bookmarkit`,
-and `quorum`, plus onboarding repositories `agent-bot-identity`,
-`codex-rules-editor`, and `playbook-dashboard`, should later reconcile their
-repo-local workflows and manual settings against this checklist. This PR does
-not modify those repositories. `playbook-engineering` validates the shared
-policy and reference implementation first.
+Every active or onboarding repository has a verified release-mechanism
+disposition in the
+[release-lifecycle fleet handoff](governed-ci-release-lifecycle-fleet.md).
+`playbook-engineering` validates and merges the shared policy first. Consumers
+then pin its reviewed immutable SHA and execute their repository-specific
+repair or retain the explicit not-applicable disposition.

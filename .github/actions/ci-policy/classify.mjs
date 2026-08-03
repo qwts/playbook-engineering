@@ -1,7 +1,9 @@
 import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { resolveReleaseOrigins } from './release-origin.mjs';
 
 const ROSTER_URL = new URL('../../../governance/agents.json', import.meta.url);
+const RELEASE_LIFECYCLES_URL = new URL('../../../governance/release-lifecycles.json', import.meta.url);
 const MERGE_QUEUE_ACTOR = 'github-merge-queue[bot]';
 
 export function allowedActorsFromRoster(roster) {
@@ -23,6 +25,62 @@ export function isNativeMergeQueueMainPush({ actor, triggeringActor, eventName, 
     eventName === 'push' &&
     ref === 'refs/heads/main'
   );
+}
+
+export function releaseLifecycleFor(catalog, repository) {
+  if (catalog?.schemaVersion !== 1 || !Array.isArray(catalog.repositories)) {
+    throw new Error('release lifecycle catalog is malformed');
+  }
+  const matches = catalog.repositories.filter((entry) => entry.repository === repository);
+  if (matches.length !== 1) {
+    throw new Error(`release lifecycle for ${repository || '<empty>'} is not uniquely configured`);
+  }
+  return matches[0];
+}
+
+function matchesGeneratedProjection(pullRequest, repository, projection) {
+  return (
+    pullRequest.base?.ref === projection.baseRef &&
+    pullRequest.head?.ref === projection.headRef &&
+    pullRequest.head?.repo?.full_name === repository &&
+    pullRequest.user?.login === projection.author
+  );
+}
+
+/**
+ * Generated only when the run's single origin matches the reviewed projection identity.
+ * A run carrying several origins with a projection among them is ambiguous and fails closed,
+ * so an earlier projection can never waive a source PR's stricter policy.
+ */
+export function isGeneratedReleaseProjection({ repository, lifecycle, pullRequests }) {
+  const projection = lifecycle.generatedProjection;
+  if (!projection) return false;
+  const generated = pullRequests.filter((pullRequest) =>
+    matchesGeneratedProjection(pullRequest, repository, projection));
+  if (generated.length === 0) return false;
+  if (pullRequests.length !== 1) throw new Error('generated release projection origin is ambiguous');
+  return true;
+}
+
+export function releaseOutputs(options) {
+  const generated = isGeneratedReleaseProjection(options);
+  const { metadataSystem, sourceInputPolicy } = options.lifecycle;
+  const hasOrigin = options.pullRequests.length > 0;
+  return {
+    pull_request_kind:
+      generated ? 'generated-release-projection' : hasOrigin ? 'change-pr' : 'not-a-pull-request',
+    generated_release_projection: String(generated),
+    release_metadata_system: metadataSystem,
+    source_input_policy: sourceInputPolicy,
+    release_gate_mode:
+      metadataSystem === 'none'
+        ? 'not-applicable'
+        : generated
+          ? 'generated-projection'
+          : hasOrigin
+            ? 'source-policy'
+            : 'no-source-context',
+  };
 }
 
 export function authorizeRun({ actor, triggeringActor = actor, allowedActors, eventName, event, ref }) {
@@ -71,15 +129,16 @@ export function classifyRun(options) {
   throw new Error(`event ${eventName || '<empty>'} on ${ref || '<empty>'} is not a governed CI trigger`);
 }
 
-export function outputsFor(mode) {
+export function outputsFor(mode, release = {}) {
   return {
     mode,
     run_full: String(mode === 'full' || mode === 'queue' || mode === 'manual'),
     run_post_merge: String(mode === 'post-merge'),
+    ...release,
   };
 }
 
-function main() {
+async function main() {
   const event = JSON.parse(readFileSync(process.env.CI_POLICY_EVENT_PATH, 'utf8'));
   const roster = JSON.parse(readFileSync(ROSTER_URL, 'utf8'));
   const options = {
@@ -88,13 +147,31 @@ function main() {
     allowedActors: allowedActorsFromRoster(roster),
     eventName: process.env.CI_POLICY_EVENT_NAME,
     event,
+    repository: process.env.CI_POLICY_REPOSITORY,
     ref: process.env.CI_POLICY_REF,
   };
-  const authorizationOnly = process.env.CI_POLICY_AUTHORIZATION_ONLY === 'true';
-  const mode = authorizationOnly ? 'authorized' : classifyRun(options);
-  if (authorizationOnly) authorizeRun(options);
-  const output = Object.entries(outputsFor(mode)).map(([key, value]) => `${key}=${value}`).join('\n');
+  // Authorization-only callers gate on the actor alone; they neither read release
+  // configuration nor hold `pull-requests: read`.
+  if (process.env.CI_POLICY_AUTHORIZATION_ONLY === 'true') {
+    authorizeRun(options);
+    return writeOutputs(outputsFor('authorized'));
+  }
+  const mode = classifyRun(options);
+  const catalog = JSON.parse(readFileSync(RELEASE_LIFECYCLES_URL, 'utf8'));
+  const lifecycle = releaseLifecycleFor(catalog, options.repository);
+  const pullRequests = await resolveReleaseOrigins({
+    ...options,
+    lifecycle,
+    sha: process.env.CI_POLICY_SHA,
+    apiUrl: process.env.CI_POLICY_API_URL,
+    token: process.env.CI_POLICY_TOKEN,
+  });
+  writeOutputs(outputsFor(mode, releaseOutputs({ ...options, lifecycle, pullRequests })));
+}
+
+function writeOutputs(outputs) {
+  const output = Object.entries(outputs).map(([key, value]) => `${key}=${value}`).join('\n');
   appendFileSync(process.env.GITHUB_OUTPUT, `${output}\n`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

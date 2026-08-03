@@ -193,6 +193,30 @@ credential boundary. The existing PR concurrency contract remains unchanged.
 The [CI policy](../reference/ci-execution-policy.md) and
 [rollout checklist](../reference/governed-ci-rollout.md) define these controls.
 
+## Amendment — 2026-08-02: source inputs and generated release projections
+
+This amendment resolves
+[#134](https://github.com/qwts/playbook-engineering/issues/134). In
+`qwts/overlook#870`, commit `260fa140` applied one repository's Changesets
+presence check to every complete suite. A generated Version packages PR then
+failed after its reviewed Changesets had been intentionally consumed into
+`package.json` and `CHANGELOG.md`. Retaining an empty Changeset only masked the
+defect until automation regenerated the branch.
+
+The decision: **release-input requirements belong to a repository's own
+contract, not to the shared lifecycle, and a generated release projection is a
+distinct lifecycle object from the source PR that fed it.** Governed CI
+classifies a projection only from reviewed configuration and GitHub-owned
+identity, and exempts it from one thing — retaining inputs it was designed to
+consume. Every other gate, including exact-SHA CI, stable contexts, Advanced
+CodeQL, reviews, version consistency, packaging, signing, provenance, and
+release integrity, applies to it unchanged.
+
+The operational contract is in the
+[CI policy](../reference/ci-execution-policy.md); per-repository dispositions
+are in the
+[release-lifecycle fleet handoff](../reference/governed-ci-release-lifecycle-fleet.md).
+
 ## References
 
 - [ENG-0003](ENG-0003-repo-is-documentation-source-of-truth.md) established this repo as the cross-repo home for shared engineering assets; this extends that from documents to CI/CD.

@@ -9,6 +9,10 @@ This baseline comes from
 [ENG-0008](../decisions/ENG-0008-shared-sop-inheritance.md). Repositories map
 existing gates onto its lanes; only timing and deduplication change.
 
+Release-input policy is repository-specific, and a generated release projection
+is a distinct lifecycle object from the source PR that fed it — see
+[Changesets, version PRs, and releases](#changesets-version-prs-and-releases).
+
 ## Runtime actor boundary
 
 Allowed runtime actors are:
@@ -112,9 +116,44 @@ deletes an agreed validation to make branch protection pass.
 
 ## Changesets, version PRs, and releases
 
-A changesets or version-packages PR follows the same lifecycle: validate its
-head, then its merge-group candidate. Generation automation validates only its
-deterministic version diff and dispatches no extra equivalent CI run.
+A source PR follows its own repository's reviewed release-input contract — a
+Changeset for shipping changes, an explicit no-release-impact path, or another
+local rule. This policy does not replace that contract with raw file presence,
+and does not add one to a repository that has no release metadata system.
+
+A generated Version packages PR is the projection of inputs a source PR already
+supplied. It follows the same ready-head and exact-SHA lifecycle, validates its
+deterministic version diff, dispatches no extra equivalent CI run, and proves
+semantic `releases.length` is zero — but it is never required to retain the
+Changesets it consumed. The counter reports zero when no non-README input and no
+`.changeset/pre.json` remain; either one, including prerelease `mode: "exit"`,
+runs `changeset status --output`, and malformed or positive state fails closed.
+No empty marker file is involved, so repeated regeneration stays safe.
+
+Classification is reviewed configuration, never a workflow input. A run is a
+generated projection only when its pull request matches every field of that
+repository's
+[`release-lifecycles.json`](../../governance/release-lifecycles.json) entry:
+base ref, head ref, canonical head repository, and author. A branch name, a
+PR-controlled flag, or bot authorship alone is not a trust boundary — ordinary
+automation, Dependabot included, keeps its normal repository contract. Actor
+authorization still checks both `github.actor` and `github.triggering_actor`,
+and public forks remain refused.
+
+The pull request a run belongs to is resolved from GitHub-owned evidence under
+`pull-requests: read`, which neither authorizes an actor nor grants write
+access:
+
+| Lane | Origin |
+| --- | --- |
+| `pull_request` | the event payload |
+| `merge_group` | the pull request named by the GitHub-owned queue head ref, so an entry queued behind it cannot weaken its policy |
+| Manual and post-merge | the pull requests associated with the exact `github.sha` |
+
+Ambiguous evidence fails closed: a projection is recognized only as a run's sole
+origin, so mixed generated and source origins are rejected. A commit with no
+associated pull request is missing release context rather than a failure, so
+manual preflight before a PR exists still runs.
 
 Tagging and release workflows consume the successful complete-suite evidence
 for that exact commit instead of rerunning generic lint, format, typecheck,
