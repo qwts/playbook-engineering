@@ -83,3 +83,7 @@ radius or a failure mode that looks like success is T1.
 
 - 2026-07-22 — initial version; generalized the claim-and-close conventions from
   the photos and cartograph working agreements (ENG-0008).
+- 2026-08-03 — added the mandatory implementation-prompt and model-routing
+  section: agent-executed issues carry a tier, routing retrieved from
+  `governance/agent-models.json` rather than recalled from memory, and evidence
+  that would fail if the change were wrong ([ENG-0151](../decisions/ENG-0151-model-routing.md)).

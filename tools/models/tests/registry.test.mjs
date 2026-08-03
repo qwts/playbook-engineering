@@ -40,6 +40,37 @@ test('a verified or seeded slot must actually name a model', () => {
   assert.match(validateRegistry(r).join('\n'), /claims status verified but names no model/);
 });
 
+test('a named model with nowhere to run it is rejected', () => {
+  // The gap this closes: a refresh fills in a model and forgets available_in.
+  // Validation passed, and the routing table printed a real-looking
+  // recommendation followed by "via unknown" — actionable in appearance, not in
+  // fact.
+  const r = clone(base());
+  r.tiers.T2.vendors.openai.plan = { model: 'some-model', reasoning: 'medium', status: 'verified' };
+  r.tiers.T2.vendors.openai.build = { model: 'some-model', reasoning: 'medium', status: 'verified' };
+  assert.match(validateRegistry(r).join('\n'), /available_in is empty/);
+
+  r.tiers.T2.vendors.openai.available_in = ['api'];
+  assert.deepEqual(validateRegistry(r), []);
+});
+
+test('an unverified slot needs no availability — there is nothing to invoke', () => {
+  // ide_native ships with an empty available_in and every slot unverified. That
+  // must stay valid, or the registry cannot represent "we have not looked yet".
+  const r = clone(base());
+  assert.deepEqual(r.tiers.T1.vendors.ide_native.available_in, []);
+  assert.deepEqual(validateRegistry(r), []);
+});
+
+test('the SOP records when the routing requirement entered the baseline', () => {
+  // Shared SOPs propagate to every governed repo under ENG-0008, so a consumer
+  // needs a dated entry to know when the requirement arrived rather than
+  // inferring it from a diff they never see.
+  const sop = readFileSync(join(ROOT, 'docs', 'sop', 'issue-lifecycle.md'), 'utf8');
+  assert.match(sop, /## Changelog/);
+  assert.match(sop, /2026-08-03 — added the mandatory implementation-prompt and model-routing/);
+});
+
 test('the Chinese-access policy cannot be widened by editing the registry', () => {
   // Access is policy, not availability: reaching a model through an IDE we
   // already run is a different posture from installing the vendor's product. A

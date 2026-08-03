@@ -80,6 +80,14 @@ export function validateRegistry(registry) {
         if (slot.status !== 'unverified' && !slot.model) {
           fail(`${tier}.${vendor}.${phase} claims status ${slot.status} but names no model`);
         }
+        // A named model with nowhere to run it renders as an actionable
+        // recommendation followed by "via unknown". The refresh task treats
+        // availability as load-bearing, so the validator has to agree: a refresh
+        // that fills in a model and forgets available_in would otherwise ship a
+        // route nobody can take.
+        if (slot.status !== 'unverified' && v.available_in?.length === 0) {
+          fail(`${tier}.${vendor}.${phase} names a model but ${tier}.${vendor}.available_in is empty — a route nobody can invoke is not a recommendation`);
+        }
       }
     }
   }
