@@ -30,6 +30,7 @@ generated-projection identity of each. Coverage is a contract test.
 | `agent-bot-identity` | None | Not applicable. |
 | `codex-rules-editor` | None | Not applicable. |
 | `playbook-dashboard` | None | Not applicable. |
+| `localnotes` | None | Not applicable; onboarding, carries no CI yet. |
 
 ## Repair handoff for a Changesets repository
 

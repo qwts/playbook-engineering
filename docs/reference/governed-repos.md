@@ -224,4 +224,5 @@ contents permission.
 | `agent-bot-identity` | public | active | no | managed | — |
 | `codex-rules-editor` | public | active | no | managed | — |
 | `playbook-dashboard` | public | active | no | managed | — |
+| `localnotes` | public | onboarding | no | managed | — |
 <!-- END GENERATED governed-repos -->
