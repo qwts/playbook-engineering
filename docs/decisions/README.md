@@ -83,6 +83,7 @@ principles; it does not waive the lower priorities.
 | [ENG-0128](ENG-0128-agent-bot-runtime-ownership.md) | Agent identity runtime ownership moves to agent-bot-identity | Proposed |
 | [ENG-0138](ENG-0138-machine-scoped-agent-memory-budget.md) | The local memory budget is machine-scoped and derived from the machine | Proposed |
 | [ENG-0149](ENG-0149-code-scanning.md) | Code scanning conformance is verified by analysis, not by configuration | Proposed |
+| [ENG-0151](ENG-0151-model-routing.md) | Model routing is retrieved from a registry, never recalled | Proposed |
 
 ## Related
 
