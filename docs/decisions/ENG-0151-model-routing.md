@@ -69,7 +69,14 @@ Two simpler designs were considered and rejected:
    which would mark the job skipped and leave an unauthorized attempt with no
    visible trace.
 
-7. **`verified_at` advances only on a successful read.** A failed refresh that
+7. **The registry is synced into every governed repo.** `agent-models.json` and
+   `registry.mjs` join the governed harness set, byte-identical and blob-SHA
+   compared, on the same argument as the agent guard: this SOP is inherited by
+   every governed repo, and an instruction pointing at a path only one repo has
+   cannot be followed. `refresh-task.mjs` stays here — refreshing happens in one
+   place.
+
+8. **`verified_at` advances only on a successful read.** A failed refresh that
    stamped a fresh date would hide staleness behind a current-looking timestamp —
    the same failure this record exists to prevent, relocated.
 
@@ -87,6 +94,11 @@ Two simpler designs were considered and rejected:
   `suggestedActors(capabilities:[CAN_BE_ASSIGNED])` lists only the owner — so the
   refresh workflow detects that and assigns the owner instead, with a warning,
   rather than silently leaving a task nobody owns.
+- Downstream repos must exclude `tools/models` from their formatters and
+  linters, exactly as they already do for `tools/agent-guard`. A repo that
+  reformats a synced file passes once and is reverted by the next sync; their
+  formatting is owned here, not there. Expect the same one-line ignore PR per
+  repo that the agent guard needed.
 - A tier assignment is a judgment the issue author must make and defend. The SOP
   asks for the reason precisely where it is least obvious: when the tier
   disagrees with the size of the diff.

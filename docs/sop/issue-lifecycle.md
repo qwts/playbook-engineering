@@ -51,9 +51,11 @@ Issues filed only to record a problem may omit it.
 
 Two rules make it worth having:
 
-- **Retrieve the routing; never recall it.** Read
-  [`governance/agent-models.json`](../../governance/agent-models.json) — via
-  `node tools/models/registry.mjs` — and cite its `verified_at`. Model names
+- **Retrieve the routing; never recall it.** Run `node tools/models/registry.mjs`
+  and cite its `verified_at`. The registry and that reader are synced
+  byte-identically into every governed repo, so the lookup works wherever the
+  issue is filed — an SOP pointing at a path only one repo has is an instruction
+  its consumers cannot follow. Model names
   written from memory are stale the moment a vendor ships, and they fail
   confidently: a superseded name reads exactly like a current one. If the
   registry cannot be read, say so in the issue rather than substituting a
