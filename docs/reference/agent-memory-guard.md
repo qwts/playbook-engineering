@@ -44,6 +44,10 @@ Leases heartbeat their real tree RSS, so a warmed-up run stops being counted
 twice — its resident memory is already reflected in what the kernel reports as
 available.
 
+Reading the leases, deciding and taking the lease happen under one machine-wide
+mutex, so two runs starting at the same moment cannot both be admitted against
+the same snapshot. A run that has to queue releases the mutex between attempts.
+
 A refusal prints the arithmetic, the other runs holding budget, and the largest
 resident processes, so it can be acted on rather than merely retried.
 
@@ -113,7 +117,7 @@ the machine is a failed test.
 | `AGENT_GUARD_WAIT_S` | How long to queue for headroom; humans default to 180, agents to 0 |
 | `AGENT_GUARD_FORCE` | Human escape hatch; blocked for agents |
 | `AGENT_GUARD_STATE_DIR` | Lease directory. **Tests only** — pointing a session elsewhere gives it a private budget nothing can see, which is the per-worktree bug again |
-| `AGENT_GUARDED` | Set for children so nested guarded scripts pass through |
+| `AGENT_GUARDED` | Set by the guard for its own children, carrying the id of the lease it holds, so nested guarded scripts pass through. Honoured only when it names a live lease — a hand-supplied value is ignored and the run is guarded normally. Blocked for agents |
 
 ## Adopting it in a repo
 

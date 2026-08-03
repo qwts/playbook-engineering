@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
 
-import { evaluateCommand, heavyLaneFor, normalizeCommand, resolveExecutionDir, stripInertText } from '../guard-agent-command.mjs';
+import { evaluateCommand, heavyLaneFor, normalizeCommand, npmScriptNames, resolveExecutionDir, splitSegments, stripInertText } from '../guard-agent-command.mjs';
 import { classifyLane, evaluateLanePolicy, harnessName, isAgentSession, isCi, listGrants, readGrant, revokeGrant, writeGrant } from '../lib/policy.mjs';
 import { ensureStateDirs } from '../lib/protocol.mjs';
 
@@ -196,6 +196,45 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label test:dom -- npm run test:dom:inner', opts()).allow, true);
   });
 
+  // PR #139 review, P1: the wrapper allowlist vouched for the whole command
+  // line, so anything sharing it rode along.
+  test('a wrapper invocation does not vouch for its neighbours', () => {
+    for (const command of [
+      'echo run-guarded.mjs; node --test .test-dist/index.test.js',
+      'node tools/agent-guard/run-guarded.mjs --label x -- npm run lint && node --test foo.js',
+      'node tools/agent-guard/run-guarded.mjs --label x -- npm run lint | npx playwright test',
+    ]) {
+      assert.equal(evaluateCommand(command, opts()).allow, false, `expected the hook to deny: ${command}`);
+    }
+  });
+
+  test('merely naming the wrapper does not sanction a segment', () => {
+    assert.equal(evaluateCommand('echo "see run-guarded.mjs" && node --test x.js', opts()).allow, false);
+  });
+
+  // PR #139 review, P1: npm's own aliases and option forms walked past the
+  // heavy-lane matcher.
+  test('heavy lanes are caught under every npm spelling', () => {
+    for (const command of [
+      'npm run-script test:e2e',
+      'npm rum test:e2e',
+      'npm urn ci',
+      'npm run --silent test:e2e',
+      'npm --silent run test:stories:ci',
+      'npm --workspace pkg run test:e2e',
+    ]) {
+      assert.equal(evaluateCommand(command, opts()).allow, false, `expected the hook to deny: ${command}`);
+    }
+  });
+
+  // PR #139 review, P1: AGENT_GUARDED=1 made the wrapper pass through with no
+  // lease, ceiling or headroom check.
+  test('claiming to be inside a guarded run is tampering', () => {
+    const verdict = evaluateCommand('AGENT_GUARDED=1 node tools/agent-guard/run-guarded.mjs --label test:dom -- npm run test:dom:inner', opts());
+    assert.equal(verdict.allow, false);
+    assert.match(verdict.reason, /guarded run that does not exist/u);
+  });
+
   test('a mention inside quotes is not an invocation', () => {
     const commit = 'git commit -m "fix: stop npm run test:e2e from bricking the machine"';
     assert.equal(evaluateCommand(commit, opts()).allow, true);
@@ -232,6 +271,22 @@ describe('hook helpers', () => {
   test('quoted text is blanked while shell payloads are promoted', () => {
     assert.match(stripInertText('echo "npm run ci"'), /""/u);
     assert.match(stripInertText('sh -c "npm run ci"'), /npm run ci/u);
+  });
+
+  test('segments are split on every shell separator', () => {
+    assert.deepEqual(splitSegments('a && b || c; d | e & f'), ['a', 'b', 'c', 'd', 'e', 'f']);
+  });
+
+  test('npm script names survive aliases and interleaved options', () => {
+    assert.deepEqual(npmScriptNames('npm run test:e2e'), ['test:e2e']);
+    assert.deepEqual(npmScriptNames('npm run-script test:e2e'), ['test:e2e']);
+    assert.deepEqual(npmScriptNames('npm --silent run test:e2e'), ['test:e2e']);
+    assert.deepEqual(npmScriptNames('npm --workspace pkg run test:e2e'), ['test:e2e']);
+    assert.deepEqual(npmScriptNames('npm run lint -- --fix'), ['lint']);
+    assert.deepEqual(npmScriptNames('npm test'), ['test']);
+    // Each segment is scanned, so a second invocation cannot hide behind the first.
+    assert.deepEqual(npmScriptNames('npm run lint && npm run test:e2e'), ['lint', 'test:e2e']);
+    assert.deepEqual(npmScriptNames('git status'), []);
   });
 
   test('heavy-lane matching on a raw command line does not fire on prose', () => {

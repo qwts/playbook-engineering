@@ -30,7 +30,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { clampCeiling, decideAdmission, deriveBudget } from './lib/budget.mjs';
-import { acquireLease, heartbeatLease, readLeases, releaseLease } from './lib/leases.mjs';
+import { acquireLease, heartbeatLease, leaseExists, readLeases, releaseLease, withAdmissionLock } from './lib/leases.mjs';
 import { evaluateLanePolicy, harnessName, isAgentSession, isCi } from './lib/policy.mjs';
 import { readMemoryStatus, topConsumers } from './lib/system-memory.mjs';
 
@@ -159,28 +159,39 @@ function sleep(ms) {
 }
 
 /**
- * Ask for admission, optionally waiting for the machine to free up.
+ * Ask for admission and, if granted, take the lease — as ONE step.
+ *
+ * Deciding and then acquiring separately let two runs starting together both
+ * measure the machine before either had written its lease, so both were
+ * admitted against the same snapshot. The whole read/decide/write sequence runs
+ * under the machine-wide admission mutex instead.
  *
  * Humans queue by default because an interactive run that starts 40 seconds
  * late is better than one that is refused; agents do not, because a blocked
- * agent should be pushing to CI, not sitting in a retry loop burning wall
- * clock and tokens.
+ * agent should be pushing to CI, not sitting in a retry loop burning wall clock
+ * and tokens. The mutex is released between attempts — holding it while
+ * sleeping would serialize the waiting, not just the deciding.
  */
-async function admit({ env, request, label, command, budget }) {
+async function admit({ env, request, budget, leaseFields }) {
   const deadline = Date.now() + Math.max(0, request.waitS) * 1000;
   let announced = false;
   for (;;) {
-    const memory = readMemoryStatus();
-    const leases = readLeases(env);
-    const decision = decideAdmission({ budget, memory, leases, requestMb: request.ceilingMb });
-    if (decision.granted || env.AGENT_GUARD_FORCE === '1') {
-      if (!decision.granted) note(`AGENT_GUARD_FORCE=1: proceeding despite ${decision.reason}. This is the human escape hatch; the machine is not being protected for this run.`);
-      if (memory.degraded) note('WARNING: platform memory probes unavailable; availability is an estimate and swap is unknown.');
-      return { decision, memory };
+    const attempt = await withAdmissionLock(env, () => {
+      const memory = readMemoryStatus();
+      const leases = readLeases(env);
+      const decision = decideAdmission({ budget, memory, leases, requestMb: request.ceilingMb });
+      if (!decision.granted && env.AGENT_GUARD_FORCE !== '1') return { decision, memory };
+      const lease = acquireLease({ env, estimatedMb: request.ceilingMb, ...leaseFields });
+      return { decision, memory, lease };
+    });
+    if (attempt.lease) {
+      if (!attempt.decision.granted) note(`AGENT_GUARD_FORCE=1: proceeding despite ${attempt.decision.reason}. This is the human escape hatch; the machine is not being protected for this run.`);
+      if (attempt.memory.degraded) note('WARNING: platform memory probes unavailable; availability is an estimate and swap is unknown.');
+      return attempt;
     }
-    if (Date.now() >= deadline) return { decision, memory, refused: true };
+    if (Date.now() >= deadline) return { ...attempt, refused: true };
     if (!announced) {
-      note(`waiting for machine memory (${decision.reason}); up to ${request.waitS}s. Ctrl-C to give up.`);
+      note(`waiting for machine memory (${attempt.decision.reason}); up to ${request.waitS}s. Ctrl-C to give up.`);
       announced = true;
     }
     await sleep(RETRY_MS);
@@ -193,7 +204,12 @@ async function main() {
 
   // CI is exempt, entirely and deliberately (see lib/policy.mjs).
   if (isCi(process.env)) return passthrough(command);
-  if (process.env.AGENT_GUARDED === '1') return passthrough(command);
+  // Nested guarded scripts pass through — but only when the marker names a
+  // lease this machine is actually holding. `AGENT_GUARDED=1` typed by hand is
+  // a claim to be inside a guarded run that does not exist, and honouring it
+  // would skip the lease, the ceiling and the headroom check outright. An
+  // unrecognised marker falls through to full admission rather than failing.
+  if (leaseExists(process.env.AGENT_GUARDED, process.env)) return passthrough(command);
   if (process.platform === 'win32') {
     note('WARNING: guard unsupported on win32; running unguarded.');
     return passthrough(command);
@@ -211,19 +227,20 @@ async function main() {
     note(`ceiling clamped: requested ${request.requestedMb} MB, machine cap is ${request.ceilingMb} MB (${totalMb} MB total RAM, ${budget.machineBudgetMb} MB machine budget). Tightening is allowed; loosening is not.`);
   }
 
-  const { decision, memory, refused } = await admit({ env: process.env, request, label: options.label, command: commandLine, budget });
-  if (refused) fail(describeRefusal(decision, process.env));
-
   const worktree = process.cwd();
-  const lease = acquireLease({
+  const { decision, memory, lease, refused } = await admit({
     env: process.env,
-    label: options.label,
-    estimatedMb: request.ceilingMb,
-    repo: path.basename(worktree),
-    worktree,
-    harness: harnessName(process.env),
-    command: commandLine,
+    request,
+    budget,
+    leaseFields: {
+      label: options.label,
+      repo: path.basename(worktree),
+      worktree,
+      harness: harnessName(process.env),
+      command: commandLine,
+    },
   });
+  if (refused) fail(describeRefusal(decision, process.env));
 
   const guardDir = path.join(worktree, '.guard');
   mkdirSync(guardDir, { recursive: true });
@@ -233,7 +250,9 @@ async function main() {
   const child = spawn(command[0], command.slice(1), {
     stdio: 'inherit',
     detached: true, // new process group; kill(-pid) reaches every descendant
-    env: { ...process.env, AGENT_GUARDED: '1', NODE_OPTIONS: nodeOptions },
+    // The marker carries this run's lease id, so a child can prove it is
+    // nested inside a real guarded run rather than merely asserting it.
+    env: { ...process.env, AGENT_GUARDED: lease.id, NODE_OPTIONS: nodeOptions },
   });
 
   const state = { peakRssMb: 0, peakProcessCount: 0, reason: null, termAt: null, done: false, polling: false, lastBeat: 0 };

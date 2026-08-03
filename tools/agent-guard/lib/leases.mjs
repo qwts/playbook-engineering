@@ -18,10 +18,10 @@
 // force-quit agent here costs the machine nothing beyond the next reap.
 
 import { randomUUID } from 'node:crypto';
-import { readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { CORE_LEASE_FIELDS, PROTOCOL_VERSION, ensureStateDirs, leasesDir, machineToken } from './protocol.mjs';
+import { CORE_LEASE_FIELDS, PROTOCOL_VERSION, ensureStateDirs, leasesDir, machineToken, stateDir } from './protocol.mjs';
 
 export function isProcessAlive(pid) {
   try {
@@ -148,5 +148,97 @@ export function releaseLease(lease) {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Does this id name a lease that is currently held?
+ *
+ * The wrapper marks its children with the id of the lease it holds, and only
+ * honours a marker that still resolves here. A hand-supplied value therefore
+ * buys nothing: an unguarded run claiming to be nested falls through to full
+ * admission instead of passing through.
+ */
+export function leaseExists(id, env = process.env) {
+  if (typeof id !== 'string' || id === '') return false;
+  return readLeases(env, { reap: false }).some((lease) => lease.id === id);
+}
+
+// --- Admission mutex ---------------------------------------------------------
+//
+// Reading the leases, deciding, and writing the new lease has to be one step.
+// Two runs starting together would otherwise both decide against the same
+// snapshot and both be admitted — precisely the concurrent-agent case the
+// machine budget exists to coordinate, so losing it here would leave the
+// headline defect half-fixed.
+//
+// `mkdir` is the primitive: atomic on every filesystem this runs on, and it
+// leaves a directory whose owner can be recorded and whose staleness can be
+// judged. The critical section is a few file reads, so contention is brief.
+
+const LOCK_STALE_MS = 30_000;
+const LOCK_POLL_MS = 50;
+
+function lockPath(env) {
+  return path.join(stateDir(env), 'admission.lock');
+}
+
+function breakStaleLock(dir) {
+  // A crashed holder must not wedge admission for everyone. Liveness first, and
+  // age as the backstop for a holder whose pid was recycled.
+  try {
+    const owner = JSON.parse(readFileSync(path.join(dir, 'owner.json'), 'utf8'));
+    if (Number.isFinite(owner.pid) && isProcessAlive(owner.pid) && Date.now() - Date.parse(owner.at) < LOCK_STALE_MS) return false;
+  } catch {
+    // Unreadable owner: judge by directory age below.
+    try {
+      if (Date.now() - statSync(dir).mtimeMs < LOCK_STALE_MS) return false;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    rmSync(dir, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function withAdmissionLock(env, fn, { timeoutMs = 15_000, now = () => Date.now() } = {}) {
+  ensureStateDirs(env);
+  const dir = lockPath(env);
+  const deadline = now() + timeoutMs;
+  for (;;) {
+    try {
+      mkdirSync(dir);
+      break;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      breakStaleLock(dir);
+      if (now() >= deadline) {
+        // Proceeding unserialized is strictly better than refusing a run
+        // because a lock is stuck: the worst case is the pre-existing race,
+        // not a machine that cannot run anything.
+        return fn();
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, LOCK_POLL_MS);
+      });
+    }
+  }
+  try {
+    writeFileSync(path.join(dir, 'owner.json'), JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+  } catch {
+    // Best-effort provenance; the directory itself is the lock.
+  }
+  try {
+    return await fn();
+  } finally {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Stale-breaking will collect it.
+    }
   }
 }

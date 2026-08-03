@@ -6,12 +6,12 @@
 // a different hat.
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
 
-import { acquireLease, heartbeatLease, isProcessAlive, readLeases, releaseLease } from '../lib/leases.mjs';
+import { acquireLease, heartbeatLease, isProcessAlive, leaseExists, readLeases, releaseLease, withAdmissionLock } from '../lib/leases.mjs';
 import { ensureStateDirs, leasesDir, machineToken } from '../lib/protocol.mjs';
 
 const roots = [];
@@ -134,6 +134,82 @@ describe('reaping', () => {
 
   test('a missing state directory reads as empty rather than throwing', () => {
     assert.deepEqual(readLeases({ ...process.env, AGENT_GUARD_STATE_DIR: path.join(tmpdir(), 'agent-guard-absent-dir') }), []);
+  });
+});
+
+// PR #139 review, P1: `AGENT_GUARDED=1` was enough to claim nesting, which
+// skipped the lease, the ceiling and the headroom check.
+describe('nested-run marker', () => {
+  test('only an id naming a held lease counts as nested', () => {
+    const lease = acquireLease({ env, label: 'parent', estimatedMb: 512 });
+    assert.equal(leaseExists(lease.id, env), true);
+    assert.equal(leaseExists('1', env), false);
+    assert.equal(leaseExists(undefined, env), false);
+    assert.equal(leaseExists('', env), false);
+  });
+
+  test('the marker stops counting once the parent run ends', () => {
+    const lease = acquireLease({ env, label: 'parent', estimatedMb: 512 });
+    releaseLease(lease);
+    assert.equal(leaseExists(lease.id, env), false);
+  });
+});
+
+// PR #139 review, P2: decide-then-acquire let two runs be admitted against one
+// snapshot — the concurrent-agent case the machine budget exists to coordinate.
+describe('admission mutex', () => {
+  test('overlapping critical sections do not interleave', async () => {
+    const order = [];
+    let inside = 0;
+    await Promise.all(
+      Array.from({ length: 5 }, (unused, index) =>
+        withAdmissionLock(env, async () => {
+          inside += 1;
+          assert.equal(inside, 1, 'two holders were inside the lock at once');
+          order.push(index);
+          await new Promise((resolve) => {
+            setTimeout(resolve, 5);
+          });
+          inside -= 1;
+        }),
+      ),
+    );
+    assert.equal(order.length, 5);
+  });
+
+  test('read-decide-write under the lock cannot double-admit', async () => {
+    // Each contender admits only if the budget still has room, then writes its
+    // lease inside the same critical section.
+    const BUDGET_MB = 2048;
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        withAdmissionLock(env, () => {
+          const used = readLeases(env).reduce((total, lease) => total + lease.estimatedMb, 0);
+          if (used + 1024 > BUDGET_MB) return 'refused';
+          acquireLease({ env, label: 'contender', estimatedMb: 1024 });
+          return 'granted';
+        }),
+      ),
+    );
+    assert.equal(results.filter((result) => result === 'granted').length, 2);
+    assert.equal(readLeases(env).length, 2);
+  });
+
+  test('a crashed holder does not wedge admission forever', async () => {
+    // Simulate the crash: a lock directory whose owner is a dead pid.
+    const dir = path.join(env.AGENT_GUARD_STATE_DIR, 'admission.lock');
+    ensureStateDirs(env);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'owner.json'), JSON.stringify({ pid: DEAD_PID, at: new Date().toISOString() }));
+    const ran = await withAdmissionLock(env, () => 'entered', { timeoutMs: 2000 });
+    assert.equal(ran, 'entered');
+  });
+
+  test('the lock is released even when the critical section throws', async () => {
+    await assert.rejects(withAdmissionLock(env, () => {
+      throw new Error('boom');
+    }));
+    assert.equal(await withAdmissionLock(env, () => 'entered'), 'entered');
   });
 });
 

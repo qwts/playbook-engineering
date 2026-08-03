@@ -125,7 +125,33 @@ const TAMPERING = [
       'Blocked `arbiter.mjs grant`: the heavy-lane opt-in belongs to the owner. Ask them to run it; an agent granting ' +
       'itself permission is not permission.',
   },
+  {
+    // The wrapper sets this for its own children so nested guarded scripts do
+    // not deadlock. Supplied from outside it is a claim to already be inside a
+    // guarded run — which would skip the lease, the ceiling and the headroom
+    // check entirely. The wrapper independently refuses to honour a value that
+    // does not name a live lease; this is the outer half of that pair.
+    pattern: /\bAGENT_GUARDED=/u,
+    reason:
+      'Blocked AGENT_GUARDED: that marker is set by the guard for its own children, and supplying it by hand claims to ' +
+      `be inside a guarded run that does not exist — skipping admission entirely. ${GUIDANCE}`,
+  },
 ];
+
+// Shell segments, so a sanctioned command in one segment cannot vouch for a
+// blocked one in the next. Quotes are already blanked by stripInertText, so
+// these separators are structural rather than incidental text.
+export function splitSegments(command) {
+  return command
+    .split(/\|\||&&|[;\n|&]/u)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+// A segment that IS a wrapper invocation: optional env assignments, then node
+// (however it is pathed), then run-guarded.mjs as its script argument. Merely
+// mentioning the filename elsewhere in the segment does not qualify.
+const WRAPPER_SEGMENT = /^(?:\w+=\S*\s+)*(?:\S*\/)?node\s+(?:-\S+\s+)*\S*run-guarded\.mjs(?:\s|$)/u;
 
 function tryRealpath(target) {
   try {
@@ -189,6 +215,37 @@ export function normalizeCommand(command) {
   return command;
 }
 
+// npm's documented spellings for running a script. `npm run-script test:e2e`
+// is the same run as `npm run test:e2e`, and a matcher that only knows `run`
+// blocks one and waves the other through.
+const NPM_RUN_ALIASES = new Set(['run', 'run-script', 'rum', 'urn']);
+
+/**
+ * The script names an npm invocation would run, per shell segment.
+ *
+ * Tokenized rather than pattern-matched because npm accepts its own options
+ * before and after the alias (`npm --silent run test:e2e`,
+ * `npm --workspace foo run test:e2e`), and a regex that grabs the token
+ * immediately after `npm` reads an option or the alias itself as the script.
+ * The alias, when present, is the reliable anchor: the script is the first
+ * non-option token after it. Without one, the first non-option token is the
+ * script (`npm test`, `npm ci`).
+ */
+export function npmScriptNames(command) {
+  const names = [];
+  for (const segment of splitSegments(command)) {
+    const tokens = segment.split(/\s+/u).filter(Boolean);
+    const start = tokens.findIndex((token) => /(?:^|\/)npm$/u.test(token));
+    if (start < 0) continue;
+    const rest = tokens.slice(start + 1);
+    const aliasAt = rest.findIndex((token) => NPM_RUN_ALIASES.has(token));
+    const candidates = aliasAt >= 0 ? rest.slice(aliasAt + 1) : rest;
+    const script = candidates.find((token) => !token.startsWith('-'));
+    if (script !== undefined) names.push(script);
+  }
+  return names;
+}
+
 /**
  * Heavy-lane detection for a raw command line.
  *
@@ -198,9 +255,8 @@ export function normalizeCommand(command) {
  * themselves count here.
  */
 export function heavyLaneFor(command) {
-  const script = /(^|[\s;(&|])npm\s+(?:run\s+)?([\w:.-]+)/gu;
-  for (let match = script.exec(command); match !== null; match = script.exec(command)) {
-    const lane = HEAVY_LANES.find((entry) => entry.pattern.test(match[2]));
+  for (const script of npmScriptNames(command)) {
+    const lane = HEAVY_LANES.find((entry) => entry.pattern.test(script));
     if (lane) return lane;
   }
   if (/\bplaywright\s+test\b|\btest-storybook\b/u.test(command)) {
@@ -228,16 +284,20 @@ export function evaluateCommand(command, { env = process.env, now = Date.now() }
     };
   }
 
-  // Explicit guard invocations are the sanctioned path even when the wrapped
-  // command matches a blocked pattern (tampering is checked above).
-  if (command.includes('run-guarded.mjs')) return { allow: true };
-
-  for (const { pattern, what, reason } of BLOCKED) {
-    if (pattern.test(effective)) {
-      return {
-        allow: false,
-        reason: reason ?? `Blocked ${what}: it bypasses the machine-scoped memory guard. ${USE_ENTRYPOINT}`,
-      };
+  // A wrapper invocation is the sanctioned path even when the command it wraps
+  // matches a blocked pattern — but only for ITS OWN segment. Vouching for the
+  // whole line let `echo run-guarded.mjs; node --test …` through, and equally
+  // `node run-guarded.mjs -- npm run lint && node --test …`: the sanctioned
+  // call is real, and the blocked binary rides along beside it.
+  for (const segment of splitSegments(effective)) {
+    if (WRAPPER_SEGMENT.test(segment)) continue;
+    for (const { pattern, what, reason } of BLOCKED) {
+      if (pattern.test(segment)) {
+        return {
+          allow: false,
+          reason: reason ?? `Blocked ${what}: it bypasses the machine-scoped memory guard. ${USE_ENTRYPOINT}`,
+        };
+      }
     }
   }
   return { allow: true };
