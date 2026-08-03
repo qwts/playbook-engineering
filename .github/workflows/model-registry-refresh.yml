@@ -1,0 +1,84 @@
+# Opens the refresh task for governance/agent-models.json (ENG-0151).
+#
+# Manual only, by design. Model releases are known events; a cron job would run
+# on a schedule that has nothing to do with when vendors ship, and a scheduled
+# run that reaches nothing looks exactly like a genuine no-change week. A person
+# presses this when there is something to update, and reads the result.
+name: Refresh model registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "What changed — carried into the issue so the run has a why"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  open-refresh-task:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # workflow_dispatch only requires *write* on the repo, so every
+      # collaborator and every bot with write could otherwise spend the Copilot
+      # budget. Guard with a failing step rather than a job-level `if:`: a false
+      # job condition marks the job skipped, which renders as a neutral run and
+      # leaves an unauthorized attempt with no visible trace.
+      #
+      # triggering_actor, not actor: on a re-run of an earlier dispatch the two
+      # diverge — actor can carry the original author while triggering_actor is
+      # whoever pressed re-run. Guarding the wrong one lets a re-run launder an
+      # unauthorized trigger.
+      - name: Only the owner may trigger a refresh
+        if: github.triggering_actor != 'qwts'
+        run: |
+          echo "::error::${{ github.triggering_actor }} is not authorized to run the model registry refresh"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate the current registry
+        run: node tools/models/registry.mjs
+
+      - name: Open the refresh task
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          body="$(node tools/models/refresh-task.mjs "$REASON")"
+          url="$(gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "Refresh the model routing registry" \
+            --body "$body")"
+          echo "opened $url" >> "$GITHUB_STEP_SUMMARY"
+
+          # Assign the coding agent when this account actually has one. It is not
+          # assignable everywhere — at the time of writing this repo's
+          # suggestedActors lists only the owner — and a silent failure would
+          # leave a task nobody owns, so an unavailable agent is reported rather
+          # than swallowed.
+          assignable="$(gh api graphql \
+            -F owner="${{ github.repository_owner }}" \
+            -F name="${GITHUB_REPOSITORY#*/}" \
+            -f query='query($owner:String!,$name:String!){
+              repository(owner:$owner,name:$name){
+                suggestedActors(capabilities:[CAN_BE_ASSIGNED], first:50){nodes{login}}
+              }
+            }' --jq '.data.repository.suggestedActors.nodes[].login')"
+
+          if printf '%s\n' "$assignable" | grep -qi '^copilot'; then
+            gh issue edit "$url" --add-assignee "@copilot"
+            echo "assigned to the Copilot coding agent" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh issue edit "$url" --add-assignee qwts
+            echo "::warning::the Copilot coding agent is not assignable on this account — assigned to qwts instead" >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -43,6 +43,18 @@ export const GOVERNED_AGENT_GUARD_FILES = [
   'tools/agent-guard/tests/conformance.test.mjs',
 ];
 
+// The model routing registry (ENG-0151). Synced rather than left in this repo
+// because the issue-lifecycle SOP requires every governed repo's agents to read
+// it before filing an issue, and an SOP that points at a path only one repo has
+// is an instruction its consumers cannot follow. Same argument as the agent
+// guard above: one record, byte-identical everywhere, refreshed in one place.
+//
+// refresh-task.mjs is deliberately absent — refreshing happens only here.
+export const GOVERNED_MODEL_ROUTING_FILES = [
+  'governance/agent-models.json',
+  'tools/models/registry.mjs',
+];
+
 // What the fleet sync keeps current downstream: both harness layers, so a
 // change here reaches every governed repo instead of only the next repo to be
 // onboarded. The manifest field that scopes it stays `codexSync` — renaming it
@@ -54,6 +66,7 @@ export const GOVERNED_HARNESS_FILES = [
   ...GOVERNED_CLAUDE_FILES,
   ...GOVERNED_CURSOR_FILES,
   ...GOVERNED_AGENT_GUARD_FILES,
+  ...GOVERNED_MODEL_ROUTING_FILES,
 ];
 
 export const BASELINE_FILES = [
