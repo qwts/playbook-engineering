@@ -6,8 +6,9 @@ import { plan } from '../lib/reconcile-plan.mjs';
 
 const CODEQL_CHECK = 'code scanning (CodeQL, own workflow)';
 
-const advanced = (key = '.github/workflows/ci.yml:analyze') => ({ analysis_key: key });
-const defaultSetup = () => ({ analysis_key: 'dynamic/github-code-scanning/codeql:analyze' });
+const advanced = (key = '.github/workflows/ci.yml:analyze') => ({ analysis_key: key, tool: { name: 'CodeQL' } });
+const defaultSetup = () => ({ analysis_key: 'dynamic/github-code-scanning/codeql:analyze', tool: { name: 'CodeQL' } });
+const otherTool = (name = 'Semgrep') => ({ analysis_key: '.github/workflows/semgrep.yml:scan', tool: { name } });
 
 test('the setup is read from the marker GitHub stamps on each analysis', () => {
   // Both strings are verbatim from live analyses: playbook-engineering (advanced)
@@ -23,6 +24,26 @@ test('a repo mid-migration reports advanced, the superset, in either order', () 
   assert.equal(codeqlSetupFrom([advanced(), defaultSetup()]), 'advanced');
 });
 
+test('another scanner uploading SARIF cannot pass as CodeQL', () => {
+  // The analyses endpoint returns every tool's uploads. A Semgrep or Trivy run
+  // carries an analysis_key that is not GitHub's default-setup marker, so an
+  // unfiltered classifier would read it as an advanced CodeQL setup and pass a
+  // repo with no CodeQL at all.
+  assert.equal(codeqlSetupFrom([otherTool()]), 'none');
+  assert.equal(codeqlSetupFrom([otherTool('Trivy'), otherTool('Semgrep')]), 'none');
+  // A real CodeQL run alongside other scanners still classifies on CodeQL.
+  assert.equal(codeqlSetupFrom([otherTool(), advanced()]), 'advanced');
+  assert.equal(codeqlSetupFrom([otherTool(), defaultSetup()]), 'default');
+});
+
+test('an analysis whose tool cannot be identified is unknown, not ignored', () => {
+  // Dropping unidentifiable entries would silently downgrade a scanning repo to
+  // 'none'; returning null makes it non-conformant *and* visibly unreadable.
+  assert.equal(codeqlSetupFrom([{ analysis_key: '.github/workflows/ci.yml:analyze' }]), null);
+  assert.equal(codeqlSetupFrom([{ ...advanced(), tool: { name: 42 } }]), null);
+  assert.equal(codeqlSetupFrom([advanced(), { analysis_key: 'x' }]), null);
+});
+
 test('unknown is never collapsed into a guessed answer', () => {
   // `api` returns null for both 403 and 404, and a governance gate must not turn
   // "could not read" into "configured". Everything unreadable stays null; only a
@@ -33,7 +54,7 @@ test('unknown is never collapsed into a guessed answer', () => {
   assert.equal(codeqlSetupFrom('not-an-array'), null);
   assert.equal(codeqlSetupFrom({ analyses: [advanced()] }), null);
   assert.equal(codeqlSetupFrom([{}]), null);
-  assert.equal(codeqlSetupFrom([{ analysis_key: 42 }]), null);
+  assert.equal(codeqlSetupFrom([{ analysis_key: 42, tool: { name: 'CodeQL' } }]), null);
 });
 
 test('only advanced satisfies the gate — default setup is drift, not a pass', () => {

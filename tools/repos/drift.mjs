@@ -109,9 +109,21 @@ export async function appCoverage(slugs = apps(), dependencies) {
 //      mentioning codeql-action over-matches.
 export function codeqlSetupFrom(analyses) {
   if (!Array.isArray(analyses)) return null; // unreadable — never a guessed "none"
-  if (analyses.length === 0) return 'none';
-  const keys = analyses.map((a) => a?.analysis_key).filter((k) => typeof k === 'string');
-  if (keys.length === 0) return null;
+  const keys = [];
+  for (const analysis of analyses) {
+    // The endpoint returns every tool's uploads, not CodeQL's. A repo pushing
+    // Semgrep or Trivy SARIF carries an analysis_key that is not GitHub's
+    // default-setup marker, which would read as an advanced CodeQL setup and
+    // pass this gate with no CodeQL anywhere. The request also asks for
+    // tool_name=CodeQL; this filter is what makes the classifier correct on its
+    // own rather than only when its caller remembers the parameter.
+    const tool = analysis?.tool?.name;
+    if (typeof tool !== 'string') return null; // a shape we do not understand
+    if (tool !== 'CodeQL') continue;
+    if (typeof analysis.analysis_key !== 'string') return null;
+    keys.push(analysis.analysis_key);
+  }
+  if (keys.length === 0) return 'none';
   // A repo mid-migration can carry both; advanced wins as the superset.
   return keys.some((k) => !k.startsWith('dynamic/github-code-scanning/')) ? 'advanced' : 'default';
 }
@@ -145,7 +157,7 @@ export async function checkRepo(owner, entry, coverage, token) {
   // and one that has never scanned both land as non-conformant — fail closed,
   // which is the right default for a gate.
   const analyses = await api(
-    `/repos/${owner}/${entry.name}/code-scanning/analyses?per_page=20&ref=refs/heads/${encodeURIComponent(meta.default_branch)}`,
+    `/repos/${owner}/${entry.name}/code-scanning/analyses?per_page=20&tool_name=CodeQL&ref=refs/heads/${encodeURIComponent(meta.default_branch)}`,
     token,
   );
   checks['code scanning (CodeQL, own workflow)'] = codeqlSetupFrom(analyses) === 'advanced';
