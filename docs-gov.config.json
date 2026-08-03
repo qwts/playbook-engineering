@@ -21,8 +21,8 @@
       },
       {
         "path": "docs/reference/governed-repos.md",
-        "budget": 3000,
-        "reason": "the generated fleet table grows by one row per onboarded repo, so this doc gets monotonically longer for reasons prose tightening cannot offset \u2014 a budget tuned to the current repo count turns every future onboarding PR into a docs-gov failure. 3000 buys roughly ten repos of headroom. What should absorb the next breach is a split, not another raise: the operational lanes here (bootstrap, drift, reconcile, and especially the codex-sync runbook) are a runbook that accreted onto a reference page, and moving them out would leave this doc as what it claims to be \u2014 the manifest's human-readable view"
+        "budget": 1400,
+        "reason": "the generated fleet table grows by one row per onboarded repo, so this doc gets monotonically longer for reasons prose tightening cannot offset. The previous 3000 bought roughly ten repos of headroom and was spent exactly there, at localnotes; as that override said it should, the breach was absorbed by a split rather than another raise — the bootstrap, drift, reconcile and codex-sync runbook lanes moved to governed-repos-operations.md, leaving this doc as what it claims to be, the manifest's human-readable view. 1400 is the post-split size plus room for roughly ten more rows. The next breach should be re-examined, not reflexively raised"
       },
       {
         "path": "docs/reference/agent-bot-identity.md",
