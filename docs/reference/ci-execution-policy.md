@@ -25,9 +25,11 @@ Allowed runtime actors are:
   each of which runs as `<slug>[bot]`.
 
 The immutable action checks both actor fields and rejects `github-actions[bot]`,
-Copilot, external contributors, third parties, and retired or unregistered
-Apps. Later automation authenticates as an allowed App. GitHub documents its
-separate preview control in
+GitHub's own `Copilot` actor, external contributors, third parties, and retired
+or unregistered Apps. Our `qwts-copilot-agent` App is a roster identity like any
+other and is not what this line excludes — the boundary is drawn at Apps we own
+and register, not at the harness a change was authored in. Later automation
+authenticates as an allowed App. GitHub documents its separate preview control in
 [workflow execution protections](https://docs.github.com/en/organizations/managing-organization-settings/actions-policies/workflow-execution-protections).
 
 Keep **Settings → Actions → Policies → Workflow execution protections**

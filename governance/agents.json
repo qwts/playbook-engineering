@@ -56,10 +56,22 @@
       "note": "Terra, pinned per worktree with agentBot.app."
     },
     {
+      "slug": "qwts-copilot-agent",
+      "harness": "copilot",
+      "status": "active",
+      "note": "GitHub Copilot's coding agent running under our own App, not GitHub's Copilot actor."
+    },
+    {
       "slug": "qwts-cursor-agent",
       "harness": "cursor",
       "status": "active",
       "note": ""
+    },
+    {
+      "slug": "qwts-devin-agent",
+      "harness": "devin",
+      "status": "active",
+      "note": "Keyed devin, not windsurf: the app ships as Devin and the key names the territory."
     },
     {
       "slug": "qwts-vscode-agent",
