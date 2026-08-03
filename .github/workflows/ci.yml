@@ -39,7 +39,7 @@ jobs:
       release_gate_mode: ${{ steps.policy.outputs.release_gate_mode }}
     steps:
       - id: policy
-        uses: qwts/playbook-engineering/.github/actions/ci-policy@ae45f805a92223c568e2d86481a28dc39c0ec0f3
+        uses: qwts/playbook-engineering/.github/actions/ci-policy@4e70c773155c2c804e52a487352627010bea1897
 
   merge-evidence:
     name: Verify merged commit evidence
