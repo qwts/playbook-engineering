@@ -30,6 +30,7 @@ generated-projection identity of each. Coverage is a contract test.
 | `agent-bot-identity` | None | Not applicable. |
 | `codex-rules-editor` | None | Not applicable. |
 | `playbook-dashboard` | None | Not applicable. |
+| `localnotes` | None | Not applicable; onboarding, carries no CI yet. |
 
 ## Repair handoff for a Changesets repository
 
@@ -73,7 +74,7 @@ Repository-specific notes:
 ## Repositories without a release metadata system
 
 `playbook-engineering`, `quorum`, `agent-bot-identity`, `codex-rules-editor`,
-and `playbook-dashboard` carry `metadataSystem: "none"` and no generated
+`playbook-dashboard`, and `localnotes` carry `metadataSystem: "none"` and no generated
 projection. They are the negative case: a migration must not add Changesets, a
 release-file check, or a bot exception to them, and their existing lifecycle,
 actor, fork, exact-SHA, CodeQL, and deployment gates are unchanged.
