@@ -37,6 +37,37 @@ spec — problem, requirements, design, proposed patterns — and closes as a re
 of what was built. A repo may add sections to the shared feature form but may not
 drop them.
 
+## Implementation prompt and model routing (mandatory — extend, don't drop)
+
+An issue intended for agent execution carries a prompt an agent can act on and a
+routing recommendation ([ENG-0151](../decisions/ENG-0151-model-routing.md)).
+Issues filed only to record a problem may omit it.
+
+```markdown
+**Tier:** T1 / T2 / T3 — why, especially where it disagrees with the diff size
+**Recommended:** per vendor group, with reasoning level
+**Routing verified:** <verified_at from the registry>
+```
+
+Two rules make it worth having:
+
+- **Retrieve the routing; never recall it.** Run `node tools/models/registry.mjs`
+  and cite its `verified_at`. The registry and that reader are synced
+  byte-identically into every governed repo, so the lookup works wherever the
+  issue is filed — an SOP pointing at a path only one repo has is an instruction
+  its consumers cannot follow. Model names
+  written from memory are stale the moment a vendor ships, and they fail
+  confidently: a superseded name reads exactly like a current one. If the
+  registry cannot be read, say so in the issue rather than substituting a
+  remembered model.
+- **State what proves the work, not that it was done.** The prompt ends with
+  evidence that would fail if the change were wrong — a query whose output
+  changes, a test that could not pass before. "The file exists" is the failure
+  mode, not the check.
+
+Tier follows the work, not the diff. A one-file change with cross-repo blast
+radius or a failure mode that looks like success is T1.
+
 ## Closing
 
 - Merging the linked PR closes the issue; do not leave the work as a lingering
@@ -54,3 +85,7 @@ drop them.
 
 - 2026-07-22 — initial version; generalized the claim-and-close conventions from
   the photos and cartograph working agreements (ENG-0008).
+- 2026-08-03 — added the mandatory implementation-prompt and model-routing
+  section: agent-executed issues carry a tier, routing retrieved from
+  `governance/agent-models.json` rather than recalled from memory, and evidence
+  that would fail if the change were wrong ([ENG-0151](../decisions/ENG-0151-model-routing.md)).
