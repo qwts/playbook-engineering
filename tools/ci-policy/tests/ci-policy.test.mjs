@@ -10,7 +10,6 @@ import {
   isAllowedActor,
   isNativeMergeQueueMainPush,
   outputsFor,
-  releaseGateOutcome,
   releaseLifecycleFor,
   releaseOutputs,
 } from '../../../.github/actions/ci-policy/classify.mjs';
@@ -354,30 +353,6 @@ test('release-origin lookups fail closed on missing or malformed evidence', asyn
 test('the release lifecycle catalog is uniquely configured per governed repository', () => {
   assert.throws(() => releaseLifecycleFor(releaseCatalog, 'qwts/unlisted'), /not uniquely configured/);
   assert.throws(() => releaseLifecycleFor({ schemaVersion: 2, repositories: [] }, 'qwts/overlook'), /malformed/);
-});
-
-test('source inputs and generated projections follow distinct release gates', () => {
-  const gate = {
-    metadataSystem: 'changesets',
-    generatedReleaseProjection: false,
-    sourceRequirementApplies: true,
-    semanticReleaseCount: null,
-  };
-  assert.equal(releaseGateOutcome({ ...gate, sourceInputsValid: true }), 'pass-source-inputs');
-  assert.equal(releaseGateOutcome({ ...gate, sourceInputsValid: false }), 'fail-source-inputs');
-  assert.equal(
-    releaseGateOutcome({ ...gate, sourceRequirementApplies: false, sourceInputsValid: false }),
-    'pass-source-inputs-not-required',
-  );
-  assert.equal(
-    releaseGateOutcome({ ...gate, generatedReleaseProjection: true, semanticReleaseCount: 0 }),
-    'pass-generated-projection',
-  );
-  assert.equal(
-    releaseGateOutcome({ ...gate, generatedReleaseProjection: true, semanticReleaseCount: 1 }),
-    'fail-generated-pending-releases',
-  );
-  assert.equal(releaseGateOutcome({ ...gate, metadataSystem: 'none' }), 'not-applicable');
 });
 
 test('unauthorized bots and forks cannot claim the generated projection path', () => {

@@ -83,21 +83,6 @@ export function releaseOutputs(options) {
   };
 }
 
-export function releaseGateOutcome({
-  metadataSystem,
-  generatedReleaseProjection,
-  sourceRequirementApplies,
-  sourceInputsValid,
-  semanticReleaseCount,
-}) {
-  if (metadataSystem === 'none') return 'not-applicable';
-  if (generatedReleaseProjection) {
-    return semanticReleaseCount === 0 ? 'pass-generated-projection' : 'fail-generated-pending-releases';
-  }
-  if (!sourceRequirementApplies) return 'pass-source-inputs-not-required';
-  return sourceInputsValid ? 'pass-source-inputs' : 'fail-source-inputs';
-}
-
 export function authorizeRun({ actor, triggeringActor = actor, allowedActors, eventName, event, ref }) {
   const nativeMergeQueueMainPush = isNativeMergeQueueMainPush({
     actor,

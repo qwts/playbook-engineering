@@ -36,18 +36,18 @@ generated-projection identity of each. Coverage is a contract test.
 The four repairs are the same work against different local gates. Each is its
 own issue-linked PR in its own repository; this one does not modify them.
 
-1. Pin the merged #134 policy revision and grant the CI workflow
-   `pull-requests: read`.
-2. Keep the repository's existing source-PR release-input gate exactly as
-   reviewed, and run it only for source PRs.
+1. Pin the merged #134 policy revision, grant the CI workflow
+   `pull-requests: read`, and expose the action's `release_gate_mode` output
+   from the policy job.
+2. Branch on that output, and on nothing else. `source-policy` runs the
+   repository's existing release-input gate exactly as reviewed;
+   `generated-projection` skips it. Do not re-derive the branch, author, or
+   repository identity locally — that is what the shared policy is for.
 3. For the generated projection, validate the version and changelog diff and
    assert a zero semantic release count through the shared
    [`changeset-release-count` action](../../.github/actions/changeset-release-count/action.yml).
    Replace any remaining raw `.changeset` file-presence check in version, tag,
-   and release planning with that action. Decide pass/fail with the shared
-   `releaseGateOutcome` from
-   [`classify.mjs`](../../.github/actions/ci-policy/classify.mjs) rather than
-   re-deriving the source/generated/not-applicable table locally.
+   and release planning with that action.
 4. Prove both directions independently before closing: a source PR missing its
    required input still fails, and a freshly regenerated Version packages PR
    passes without an empty marker file.
