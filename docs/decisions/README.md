@@ -81,6 +81,7 @@ principles; it does not waive the lower priorities.
 | [ENG-0079](ENG-0079-per-agent-identity.md) | Agent identity is per agent — the harness is detected, the agent is pinned | Proposed |
 | [ENG-0081](ENG-0081-transcript-bound-agent-execution-identities.md) | Agent execution identities bind bot actions to provider transcripts | Proposed |
 | [ENG-0128](ENG-0128-agent-bot-runtime-ownership.md) | Agent identity runtime ownership moves to agent-bot-identity | Proposed |
+| [ENG-0138](ENG-0138-machine-scoped-agent-memory-budget.md) | The local memory budget is machine-scoped and derived from the machine | Proposed |
 
 ## Related
 

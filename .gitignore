@@ -12,3 +12,4 @@ issues
 .env.test
 .env.production
 .claude/settings.local.json
+.guard
