@@ -102,6 +102,14 @@ test('governed integrations use the installed CLI and the playbook suite exclude
   // its symlink is present.
   assert.match(codex, /installed="\$HOME\/\.local\/bin\/agent-bot"/);
   assert.match(codex, /elif \[\[ -x "\$installed" \]\]; then\n\s+"\$installed" setup-worktree/);
+  // An explicit AGENT_BOT_BIN stays authoritative: if it is set and unusable the
+  // script fails rather than silently configuring through the default install,
+  // which would attribute the worktree to a different bot than the one named.
+  assert.match(codex, /elif \[\[ -n "\$\{AGENT_BOT_BIN:-\}" \]\]; then/);
+  assert.ok(
+    codex.indexOf('${AGENT_BOT_BIN:-}" ]]; then') < codex.indexOf('-x "$installed"'),
+    'the override guard must precede the installed-location fallback',
+  );
   assert.match(codex, /AGENT_BOT_HOME:-[\s\S]*setup-worktree\.mjs/);
   assert.match(codex, /node "\$AGENT_BOT_HOME\/setup-worktree\.mjs"/);
   assert.ok(!codex.includes('qwts.agent'));
