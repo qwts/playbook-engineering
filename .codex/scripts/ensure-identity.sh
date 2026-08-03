@@ -34,10 +34,14 @@ elif [[ -n "${AGENT_BOT_BIN:-}" ]]; then
   # install would configure the worktree through a different bot than the one
   # named -- quietly, and with a plausible-looking success message.
   fail "AGENT_BOT_BIN is set to '$AGENT_BOT_BIN' but it is not executable"
+elif [[ -n "${AGENT_BOT_HOME:-}" && -f "$AGENT_BOT_HOME/setup-worktree.mjs" ]]; then
+  # Before the fixed path, for the same reason AGENT_BOT_BIN is: someone who
+  # pointed this at a checkout meant it. Letting a stale ~/.local/bin symlink win
+  # would run a different setup-worktree than the one configured, and still
+  # report success.
+  node "$AGENT_BOT_HOME/setup-worktree.mjs"
 elif [[ -x "$installed" ]]; then
   "$installed" setup-worktree
-elif [[ -n "${AGENT_BOT_HOME:-}" && -f "$AGENT_BOT_HOME/setup-worktree.mjs" ]]; then
-  node "$AGENT_BOT_HOME/setup-worktree.mjs"
 else
   fail "agent-bot is not installed; install it from the agent-bot-identity runtime repository"
 fi
