@@ -87,13 +87,16 @@ test('managed JSON overlays preserve repository-owned agent harness configuratio
   const source = canonical(path, JSON.stringify({
     $schema: 'https://json.schemastore.org/claude-code-settings.json',
     hooks: {
+      // Governance-owned since ENG-0138: the memory guard is only a fleet
+      // control if every repo's hook wiring comes from here.
+      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'managed-guard' }] }],
       WorktreeCreate: [{ hooks: [{ type: 'command', command: 'managed' }] }],
     },
   }));
   const targetContent = Buffer.from(JSON.stringify({
     permissions: { defaultMode: 'acceptEdits' },
     hooks: {
-      PreToolUse: [{ matcher: 'Bash' }],
+      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'stale-local-guard' }] }],
       SessionStart: [{ hooks: [{ type: 'command', command: 'repo-session' }] }],
       WorktreeCreate: [{ hooks: [{ type: 'command', command: 'stale' }] }],
     },
@@ -114,7 +117,9 @@ test('managed JSON overlays preserve repository-owned agent harness configuratio
   const merged = JSON.parse(files.get(path).content.toString('utf8'));
 
   assert.deepEqual(merged.permissions, { defaultMode: 'acceptEdits' });
-  assert.deepEqual(merged.hooks.PreToolUse, [{ matcher: 'Bash' }]);
+  // A repo cannot keep a local edit of a governed hook: the guard wiring is
+  // the one thing a drifting downstream copy would silently disable.
+  assert.equal(merged.hooks.PreToolUse[0].hooks[0].command, 'managed-guard');
   assert.deepEqual(merged.hooks.SessionStart, [{
     hooks: [{ type: 'command', command: 'repo-session' }],
   }]);
@@ -136,13 +141,17 @@ test('managed JSON ownership propagates deletions without removing repository ho
   }));
   const target = Buffer.from(JSON.stringify({
     hooks: {
+      SessionStart: [{ hooks: [{ type: 'command', command: 'repo-session' }] }],
       PreToolUse: [{ matcher: 'Bash' }],
       WorktreeCreate: [{ hooks: [{ type: 'command', command: 'obsolete' }] }],
     },
   }));
   const merged = JSON.parse(mergeManagedFile(source, target).content.toString('utf8'));
 
-  assert.deepEqual(merged.hooks.PreToolUse, [{ matcher: 'Bash' }]);
+  // Repo-owned hooks survive; governed ones the canonical file no longer
+  // declares are removed rather than left behind as orphans.
+  assert.deepEqual(merged.hooks.SessionStart, [{ hooks: [{ type: 'command', command: 'repo-session' }] }]);
+  assert.equal(Object.hasOwn(merged.hooks, 'PreToolUse'), false);
   assert.equal(Object.hasOwn(merged.hooks, 'WorktreeCreate'), false);
 });
 
@@ -275,13 +284,14 @@ test('an open sync pull repairs a JSON overlay from the target default branch', 
   const path = '.claude/settings.json';
   const source = canonical(path, `${JSON.stringify({
     hooks: {
+      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'managed-guard' }] }],
       WorktreeCreate: [{ hooks: [{ type: 'command', command: 'managed' }] }],
     },
   }, null, 2)}\n`);
   const baseContent = Buffer.from(`${JSON.stringify({
     permissions: { defaultMode: 'acceptEdits' },
     hooks: {
-      PreToolUse: [{ matcher: 'Bash' }],
+      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'stale-local-guard' }] }],
       SessionStart: [{ hooks: [{ type: 'command', command: 'repo-session' }] }],
       WorktreeCreate: [{ hooks: [{ type: 'command', command: 'managed' }] }],
     },
@@ -371,7 +381,7 @@ test('an open sync pull repairs a JSON overlay from the target default branch', 
 
   assert.equal(result.status, 'pull-updated');
   assert.deepEqual(merged.permissions, { defaultMode: 'acceptEdits' });
-  assert.deepEqual(merged.hooks.PreToolUse, [{ matcher: 'Bash' }]);
+  assert.equal(merged.hooks.PreToolUse[0].hooks[0].command, 'managed-guard');
   assert.deepEqual(merged.hooks.SessionStart, [{
     hooks: [{ type: 'command', command: 'repo-session' }],
   }]);

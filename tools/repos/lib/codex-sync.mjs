@@ -16,9 +16,15 @@ export const COPILOT_REVIEW_BOT = 'copilot-pull-request-reviewer[bot]';
 export const CODEX_SOURCE_REPO = 'playbook-engineering';
 export const CODEX_SYNC_TITLE = 'governance: sync managed agent harness files';
 export const CODEX_SYNC_COMMIT_PREFIX = `governance: sync agent harness from ${CODEX_SOURCE_REPO}@`;
+// Paths governance owns inside a downstream JSON file; everything else in that
+// file belongs to the repo and survives a sync untouched. `hooks.PreToolUse`
+// joined the list with ENG-0138: the memory guard is only a fleet control if
+// every repo's hook wiring is governed, and a repo that quietly edited it back
+// out would be the one machine-scoped budgeting cannot see.
 export const MANAGED_JSON_OVERLAYS = new Map([
   ['.claude/settings.json', [
     ['$schema'],
+    ['hooks', 'PreToolUse'],
     ['hooks', 'WorktreeCreate'],
   ]],
 ]);

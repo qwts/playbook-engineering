@@ -1,0 +1,142 @@
+# Machine memory guard
+
+Local machines have one memory budget, shared by every repo, worktree and agent
+tool on them. This guard is what makes that budget real: it derives limits from
+the machine, checks live availability and swap before a run starts, and
+coordinates through per-machine leases so concurrent agent sessions can see each
+other. Decision record: [ENG-0138](../decisions/ENG-0138-machine-scoped-agent-memory-budget.md).
+The tooling lives in [`tools/agent-guard/`](../../tools/agent-guard/run-guarded.mjs)
+and reaches governed repos through the fleet harness sync.
+
+**CI is exempt.** `CI=true` or `GITHUB_ACTIONS=true` makes the whole mechanism a
+no-op. Nothing here slows a hosted runner down.
+
+## Limits, and where they come from
+
+Nothing is a constant. On a machine with `T` MB of RAM:
+
+| Quantity | Formula | On 8 GB | On 32 GB |
+| --- | --- | --- | --- |
+| Desktop reserve | `max(1536, T×0.25)` | 2048 MB | 8192 MB |
+| Machine budget | `T − reserve` | 6144 MB | 24576 MB |
+| Max per run | `budget ÷ 2` | 3072 MB | 12288 MB |
+| Availability floor | `max(768, T×0.125)` | 1024 MB | 4096 MB |
+| Light run | `floor ÷ 2` | 512 MB | 2048 MB |
+
+A requested ceiling is **clamped down** to the per-run cap and never up: asking
+for less than the cap always works, asking for more never does. This is what
+turns an inherited `--rss-mb 8192` from an unreachable ceiling into an
+enforceable one.
+
+## Admission
+
+A run is granted only if all three hold:
+
+1. **Swap.** Refused when swap is at least 50% committed, unless the run
+   reserves no more than the light-run size. A machine already trading pages for
+   progress is one more Electron worker away from a freeze.
+2. **Headroom.** `available − (what running leases have not yet materialized) −
+   this request` must stay above the availability floor. Availability comes from
+   `vm_stat` and `sysctl vm.swapusage` on macOS, `/proc/meminfo` on Linux.
+3. **Budget.** Outstanding leases plus this request must fit the machine budget.
+
+Leases heartbeat their real tree RSS, so a warmed-up run stops being counted
+twice — its resident memory is already reflected in what the kernel reports as
+available.
+
+A refusal prints the arithmetic, the other runs holding budget, and the largest
+resident processes, so it can be acted on rather than merely retried.
+
+## Agents and the owner
+
+Agents are denied these lanes locally by default:
+
+| Lane | Why it is heavy |
+| --- | --- |
+| `e2e` | every Playwright worker boots a full Electron app |
+| `stories` | a Storybook build plus a browser-driven test run |
+| `perf` | seeds a large synthetic library |
+| `coverage` | instruments the whole suite |
+| `full-ci` | chains lint, typecheck, the suites and a build |
+
+**An agent's correct move is to push and let GitHub CI verify.** CI is the
+authoritative lane and is exempt from this guard, so nothing is lost but
+latency.
+
+The owner is never refused by policy — their runs are clamped and
+headroom-checked like anything else, and `AGENT_GUARD_FORCE=1` overrides a
+refusal in their own terminal. The hook blocks agents from using it: a run
+killed for real memory pressure is a real result, and reporting it is the
+expected behaviour.
+
+To let an agent run one heavy lane, briefly:
+
+```bash
+node tools/agent-guard/arbiter.mjs grant e2e --minutes 30
+```
+
+Grants are per lane, expire on their own, and cannot be created from an agent
+session — an opt-in an agent can write for itself is not an opt-in.
+
+## Commands
+
+```bash
+node tools/agent-guard/arbiter.mjs status
+```
+
+Machine limits, live availability and swap, every lease on the machine with the
+repo and harness holding it, and active grants. `check --rss-mb N` dry-runs an
+admission decision and exits non-zero when it would be refused; `doctor`
+verifies the probes and reports the resolved state directory.
+
+Wrapping a command:
+
+```bash
+node tools/agent-guard/run-guarded.mjs --label test:dom -- npm run test:dom:inner
+```
+
+The wrapper puts the command in its own process group, polls the whole
+descendant tree's RSS every 250 ms, and terminates the group on breach
+(`SIGTERM`, then `SIGKILL` after 2 s, or immediately past 1.25× the ceiling,
+because a fast runaway outruns a polite shutdown). Every run writes
+`.guard/last-run.json` and appends to `.guard/history.jsonl`; a run killed for
+`rss-limit` or `timeout` exits non-zero, so a test that "passes" while eating
+the machine is a failed test.
+
+## Environment
+
+| Variable | Effect |
+| --- | --- |
+| `AGENT_GUARD_RSS_MB` | Requested tree ceiling, still clamped to the machine cap |
+| `AGENT_GUARD_HEAP_MB` | Per-process V8 heap; defaults to half the tree ceiling |
+| `AGENT_GUARD_TIMEOUT_S` | Wall-clock timeout, `0` disables |
+| `AGENT_GUARD_WAIT_S` | How long to queue for headroom; humans default to 180, agents to 0 |
+| `AGENT_GUARD_FORCE` | Human escape hatch; blocked for agents |
+| `AGENT_GUARD_STATE_DIR` | Lease directory. **Tests only** — pointing a session elsewhere gives it a private budget nothing can see, which is the per-worktree bug again |
+| `AGENT_GUARDED` | Set for children so nested guarded scripts pass through |
+
+## Adopting it in a repo
+
+The files arrive by harness sync. A consuming repo then:
+
+1. Points its guarded npm scripts at `tools/agent-guard/run-guarded.mjs` and
+   deletes any local fork of the old guard.
+2. Removes heavy lanes from `permissions.allow` in `.claude/settings.json` —
+   pre-approving them is how they became routine.
+3. Adds `tools/agent-guard/tests/conformance.test.mjs` to its test command. This
+   is not optional: it is what fails a future sync that drops the hook wiring,
+   which has already happened once.
+4. Rewrites its `AGENTS.md` validation section to say push-and-let-CI-verify
+   rather than run-the-suites-locally.
+
+## Limitations
+
+- Polling at 250 ms lets a fast enough runaway overshoot briefly before
+  `SIGTERM` lands; the 1.25× hard kill bounds the tail. There is no unprivileged
+  macOS API for a hard aggregate-RSS cap on a process tree.
+- Admission is advisory. It orders honest participants — anything started
+  outside the wrapped entrypoints is invisible to it, and shows up only as
+  reduced availability for everyone else.
+- The guard cannot see memory pressure caused by applications rather than runs,
+  beyond what the availability and swap readings already reflect.
+- Windows falls back to passthrough; the probes target macOS and Linux.
