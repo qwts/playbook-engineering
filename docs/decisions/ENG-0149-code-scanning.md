@@ -51,16 +51,32 @@ a file exists, not whether scanning happens.
    conformant. A repo scanning via default setup is being scanned but is not
    conformant, and the gate reports the second.
 
-3. **Unreadable is never conformant, and never a guessed "none".** The helper
-   returns `null` for anything it cannot interpret — a non-array body, entries
-   without a string `analysis_key`. Only a genuinely empty list is `'none'`. The
-   gate passes on `'advanced'` alone, so every unknown fails closed.
+3. **Only CodeQL's own analyses are classified.** The endpoint returns every
+   tool's uploads; a Semgrep or Trivy `analysis_key` is not GitHub's
+   default-setup marker and would otherwise read as advanced CodeQL, passing a
+   repo with no CodeQL at all. The request filters on `tool_name` and the
+   classifier filters on `tool.name`, so it is correct independently of its
+   caller.
 
-4. **`.github/workflows/codeql.yml` is not a governed baseline file.** Repos own
+4. **The analysis must cover the current default-branch head.** GitHub keeps
+   historical analyses indefinitely, so a repo whose workflow is deleted,
+   disabled, or silently stops uploading keeps classifying as `advanced` off runs
+   from weeks ago — the same went-dark failure, only slower to notice.
+   Conformance requires the newest CodeQL analysis to be for the head commit,
+   with a six-hour grace window so a merge whose CI is still running is not
+   reported as drift.
+
+5. **Unreadable is never conformant, and never a guessed "none".** The helper
+   returns `null` for anything it cannot interpret — a non-array body, entries
+   without a string `analysis_key`, an unidentifiable tool. Only a genuinely
+   empty list is `'none'`. The gate passes on `'advanced'` and `'current'`
+   together, so every unknown fails closed.
+
+6. **`.github/workflows/codeql.yml` is not a governed baseline file.** Repos own
    their copy, including a language matrix that fits the repo. What governance
    requires is the outcome.
 
-5. **Code scanning has no automated reconcile lane.** Because the fix spans a
+7. **Code scanning has no automated reconcile lane.** Because the fix spans a
    file the reconciler could seed and a `ci.yml` it must not edit, drift routes
    to the human lane carrying the actual remediation — copy the workflow, add
    the calling job, declare permissions at the call site — rather than a bare
@@ -73,8 +89,8 @@ a file exists, not whether scanning happens.
   fails as `'default'` rather than `'none'` because its July default-setup
   analyses are still the most recent on `main`. It converges once
   qwts/bookmarkit#125 lands an advanced analysis there.
-- A repo whose workflow exists but has never run reads as non-conformant. This
-  is intended. A workflow that has produced no analysis is not protecting the
+- A repo whose workflow exists but has never run, or has stopped running, reads
+  as non-conformant. This is intended. A workflow that has produced no analysis is not protecting the
   repo, and reporting it as configured is precisely the false assurance that let
   `bookmarkit` go dark. The window is self-closing after one CI run.
 - The drift token needs no new scope: the code-scanning read it already performs

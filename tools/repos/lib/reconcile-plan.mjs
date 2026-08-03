@@ -37,8 +37,8 @@ const SETTINGS = {
 // it — and ci.yml is deliberately per-repo (coverage floors, Rust gates, version
 // consistency), so a reconciler cannot safely edit it.
 const HUMAN_SETUP = {
-  'code scanning (CodeQL, own workflow)':
-    'copy .github/workflows/codeql.yml from this repo and add a `codeql` job to the repo\'s ci.yml that invokes it (`uses: ./.github/workflows/codeql.yml`), declaring actions/contents/packages read + security-events write at the call site',
+  'code scanning (CodeQL, own workflow, current)':
+    'either the repo never scans with its own workflow, or it stopped: copy .github/workflows/codeql.yml from this repo and add a `codeql` job to the repo\'s ci.yml that invokes it (`uses: ./.github/workflows/codeql.yml`), declaring actions/contents/packages read + security-events write at the call site; if that job already exists, its last analysis predates the current default-branch head, so check the workflow is enabled and still runs on pushes to the default branch',
 };
 
 // Deliberately per-repo: generating them would fake conformance.

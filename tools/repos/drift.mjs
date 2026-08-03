@@ -128,6 +128,35 @@ export function codeqlSetupFrom(analyses) {
   return keys.some((k) => !k.startsWith('dynamic/github-code-scanning/')) ? 'advanced' : 'default';
 }
 
+// Six hours. Long enough that a merge landing mid-run is not reported as drift
+// while its CI is still going; short enough that a workflow which stopped
+// running is caught the same day.
+export const CODEQL_GRACE_MS = 6 * 60 * 60 * 1000;
+
+// Whether the newest CodeQL analysis actually covers the current default-branch
+// head. Classification alone is not enough: GitHub keeps historical analyses
+// forever, so a repo whose workflow is deleted, disabled, or silently stops
+// uploading keeps reporting 'advanced' off runs from weeks ago. That is the same
+// went-dark failure this check exists to catch, just slower to notice.
+export function codeqlFreshness({ analyses, headSha, headCommittedAt, now, graceMs = CODEQL_GRACE_MS }) {
+  if (!Array.isArray(analyses) || typeof headSha !== 'string' || !headSha) return null;
+  const dated = analyses
+    .filter((a) => a?.tool?.name === 'CodeQL' && typeof a?.commit_sha === 'string')
+    .map((a) => ({ sha: a.commit_sha, at: Date.parse(a.created_at) }))
+    .filter((a) => Number.isFinite(a.at));
+  if (dated.length === 0) return null;
+  // Sorted rather than trusting the endpoint's order: relying on an undocumented
+  // ordering would fail silently and look like staleness.
+  const newest = dated.reduce((a, b) => (b.at > a.at ? b : a));
+  if (newest.sha === headSha) return 'current';
+  // The head moved and this analysis is for an older commit. That is only drift
+  // once CI has had time to run — otherwise every repo is briefly "stale" in the
+  // minutes after a merge.
+  const headAt = Date.parse(headCommittedAt ?? '');
+  if (!Number.isFinite(headAt) || !Number.isFinite(now)) return null;
+  return now - headAt < graceMs ? 'current' : 'stale';
+}
+
 async function reviewRequired(owner, name, branch, token) {
   const rules = (await api(`/repos/${owner}/${name}/rules/branches/${branch}`, token)) ?? [];
   const rule = rules.find((r) => r.type === 'pull_request');
@@ -160,7 +189,22 @@ export async function checkRepo(owner, entry, coverage, token) {
     `/repos/${owner}/${entry.name}/code-scanning/analyses?per_page=20&tool_name=CodeQL&ref=refs/heads/${encodeURIComponent(meta.default_branch)}`,
     token,
   );
-  checks['code scanning (CodeQL, own workflow)'] = codeqlSetupFrom(analyses) === 'advanced';
+  const head = await api(
+    `/repos/${owner}/${entry.name}/commits/${encodeURIComponent(meta.default_branch)}`,
+    token,
+  );
+  // Both halves, in one check: a repo can fail either by never scanning with its
+  // own workflow or by having stopped. Splitting them would make a repo with no
+  // CodeQL at all report two failures for one problem, and would force the
+  // freshness line into a vacuous pass whenever there was nothing to be stale.
+  checks['code scanning (CodeQL, own workflow, current)'] =
+    codeqlSetupFrom(analyses) === 'advanced' &&
+    codeqlFreshness({
+      analyses,
+      headSha: head?.sha,
+      headCommittedAt: head?.commit?.committer?.date,
+      now: Date.now(),
+    }) === 'current';
   for (const slug of Object.keys(coverage)) checks[`app: ${slug}`] = coverage[slug].has(entry.name);
 
   const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([k]) => k);
