@@ -31,6 +31,16 @@ const SETTINGS = {
   'private vulnerability reporting': 'enable-pvr',
 };
 
+// Non-file checks with no automated lane, each carrying the fix rather than
+// just the failure. Code scanning is not a seed: the workflow is `workflow_call`
+// only, so dropping the file in does nothing until the repo's own ci.yml invokes
+// it — and ci.yml is deliberately per-repo (coverage floors, Rust gates, version
+// consistency), so a reconciler cannot safely edit it.
+const HUMAN_SETUP = {
+  'code scanning (CodeQL, own workflow, current)':
+    'either the repo never scans with its own workflow, or it stopped: copy .github/workflows/codeql.yml from this repo and add a `codeql` job to the repo\'s ci.yml that invokes it (`uses: ./.github/workflows/codeql.yml`), declaring actions/contents/packages read + security-events write at the call site; if that job already exists, its last analysis predates the current default-branch head, so check the workflow is enabled and still runs on pushes to the default branch',
+};
+
 // Deliberately per-repo: generating them would fake conformance.
 const HUMAN_FILES = {
   'README.md': 'write a real README — what it is, how to run it, where deeper docs live',
@@ -47,6 +57,7 @@ export function plan(result) {
     if (SETTINGS[check]) out.settings.push({ check, action: SETTINGS[check] });
     else if (SEEDS[check]) out.seeds.push({ check, ...SEEDS[check] });
     else if (HUMAN_FILES[check]) out.human.push(`${check}: ${HUMAN_FILES[check]}`);
+    else if (HUMAN_SETUP[check]) out.human.push(`${check}: ${HUMAN_SETUP[check]}`);
     else if (check.startsWith('app: ')) {
       out.human.push(`install ${check.slice(5)} on the repo — installation-repo management is user-to-server only`);
     } else out.human.push(`${check}: no reconcile lane — converge manually`);

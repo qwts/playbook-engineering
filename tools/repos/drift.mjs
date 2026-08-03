@@ -6,6 +6,7 @@
 //   - a default-branch rule requiring at least one approving review
 //     (rulesets or classic branch protection)
 //   - private vulnerability reporting enabled
+//   - CodeQL running from the repo's own workflow, not GitHub's default setup
 //   - installation of every active agent App in governance/agents.json
 //     (ENG-0016, ENG-0079 — the roster is data, so the count is not fixed)
 //
@@ -89,6 +90,73 @@ export async function appCoverage(slugs = apps(), dependencies) {
   return coverage;
 }
 
+// Which CodeQL setup produced a repo's analyses, read from the marker GitHub
+// stamps on each one. Default setup runs as the unselectable
+// github-advanced-security[bot] actor and reports `analysis_key` under
+// `dynamic/github-code-scanning/`; a workflow-driven run carries its own
+// workflow path instead. That distinction is the whole point — the fleet uses
+// advanced setup so code scanning stays inside the repository Actions Policy.
+//
+// Deliberately not a scan of `.github/workflows/` for `github/codeql-action`.
+// Two reasons, both learned the hard way in bookmarkit:
+//
+//   1. A file is not a producer. bookmarkit carried CodeQL as a *required*
+//      status check with nothing behind it for two days; PR #121 was green,
+//      approved and fully signed, and still had to be merged with --admin. A
+//      contents scan reports on intent; analyses report on what happened.
+//   2. Matching source text is a heuristic in both directions — a reusable
+//      workflow whose path avoids the word "codeql" is invisible, and a comment
+//      mentioning codeql-action over-matches.
+export function codeqlSetupFrom(analyses) {
+  if (!Array.isArray(analyses)) return null; // unreadable — never a guessed "none"
+  const keys = [];
+  for (const analysis of analyses) {
+    // The endpoint returns every tool's uploads, not CodeQL's. A repo pushing
+    // Semgrep or Trivy SARIF carries an analysis_key that is not GitHub's
+    // default-setup marker, which would read as an advanced CodeQL setup and
+    // pass this gate with no CodeQL anywhere. The request also asks for
+    // tool_name=CodeQL; this filter is what makes the classifier correct on its
+    // own rather than only when its caller remembers the parameter.
+    const tool = analysis?.tool?.name;
+    if (typeof tool !== 'string') return null; // a shape we do not understand
+    if (tool !== 'CodeQL') continue;
+    if (typeof analysis.analysis_key !== 'string') return null;
+    keys.push(analysis.analysis_key);
+  }
+  if (keys.length === 0) return 'none';
+  // A repo mid-migration can carry both; advanced wins as the superset.
+  return keys.some((k) => !k.startsWith('dynamic/github-code-scanning/')) ? 'advanced' : 'default';
+}
+
+// Six hours. Long enough that a merge landing mid-run is not reported as drift
+// while its CI is still going; short enough that a workflow which stopped
+// running is caught the same day.
+export const CODEQL_GRACE_MS = 6 * 60 * 60 * 1000;
+
+// Whether the newest CodeQL analysis actually covers the current default-branch
+// head. Classification alone is not enough: GitHub keeps historical analyses
+// forever, so a repo whose workflow is deleted, disabled, or silently stops
+// uploading keeps reporting 'advanced' off runs from weeks ago. That is the same
+// went-dark failure this check exists to catch, just slower to notice.
+export function codeqlFreshness({ analyses, headSha, headCommittedAt, now, graceMs = CODEQL_GRACE_MS }) {
+  if (!Array.isArray(analyses) || typeof headSha !== 'string' || !headSha) return null;
+  const dated = analyses
+    .filter((a) => a?.tool?.name === 'CodeQL' && typeof a?.commit_sha === 'string')
+    .map((a) => ({ sha: a.commit_sha, at: Date.parse(a.created_at) }))
+    .filter((a) => Number.isFinite(a.at));
+  if (dated.length === 0) return null;
+  // Sorted rather than trusting the endpoint's order: relying on an undocumented
+  // ordering would fail silently and look like staleness.
+  const newest = dated.reduce((a, b) => (b.at > a.at ? b : a));
+  if (newest.sha === headSha) return 'current';
+  // The head moved and this analysis is for an older commit. That is only drift
+  // once CI has had time to run — otherwise every repo is briefly "stale" in the
+  // minutes after a merge.
+  const headAt = Date.parse(headCommittedAt ?? '');
+  if (!Number.isFinite(headAt) || !Number.isFinite(now)) return null;
+  return now - headAt < graceMs ? 'current' : 'stale';
+}
+
 async function reviewRequired(owner, name, branch, token) {
   const rules = (await api(`/repos/${owner}/${name}/rules/branches/${branch}`, token)) ?? [];
   const rule = rules.find((r) => r.type === 'pull_request');
@@ -112,6 +180,31 @@ export async function checkRepo(owner, entry, coverage, token) {
   checks['review required to merge'] = await reviewRequired(owner, entry.name, meta.default_branch, token);
   const pvr = await api(`/repos/${owner}/${entry.name}/private-vulnerability-reporting`, token);
   checks['private vulnerability reporting'] = pvr?.enabled === true;
+  // Pinned to the default branch: analyses are recorded against PR refs too, so
+  // an unpinned read measures pull-request traffic rather than the repo's
+  // steady state. `api` collapses 403 and 404 to null, so an unreadable repo
+  // and one that has never scanned both land as non-conformant — fail closed,
+  // which is the right default for a gate.
+  const analyses = await api(
+    `/repos/${owner}/${entry.name}/code-scanning/analyses?per_page=20&tool_name=CodeQL&ref=refs/heads/${encodeURIComponent(meta.default_branch)}`,
+    token,
+  );
+  const head = await api(
+    `/repos/${owner}/${entry.name}/commits/${encodeURIComponent(meta.default_branch)}`,
+    token,
+  );
+  // Both halves, in one check: a repo can fail either by never scanning with its
+  // own workflow or by having stopped. Splitting them would make a repo with no
+  // CodeQL at all report two failures for one problem, and would force the
+  // freshness line into a vacuous pass whenever there was nothing to be stale.
+  checks['code scanning (CodeQL, own workflow, current)'] =
+    codeqlSetupFrom(analyses) === 'advanced' &&
+    codeqlFreshness({
+      analyses,
+      headSha: head?.sha,
+      headCommittedAt: head?.commit?.committer?.date,
+      now: Date.now(),
+    }) === 'current';
   for (const slug of Object.keys(coverage)) checks[`app: ${slug}`] = coverage[slug].has(entry.name);
 
   const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([k]) => k);
