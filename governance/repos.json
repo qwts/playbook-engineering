@@ -85,6 +85,15 @@
       "sharedCi": false,
       "delta": "",
       "note": "Public redacted fleet dashboard; reads this manifest as its own source of truth."
+    },
+    {
+      "name": "localnotes",
+      "visibility": "public",
+      "publish": true,
+      "status": "onboarding",
+      "sharedCi": false,
+      "delta": "",
+      "note": "Onboarded after a fleet CodeQL audit found it had lost code scanning with no governed replacement; carries no agent harness, CI, AGENTS.md or CONTRIBUTING.md yet."
     }
   ]
 }
