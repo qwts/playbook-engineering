@@ -96,6 +96,12 @@ test('governed integrations use the installed CLI and the playbook suite exclude
 
   assert.match(codex, /AGENT_BOT_BIN:-agent-bot/);
   assert.match(codex, /"\$setup" setup-worktree/);
+  // The environment spawns this script in a non-login shell, which reads only
+  // .zshenv -- where the installer does not register ~/.local/bin. Without this
+  // rung `command -v` finds nothing and the runtime reports as missing while
+  // its symlink is present.
+  assert.match(codex, /installed="\$HOME\/\.local\/bin\/agent-bot"/);
+  assert.match(codex, /elif \[\[ -x "\$installed" \]\]; then\n\s+"\$installed" setup-worktree/);
   assert.match(codex, /AGENT_BOT_HOME:-[\s\S]*setup-worktree\.mjs/);
   assert.match(codex, /node "\$AGENT_BOT_HOME\/setup-worktree\.mjs"/);
   assert.ok(!codex.includes('qwts.agent'));

@@ -20,9 +20,17 @@ if [[ "$git_dir" == "$common_dir" ]]; then
   fail "agents must use a linked worktree; refusing to configure a primary checkout"
 fi
 
+# The installed location is checked as well as PATH because this script runs in
+# whatever shell the environment spawns, and that is usually a non-login,
+# non-interactive one -- which reads .zshenv and nothing else. The installer
+# registers ~/.local/bin for login shells, so `command -v` finds nothing here
+# and the runtime looks missing while its symlink sits in plain view.
 setup="${AGENT_BOT_BIN:-agent-bot}"
+installed="$HOME/.local/bin/agent-bot"
 if command -v "$setup" >/dev/null 2>&1; then
   "$setup" setup-worktree
+elif [[ -x "$installed" ]]; then
+  "$installed" setup-worktree
 elif [[ -n "${AGENT_BOT_HOME:-}" && -f "$AGENT_BOT_HOME/setup-worktree.mjs" ]]; then
   node "$AGENT_BOT_HOME/setup-worktree.mjs"
 else
