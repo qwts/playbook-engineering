@@ -6,6 +6,7 @@
 //   - a default-branch rule requiring at least one approving review
 //     (rulesets or classic branch protection)
 //   - private vulnerability reporting enabled
+//   - CodeQL running from the repo's own workflow, not GitHub's default setup
 //   - installation of every active agent App in governance/agents.json
 //     (ENG-0016, ENG-0079 — the roster is data, so the count is not fixed)
 //
@@ -89,6 +90,32 @@ export async function appCoverage(slugs = apps(), dependencies) {
   return coverage;
 }
 
+// Which CodeQL setup produced a repo's analyses, read from the marker GitHub
+// stamps on each one. Default setup runs as the unselectable
+// github-advanced-security[bot] actor and reports `analysis_key` under
+// `dynamic/github-code-scanning/`; a workflow-driven run carries its own
+// workflow path instead. That distinction is the whole point — the fleet uses
+// advanced setup so code scanning stays inside the repository Actions Policy.
+//
+// Deliberately not a scan of `.github/workflows/` for `github/codeql-action`.
+// Two reasons, both learned the hard way in bookmarkit:
+//
+//   1. A file is not a producer. bookmarkit carried CodeQL as a *required*
+//      status check with nothing behind it for two days; PR #121 was green,
+//      approved and fully signed, and still had to be merged with --admin. A
+//      contents scan reports on intent; analyses report on what happened.
+//   2. Matching source text is a heuristic in both directions — a reusable
+//      workflow whose path avoids the word "codeql" is invisible, and a comment
+//      mentioning codeql-action over-matches.
+export function codeqlSetupFrom(analyses) {
+  if (!Array.isArray(analyses)) return null; // unreadable — never a guessed "none"
+  if (analyses.length === 0) return 'none';
+  const keys = analyses.map((a) => a?.analysis_key).filter((k) => typeof k === 'string');
+  if (keys.length === 0) return null;
+  // A repo mid-migration can carry both; advanced wins as the superset.
+  return keys.some((k) => !k.startsWith('dynamic/github-code-scanning/')) ? 'advanced' : 'default';
+}
+
 async function reviewRequired(owner, name, branch, token) {
   const rules = (await api(`/repos/${owner}/${name}/rules/branches/${branch}`, token)) ?? [];
   const rule = rules.find((r) => r.type === 'pull_request');
@@ -112,6 +139,16 @@ export async function checkRepo(owner, entry, coverage, token) {
   checks['review required to merge'] = await reviewRequired(owner, entry.name, meta.default_branch, token);
   const pvr = await api(`/repos/${owner}/${entry.name}/private-vulnerability-reporting`, token);
   checks['private vulnerability reporting'] = pvr?.enabled === true;
+  // Pinned to the default branch: analyses are recorded against PR refs too, so
+  // an unpinned read measures pull-request traffic rather than the repo's
+  // steady state. `api` collapses 403 and 404 to null, so an unreadable repo
+  // and one that has never scanned both land as non-conformant — fail closed,
+  // which is the right default for a gate.
+  const analyses = await api(
+    `/repos/${owner}/${entry.name}/code-scanning/analyses?per_page=20&ref=refs/heads/${encodeURIComponent(meta.default_branch)}`,
+    token,
+  );
+  checks['code scanning (CodeQL, own workflow)'] = codeqlSetupFrom(analyses) === 'advanced';
   for (const slug of Object.keys(coverage)) checks[`app: ${slug}`] = coverage[slug].has(entry.name);
 
   const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([k]) => k);
