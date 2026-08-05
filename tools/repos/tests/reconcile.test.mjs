@@ -170,11 +170,11 @@ test('the baseline agent context maps governed repos to shared guidance and skil
   const baseline = readFileSync(join(ROOT, 'governance/baseline/AGENTS.md'), 'utf8');
   assert.match(baseline, /## Shared agent conventions and skills/);
   assert.match(baseline, /https:\/\/github\.com\/qwts\/playbook-engineering\/blob\/main\/docs\/reference\/agent-conventions\.md/);
-  assert.match(baseline, /https:\/\/github\.com\/qwts\/playbook-engineering\/blob\/main\/skills\/README\.md/);
+  assert.match(baseline, /https:\/\/github\.com\/qwts\/playbook-engineering\/blob\/[0-9a-f]{40}\/skills\/README\.md/);
   assert.match(baseline, /https:\/\/github\.com\/qwts\/playbook-engineering\/blob\/main\/docs\/sop\/README\.md/);
   assert.match(baseline, /https:\/\/github\.com\/qwts\/playbook-engineering\/blob\/main\/docs\/decisions\/README\.md/);
   assert.match(baseline, /Before creating or copying a repo-local skill/);
-  assert.match(baseline, /Reuse a shared skill when it fits/);
+  assert.match(baseline, /Reuse only the pinned version supplied by the governed harness/);
 });
 
 test('every governed harness file is both drift-checked and seeded from the root layer', () => {
