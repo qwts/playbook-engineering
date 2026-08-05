@@ -36,6 +36,7 @@ import { activeAgentSlugs, loadAgents, validateAgents } from './lib/agents.mjs';
 import { mintAgentToken } from './lib/agent-bot-client.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const CANONICAL_DISCOVERY_BLOCK = loadCanonicalDiscoveryBlock(ROOT);
 export { BASELINE_FILES };
 
 // The Apps to verify come from the roster, not from a constant here: an
@@ -176,7 +177,7 @@ async function reviewRequired(owner, name, branch, token) {
 }
 
 export async function checkRepo(owner, entry, coverage, token, {
-  canonicalDiscoveryBlock = loadCanonicalDiscoveryBlock(ROOT),
+  canonicalDiscoveryBlock = CANONICAL_DISCOVERY_BLOCK,
 } = {}) {
   // The coverage map's own keys are the roster: one entry per App listed.
   const checks = {};

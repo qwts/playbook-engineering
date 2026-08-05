@@ -51,11 +51,21 @@ test('a stale canonical link is not conformant', () => {
   assert.equal(discoveryDisposition('active', stale, canonical).state, 'drift');
 });
 
-test('projection retires stale master links in the context it touches', () => {
-  const source = '# Context\n\nSee https://github.com/qwts/playbook-engineering/blob/master/docs/decisions/ENG-0006-agentic-primitives-governance.md.\n';
+test('projection retires stale playbook master links without changing local links', () => {
+  const source = '# Context\n\nSee https://github.com/qwts/playbook-engineering/blob/master/docs/decisions/ENG-0006-agentic-primitives-governance.md and https://github.com/qwts/legacy/blob/master/README.md.\n';
   const projected = projectDiscoveryBlock(source, canonical);
-  assert.doesNotMatch(projected, /\/blob\/master\//);
-  assert.match(projected, /\/blob\/main\//);
+  assert.doesNotMatch(projected, /playbook-engineering\/blob\/master\//);
+  assert.match(projected, /playbook-engineering\/blob\/main\//);
+  assert.match(projected, /qwts\/legacy\/blob\/master\//);
+});
+
+test('duplicate marked discovery blocks fail conformance and reconcile to one block', () => {
+  const duplicated = `# Context\n\n${canonical}\n\n## Local rules\n\nKeep this.\n\n${canonical}\n`;
+  assert.equal(hasCanonicalDiscoveryBlock(duplicated, canonical), false);
+  const projected = projectDiscoveryBlock(duplicated, canonical);
+  assert.equal(hasCanonicalDiscoveryBlock(projected, canonical), true);
+  assert.equal(projected.split('governed:shared-agent-discovery:start').length - 1, 1);
+  assert.match(projected, /## Local rules\n\nKeep this\./);
 });
 
 test('projection replaces a legacy shared section and is idempotent', () => {

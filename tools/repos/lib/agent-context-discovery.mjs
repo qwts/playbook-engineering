@@ -25,7 +25,9 @@ export function loadCanonicalDiscoveryBlock(root) {
 }
 
 export function hasCanonicalDiscoveryBlock(source, canonicalBlock) {
-  return extractDiscoveryBlock(source) === canonicalBlock;
+  const starts = source.split(DISCOVERY_START).length - 1;
+  const ends = source.split(DISCOVERY_END).length - 1;
+  return starts === 1 && ends === 1 && extractDiscoveryBlock(source) === canonicalBlock;
 }
 
 // Active repositories fail closed; onboarding repositories retain a visible
@@ -41,11 +43,13 @@ export function discoveryDisposition(status, source, canonicalBlock) {
 }
 
 function replaceMarkedBlock(source, block) {
-  const start = source.indexOf(DISCOVERY_START);
-  if (start === -1) return null;
-  const end = source.indexOf(DISCOVERY_END, start + DISCOVERY_START.length);
-  if (end === -1) return null;
-  return `${source.slice(0, start)}${block}${source.slice(end + DISCOVERY_END.length)}`;
+  const marked = new RegExp(`${DISCOVERY_START}[\\s\\S]*?${DISCOVERY_END}`, 'g');
+  let count = 0;
+  const replaced = source.replace(marked, () => {
+    count += 1;
+    return count === 1 ? block : '';
+  });
+  return count === 0 ? null : replaced;
 }
 
 // Older governed contexts used the same heading without markers. Replacing the
@@ -58,8 +62,12 @@ function replaceLegacySection(source, block) {
 
 export function projectDiscoveryBlock(source, canonicalBlock) {
   // A repository whose context is being reconciled is already being touched;
-  // retain the link target but retire the old branch name at the same time.
-  const current = source.replaceAll('/blob/master/', '/blob/main/');
+  // retain the playbook link target but retire its old branch name. Never
+  // rewrite a repository-owned link: another project may still use master.
+  const current = source.replaceAll(
+    'https://github.com/qwts/playbook-engineering/blob/master/',
+    'https://github.com/qwts/playbook-engineering/blob/main/',
+  );
   const marked = replaceMarkedBlock(current, canonicalBlock);
   if (marked !== null) return marked;
 
