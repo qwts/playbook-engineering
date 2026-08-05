@@ -155,10 +155,13 @@ async function applyBaseline(owner, name, seeds, projections, botToken) {
     }
   }
 
-  if (open.length > 0) {
-    return `${changed.length ? 'reconciliation PR updated' : 'reconciliation PR already current'}: ${open[0].html_url}`;
+  const pullAction = reconciliationPullAction({
+    hasOpenPull: open.length > 0,
+    changed: changed.length > 0,
+  });
+  if (pullAction !== 'open') {
+    return `${pullAction === 'update' ? 'reconciliation PR updated' : 'reconciliation PR already current'}: ${open[0].html_url}`;
   }
-  if (changed.length === 0) return 'reconciliation branch already current (no PR opened)';
   const pr = await call('POST', `/repos/${owner}/${name}/pulls`, botToken, {
     title: 'governance: reconcile baseline files',
     head: SEED_BRANCH,
@@ -173,12 +176,30 @@ async function applyBaseline(owner, name, seeds, projections, botToken) {
   return `reconciliation PR opened: ${pr.html_url}`;
 }
 
+function optionValue(argv, flag) {
+  const index = argv.indexOf(flag);
+  if (index === -1) return null;
+  const value = argv[index + 1];
+  if (!value || value.startsWith('-')) throw new Error(`${flag} requires a repository name`);
+  return value;
+}
+
+export function parseReconcileArgs(argv) {
+  const apply = argv.includes('--apply');
+  const only = optionValue(argv, '--repo');
+  const promote = optionValue(argv, '--promote');
+  if (apply && promote !== null) throw new Error('--apply and --promote cannot be used together');
+  return { apply, only, promote };
+}
+
+export function reconciliationPullAction({ hasOpenPull, changed }) {
+  if (!hasOpenPull) return 'open';
+  return changed ? 'update' : 'current';
+}
+
 async function main() {
   const argv = process.argv;
-  const apply = argv.includes('--apply');
-  const only = argv.includes('--repo') ? argv[argv.indexOf('--repo') + 1] : null;
-  const promote = argv.includes('--promote') ? argv[argv.indexOf('--promote') + 1] : null;
-  if (apply && promote) throw new Error('--apply and --promote cannot be used together');
+  const { apply, only, promote } = parseReconcileArgs(argv);
 
   const manifest = JSON.parse(readFileSync(join(ROOT, 'governance', 'repos.json'), 'utf8'));
   if (promote) {
