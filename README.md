@@ -67,6 +67,7 @@ Each document includes navigation links, prerequisites, and cross-references to 
 - [Governed CI rollout checklist](docs/reference/governed-ci-rollout.md) — exact-SHA rollout evidence, user-owned fallback, check publishers, credentials, and manual settings.
 - [Release-lifecycle fleet handoff](docs/reference/governed-ci-release-lifecycle-fleet.md) — manifest-wide release mechanism inventory, generated-projection identities, and executable repair or verified dispositions.
 - [Dependency & tooling inventory](docs/reference/dependency-inventory.md) — the report-only inventory of dependencies, licenses, and tooling across governed repos, consumed as a reusable workflow (ENG-0015).
+- [Semantic ratchets](docs/reference/semantic-ratchets.md) — combine deterministic size ratchets with calibrated semantic screening and rare authoritative exception adjudication (ENG-0160).
 - [Documentation style guide](docs/23-documentation_style_guide.md) — conventions for writing docs in this playbook.
 - [Contributing](CONTRIBUTING.md) — how changes to this repository land.
 

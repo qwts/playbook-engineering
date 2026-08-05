@@ -84,7 +84,7 @@ principles; it does not waive the lower priorities.
 | [ENG-0138](ENG-0138-machine-scoped-agent-memory-budget.md) | The local memory budget is machine-scoped and derived from the machine | Proposed |
 | [ENG-0149](ENG-0149-code-scanning.md) | Code scanning conformance is verified by analysis, not by configuration | Proposed |
 | [ENG-0151](ENG-0151-model-routing.md) | Model routing is retrieved from a registry, never recalled | Proposed |
-| [ENG-0160](ENG-0160-semantic-judge-arbitrates-size-ratchets.md) | The semantic judge arbitrates size-ratchet adjustments | Proposed |
+| [ENG-0160](ENG-0160-semantic-judge-arbitrates-size-ratchets.md) | The semantic judge arbitrates size-ratchet adjustments | Accepted |
 
 ## Related
 

@@ -1,6 +1,6 @@
 # ENG-0160: The semantic judge arbitrates size-ratchet adjustments
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-08-04
 **Issue:** qwts/playbook-engineering#160
 
@@ -57,6 +57,20 @@ change is good when it passes the ratchet AND the semantic check.
    message or an environment variable — the exception list's growth rate is
    itself a health signal.
 
+5. **Routine screening is cheap and advisory; exception adjudication is
+   authoritative and rare.** A calibrated model reached through the Hugging
+   Face OpenAI-compatible route screens changed files on ready pull requests.
+   Its findings do not replace the deterministic ratchet and do not block a
+   merge. The authoritative tier runs only when a per-file exception is
+   requested or a screening verdict is disputed. Cost selects the screening
+   route; calibration evidence selects an adjudicator.
+
+6. **No model call runs in a commit or push hook.** Network availability,
+   credentials, model latency, and billable retries do not belong in a local
+   Git operation. Local semantic runs are explicit advisory commands. The
+   shared CI lane runs once per ready pull-request revision and caches verdicts
+   by their semantic inputs.
+
 ## Consequences
 
 - The false choice between "relax the repo" and "never exceed the ceiling"
@@ -65,12 +79,12 @@ change is good when it passes the ratchet AND the semantic check.
 - Ratchet adjustment acquires a real cost: an authoritative-tier judgment
   per exception (cents) and a checked-in artifact per raise. That friction is
   intended — raises should be rare and visible.
-- The policy inherits aca's open defects. Until quota exhaustion stops
-  degrading to `warn` (qwts/agentic-code-analysis#11) an unfunded judge could
-  block legitimate exception grants, and until verdicts judge the direction
-  of change (qwts/agentic-code-analysis#13) legacy-file verdicts overstate
-  fail. Both are advisory-phase blockers to promoting this policy to an
-  enforced gate.
+- The two advisory-phase blockers identified at proposal time are closed in
+  aca: account rejection now stops an enforcing or calibration run as gate
+  down (qwts/agentic-code-analysis#11), and comparative judgments distinguish
+  improvement from regression while retaining residual debt
+  (qwts/agentic-code-analysis#13). A consuming repo still qualifies its exact
+  provider, model, prompt, and fixture-suite tuple before relying on it.
 - Judge verdicts are model judgments, not proofs. Verdict-stability across
   fresh runs (measured 3–4× today) and the graded self-test fixtures
   (qwts/agentic-code-analysis#12) are the calibration evidence; if a judge
@@ -79,3 +93,6 @@ change is good when it passes the ratchet AND the semantic check.
 - The consuming repos owe a small implementation: the exceptions map and the
   ratchet reading it. Until that lands, this record governs the manual
   process (owner grants the exception on judge evidence in the PR).
+
+Operational adoption, qualification, and the two-dimensional decision matrix
+are in [semantic ratchets](../reference/semantic-ratchets.md).
