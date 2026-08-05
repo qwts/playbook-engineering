@@ -6,6 +6,7 @@ Vendor-specific files (Copilot instructions, Cursor rules, and similar) are
 thin adapters onto this file — they never restate what is here.
 
 <!-- governed:shared-agent-discovery:start -->
+
 ## Shared agent conventions and skills
 
 PR-first workflow, validation-before-push, commit and PR hygiene, and the

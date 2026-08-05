@@ -18,6 +18,7 @@ const canonical = extractDiscoveryBlock(readFileSync(join(ROOT, 'governance/base
 
 test('the marked baseline is the one canonical discovery block', () => {
   assert.ok(canonical);
+  assert.match(canonical, /^<!-- governed:shared-agent-discovery:start -->\n\n## /);
   assert.match(canonical, /blob\/main\/docs\/reference\/agent-conventions\.md/);
   assert.match(canonical, /blob\/main\/skills\/README\.md/);
   assert.match(canonical, /blob\/main\/docs\/sop\/README\.md/);

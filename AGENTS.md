@@ -7,6 +7,7 @@ Canonical, vendor-neutral agent context for this repository, per [ENG-0006](docs
 The org's cross-repo home for engineering decisions (ENG records), shared SOPs, shared CI/CD, and the docs-governance tooling every `qwts` repo consumes. Full map: [README.md](README.md).
 
 <!-- governed:shared-agent-discovery:start -->
+
 ## Shared agent conventions and skills
 
 PR-first workflow, validation-before-push, commit and PR hygiene, and the
