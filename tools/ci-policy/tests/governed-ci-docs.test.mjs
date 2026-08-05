@@ -151,3 +151,31 @@ test('dependency remediation preserves traced analysis and packaging exceptions'
   assert.match(release, /does not accept a tool's autofix as proof/u);
   assert.match(release, /runs\s+the complete contract suite/u);
 });
+
+test('semantic ratchets keep deterministic enforcement separate from advisory model judgment', () => {
+  const workflow = read('.github/workflows/semantic-ratchet.yml');
+  const policy = read('docs/reference/semantic-ratchets.md');
+
+  assert.match(workflow, /^  workflow_call:$/mu);
+  assert.match(workflow, /ref: [0-9a-f]{40}$/mu);
+  assert.match(workflow, /OPENAI_BASE_URL: https:\/\/router\.huggingface\.co\/v1/u);
+  assert.match(workflow, /OPENAI_API_KEY: \$\{\{ secrets\.HF_TOKEN \}\}/u);
+  assert.match(workflow, /context-footprint --base "\$BASE_REF"/u);
+  assert.match(workflow, /context-footprint --self-test --json/u);
+  assert.match(workflow, /dynamic Hugging Face routing cannot carry pinned calibration evidence/u);
+  assert.doesNotMatch(workflow, /--enforce/u);
+  assert.doesNotMatch(workflow, /pull_request_target/u);
+
+  const discardUntrustedCache = workflow.indexOf('rm -rf -- .cache/aca');
+  const restoreTrustedCache = workflow.indexOf('uses: actions/cache@');
+  assert.ok(discardUntrustedCache >= 0, 'caller-controlled verdicts must be discarded');
+  assert.ok(restoreTrustedCache > discardUntrustedCache, 'trusted cache restore must follow discard');
+
+  assert.match(workflow, /if \[ "\$QUALIFY" != "true" \]; then/u);
+  assert.match(workflow, /aca\.config\.json is required so screening never defaults/u);
+
+  assert.match(policy, /Numeric ratchets remain the deterministic merge gate/u);
+  assert.match(policy, /No model call belongs in a commit or push hook/u);
+  assert.match(policy, /authoritative judge is\s+required only to grant a per-file ceiling exception/u);
+  assert.match(policy, /never switch to `pull_request_target`/u);
+});
