@@ -12,7 +12,7 @@ untrusted-input threat model are defined once, for every repo, in the
 [org-wide agent conventions](https://github.com/qwts/playbook-engineering/blob/main/docs/reference/agent-conventions.md).
 Before creating or copying a repo-local skill, consult the
 [shared agent skills](https://github.com/qwts/playbook-engineering/blob/main/skills/README.md)
-index. Reuse a shared workflow when it fits; only a workflow genuinely specific
+index. Reuse a shared skill when it fits; only a skill genuinely specific
 to this repository belongs in its local context.
 This repository is governed by
 [playbook-engineering](https://github.com/qwts/playbook-engineering) — its
