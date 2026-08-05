@@ -9,7 +9,7 @@ inherit by default, vary by explicit delta.
 | --- | --- |
 | `README.md` | What it is, how to run it, where deeper docs live. |
 | `LICENSE` | Exactly this filename. Licensing is deliberately per-repo (MIT, PolyForm NC, proprietary, Apache-2.0 all in use); *absence* is the only violation. |
-| `AGENTS.md` | Canonical agent context per [ENG-0006](../decisions/ENG-0006-agentic-primitives-governance.md); vendor files are thin adapters. It inherits the baseline shared-conventions and skills map, which points agents to the org-wide conventions, shared skills index, SOPs, and ENG records rather than copying them. |
+| `AGENTS.md` | Canonical agent context per [ENG-0006](../decisions/ENG-0006-agentic-primitives-governance.md); vendor files are thin adapters. Its marked shared-conventions and skills block is projected from this baseline, pointing agents to the org-wide conventions, shared skills index, SOPs, and ENG records rather than copying them. Repo-specific context remains outside that block. |
 | `CONTRIBUTING.md` | May be a pointer stub into `docs/` (the photos pattern). |
 | `.github/CODEOWNERS` | Minimum: `* @qwts` plus explicit `/.github/` ownership. |
 | Feature issue template | The shared [feature-lifecycle](feature-lifecycle.md) form ([ENG-0007](../decisions/ENG-0007-feature-lifecycle-convention.md)); repos may add fields, not drop sections. |
@@ -49,6 +49,8 @@ the repository's enabled merge methods.
 
 ## Changelog
 
+- 2026-08-05 — make the shared agent-context discovery block status-aware,
+  reconciled, and required before an onboarding repository can graduate.
 - 2026-08-05 — require the baseline agent context to point agents to the
   org-wide conventions, shared skills index, SOPs, and ENG records before
   creating a repo-local skill.

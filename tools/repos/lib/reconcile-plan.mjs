@@ -9,6 +9,7 @@
 //              files that are deliberately per-repo (README, LICENSE)
 
 import { GOVERNED_HARNESS_FILES } from './baseline-files.mjs';
+import { DISCOVERY_CHECK } from './agent-context-discovery.mjs';
 
 // check name -> { source (template in this repo), target (path in the repo) }
 export const SEEDS = {
@@ -48,7 +49,7 @@ const HUMAN_FILES = {
 };
 
 export function plan(result) {
-  const out = { name: result.name, status: result.status, settings: [], seeds: [], human: [] };
+  const out = { name: result.name, status: result.status, settings: [], seeds: [], projections: [], human: [] };
   if (result.error) {
     out.human.push(`create the repo under the account and record it in governance/repos.json (${result.error})`);
     return out;
@@ -56,6 +57,9 @@ export function plan(result) {
   for (const check of result.failed) {
     if (SETTINGS[check]) out.settings.push({ check, action: SETTINGS[check] });
     else if (SEEDS[check]) out.seeds.push({ check, ...SEEDS[check] });
+    else if (check === DISCOVERY_CHECK && !out.seeds.some((seed) => seed.target === 'AGENTS.md')) {
+      out.projections.push({ check, target: 'AGENTS.md', action: 'project-shared-agent-discovery' });
+    }
     else if (HUMAN_FILES[check]) out.human.push(`${check}: ${HUMAN_FILES[check]}`);
     else if (HUMAN_SETUP[check]) out.human.push(`${check}: ${HUMAN_SETUP[check]}`);
     else if (check.startsWith('app: ')) {
@@ -63,6 +67,14 @@ export function plan(result) {
     } else out.human.push(`${check}: no reconcile lane — converge manually`);
   }
   return out;
+}
+
+// A manifest status is a statement of conformance, not an escape hatch. The
+// promotion command calls this after a live audit and will not flip onboarding
+// to active while any declared baseline (including discovery) remains missing.
+export function promotionPlan(result) {
+  if (result.error) return { eligible: false, reasons: [result.error] };
+  return { eligible: result.failed.length === 0, reasons: result.failed };
 }
 
 // The transformation applied to an existing ruleset: bump the pull_request

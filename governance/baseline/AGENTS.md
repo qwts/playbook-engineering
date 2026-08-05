@@ -5,6 +5,7 @@ Canonical, vendor-neutral agent context for this repository, per
 Vendor-specific files (Copilot instructions, Cursor rules, and similar) are
 thin adapters onto this file — they never restate what is here.
 
+<!-- governed:shared-agent-discovery:start -->
 ## Shared agent conventions and skills
 
 PR-first workflow, validation-before-push, commit and PR hygiene, and the
@@ -21,6 +22,7 @@ and [engineering decisions](https://github.com/qwts/playbook-engineering/blob/ma
 apply here by default
 ([ENG-0008](https://github.com/qwts/playbook-engineering/blob/main/docs/decisions/ENG-0008-shared-sop-inheritance.md):
 inherit by default, vary by explicit delta).
+<!-- governed:shared-agent-discovery:end -->
 
 ## What is specific to this repository
 

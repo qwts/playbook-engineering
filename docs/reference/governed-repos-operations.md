@@ -49,6 +49,9 @@ CodeQL run by the repo's own workflow
 `status: active` are expected to conform — their drift sets a non-zero exit
 code so CI can gate on it; `status: onboarding` repos report drift without
 failing, so migrating an old repo is a declared state, not a surprise.
+The marked shared agent-context discovery block is also checked against the
+canonical baseline: a missing or stale block is active drift, while the same
+gap appears as a tracked onboarding migration state.
 
 ## Reconciling
 
@@ -57,6 +60,7 @@ Drift's write path ([ENG-0038](../decisions/ENG-0038-governance-reconciler.md)):
 ```bash
 node tools/repos/reconcile.mjs            # dry run: plan per repo
 node tools/repos/reconcile.mjs --apply    # converge; --repo <name> to scope
+node tools/repos/reconcile.mjs --promote NAME # live audit, then graduate onboarding
 ```
 
 Three lanes per repo, split by GitHub's permission model: **settings**
@@ -68,8 +72,14 @@ environments, and the feature form) proposed as a bot-authored PR, so the
 seeded content is itself reviewed;
 **human** steps (repo creation, App installs, README/LICENSE) printed, never
 attempted. Only missing files are added — existing content is never clobbered.
-Run it from this checkout; onboard a repo by adding its manifest row, running
-`--apply`, reviewing the seed PR, then flipping the row to `active`.
+The single exception is an existing `AGENTS.md`: reconciliation replaces only
+its marked shared discovery block (or its legacy shared-conventions section),
+preserving repository-specific context and vendor adapters; it also updates any
+touched playbook `blob/master` link to canonical `blob/main`. Run it from this
+checkout; onboard a repo by adding its manifest row, running `--apply`, and
+reviewing the reconciliation PR. `--promote NAME` performs a fresh live audit
+and refuses to flip its manifest status to `active` until every baseline check,
+including shared discovery, conforms.
 
 When the settings lane must create a missing ruleset, it preserves the
 repository's enabled merge methods and adds a native merge-queue rule only for

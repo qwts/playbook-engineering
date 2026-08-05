@@ -27,6 +27,11 @@ import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BASELINE_FILES } from './lib/baseline-files.mjs';
+import {
+  DISCOVERY_CHECK,
+  discoveryDisposition,
+  loadCanonicalDiscoveryBlock,
+} from './lib/agent-context-discovery.mjs';
 import { activeAgentSlugs, loadAgents, validateAgents } from './lib/agents.mjs';
 import { mintAgentToken } from './lib/agent-bot-client.mjs';
 
@@ -66,6 +71,11 @@ export async function api(path, token) {
   if (res.status === 404 || res.status === 403) return null; // absent or not visible = not conformant
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return res.json();
+}
+
+export function contentSource(file) {
+  if (typeof file?.content !== 'string') return '';
+  return Buffer.from(file.content, 'base64').toString('utf8');
 }
 
 // One installation-repository listing per App; every repo check reads the set.
@@ -165,16 +175,23 @@ async function reviewRequired(owner, name, branch, token) {
   return (classic?.required_pull_request_reviews?.required_approving_review_count ?? 0) >= 1;
 }
 
-export async function checkRepo(owner, entry, coverage, token) {
+export async function checkRepo(owner, entry, coverage, token, {
+  canonicalDiscoveryBlock = loadCanonicalDiscoveryBlock(ROOT),
+} = {}) {
   // The coverage map's own keys are the roster: one entry per App listed.
   const checks = {};
   const meta = await api(`/repos/${owner}/${entry.name}`, token);
   if (!meta) return { name: entry.name, status: entry.status, error: 'repo not found or not visible' };
 
+  let agentContext;
   for (const file of BASELINE_FILES) {
     const path = file.split('/').map(encodeURIComponent).join('/');
-    checks[file] = (await api(`/repos/${owner}/${entry.name}/contents/${path}`, token)) !== null;
+    const contents = await api(`/repos/${owner}/${entry.name}/contents/${path}`, token);
+    checks[file] = contents !== null;
+    if (file === 'AGENTS.md') agentContext = contents;
   }
+  const discovery = discoveryDisposition(entry.status, contentSource(agentContext), canonicalDiscoveryBlock);
+  checks[DISCOVERY_CHECK] = discovery.conformant;
   const templates = await api(`/repos/${owner}/${entry.name}/contents/.github/ISSUE_TEMPLATE`, token);
   checks['feature issue template'] = Array.isArray(templates) && templates.some((t) => /feature/i.test(t.name));
   checks['review required to merge'] = await reviewRequired(owner, entry.name, meta.default_branch, token);
@@ -208,7 +225,11 @@ export async function checkRepo(owner, entry, coverage, token) {
   for (const slug of Object.keys(coverage)) checks[`app: ${slug}`] = coverage[slug].has(entry.name);
 
   const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([k]) => k);
-  return { name: entry.name, status: entry.status, checks, failed };
+  return { name: entry.name, status: entry.status, checks, failed, discovery };
+}
+
+export function activeDrift(results) {
+  return results.filter((r) => r.status === 'active' && (r.error || r.failed.length));
 }
 
 async function main() {
@@ -232,16 +253,19 @@ async function main() {
       const passed = total - r.failed.length;
       process.stdout.write(`${r.name} (${r.status}) — ${passed}/${total}\n`);
       for (const miss of r.failed) process.stdout.write(`  ✗ ${miss}\n`);
+      if (r.discovery?.state === 'migration') {
+        process.stdout.write('  ↳ migration: shared agent-context discovery is incomplete; promotion to active remains blocked\n');
+      }
     }
   }
 
-  const activeDrift = results.filter((r) => r.status === 'active' && (r.error || r.failed.length));
+  const blocking = activeDrift(results);
   process.stdout.write(
-    activeDrift.length
-      ? `\ndrift in ${activeDrift.length} active repo(s): ${activeDrift.map((r) => r.name).join(', ')}\n`
+    blocking.length
+      ? `\ndrift in ${blocking.length} active repo(s): ${blocking.map((r) => r.name).join(', ')}\n`
       : '\nall active repos conform\n',
   );
-  process.exitCode = activeDrift.length ? 1 : 0;
+  process.exitCode = blocking.length ? 1 : 0;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
