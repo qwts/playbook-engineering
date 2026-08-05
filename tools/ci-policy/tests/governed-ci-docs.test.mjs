@@ -164,6 +164,15 @@ test('semantic ratchets keep deterministic enforcement separate from advisory mo
   assert.match(workflow, /context-footprint --self-test --json/u);
   assert.match(workflow, /dynamic Hugging Face routing cannot carry pinned calibration evidence/u);
   assert.doesNotMatch(workflow, /--enforce/u);
+  assert.doesNotMatch(workflow, /pull_request_target/u);
+
+  const discardUntrustedCache = workflow.indexOf('rm -rf -- .cache/aca');
+  const restoreTrustedCache = workflow.indexOf('uses: actions/cache@');
+  assert.ok(discardUntrustedCache >= 0, 'caller-controlled verdicts must be discarded');
+  assert.ok(restoreTrustedCache > discardUntrustedCache, 'trusted cache restore must follow discard');
+
+  assert.match(workflow, /if \[ "\$QUALIFY" != "true" \]; then/u);
+  assert.match(workflow, /aca\.config\.json is required so screening never defaults/u);
 
   assert.match(policy, /Numeric ratchets remain the deterministic merge gate/u);
   assert.match(policy, /No model call belongs in a commit or push hook/u);

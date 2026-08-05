@@ -55,6 +55,13 @@ jobs:
       - name: Install pinned analyzer dependencies
         run: npm --prefix .aca clean-install
 
+      # A pull request can commit a file under .cache/aca whose name matches a
+      # real content-addressed verdict. Remove caller-controlled entries before
+      # restoring the trusted Actions cache so they cannot suppress a judge call.
+      - name: Discard checked-out semantic verdicts
+        if: ${{ !inputs.qualify }}
+        run: rm -rf -- .cache/aca
+
       - name: Restore semantic verdicts
         if: ${{ !inputs.qualify }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -67,11 +74,14 @@ jobs:
       - name: Validate route and scope configuration
         env:
           ACA_MODEL: ${{ inputs.model }}
+          QUALIFY: ${{ inputs.qualify }}
         run: |
-          test -f aca.config.json || {
-            echo '::error::aca.config.json is required so the shared workflow never defaults to judging the whole repository'
-            exit 2
-          }
+          if [ "$QUALIFY" != "true" ]; then
+            test -f aca.config.json || {
+              echo '::error::aca.config.json is required so screening never defaults to judging the whole repository'
+              exit 2
+            }
+          fi
           case "$ACA_MODEL" in
             *:cheapest|*:preferred)
               echo '::error::dynamic Hugging Face routing cannot carry pinned calibration evidence'
