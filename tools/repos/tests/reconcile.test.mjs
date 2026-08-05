@@ -14,6 +14,7 @@ import {
   mergeQueueRule,
   SEEDS,
 } from '../lib/reconcile-plan.mjs';
+import { parseReconcileArgs, reconciliationPullAction } from '../reconcile.mjs';
 import { BASELINE_FILES, GOVERNED_CODEX_FILES, GOVERNED_HARNESS_FILES } from '../lib/baseline-files.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -21,6 +22,28 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 test('a fully conformant repo plans nothing', () => {
   const p = plan({ name: 'clean', status: 'active', failed: [] });
   assert.deepEqual([p.settings, p.seeds, p.human], [[], [], []]);
+});
+
+test('promote requires a repository operand and never falls through to apply', () => {
+  assert.throws(
+    () => parseReconcileArgs(['node', 'reconcile.mjs', '--promote']),
+    /--promote requires a repository name/,
+  );
+  assert.throws(
+    () => parseReconcileArgs(['node', 'reconcile.mjs', '--apply', '--promote']),
+    /--promote requires a repository name/,
+  );
+  assert.throws(
+    () => parseReconcileArgs(['node', 'reconcile.mjs', '--apply', '--promote', 'localnotes']),
+    /--apply and --promote cannot be used together/,
+  );
+});
+
+test('a recovered reconciliation branch without an open PR always opens one', () => {
+  assert.equal(reconciliationPullAction({ hasOpenPull: false, changed: false }), 'open');
+  assert.equal(reconciliationPullAction({ hasOpenPull: false, changed: true }), 'open');
+  assert.equal(reconciliationPullAction({ hasOpenPull: true, changed: false }), 'current');
+  assert.equal(reconciliationPullAction({ hasOpenPull: true, changed: true }), 'update');
 });
 
 test('failed checks route to the right lane', () => {

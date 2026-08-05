@@ -6,9 +6,24 @@ Canonical, vendor-neutral agent context for this repository, per [ENG-0006](docs
 
 The org's cross-repo home for engineering decisions (ENG records), shared SOPs, shared CI/CD, and the docs-governance tooling every `qwts` repo consumes. Full map: [README.md](README.md).
 
-## Shared agent conventions
+<!-- governed:shared-agent-discovery:start -->
+## Shared agent conventions and skills
 
-PR-first workflow, validation-before-push, commit and PR hygiene, supply-chain pinning for MCP servers and skills, and the untrusted-input threat model are defined once, for every repo, in [org-wide agent conventions](docs/reference/agent-conventions.md) — this file does not restate them. This repository hosts that document as well as consuming it.
+PR-first workflow, validation-before-push, commit and PR hygiene, and the
+untrusted-input threat model are defined once, for every repo, in the
+[org-wide agent conventions](https://github.com/qwts/playbook-engineering/blob/main/docs/reference/agent-conventions.md).
+Before creating or copying a repo-local skill, consult the
+[shared agent skills](https://github.com/qwts/playbook-engineering/blob/main/skills/README.md)
+index. Reuse a shared skill when it fits; only a skill genuinely specific
+to this repository belongs in its local context.
+This repository is governed by
+[playbook-engineering](https://github.com/qwts/playbook-engineering) — its
+[shared SOPs](https://github.com/qwts/playbook-engineering/blob/main/docs/sop/README.md)
+and [engineering decisions](https://github.com/qwts/playbook-engineering/blob/main/docs/decisions/README.md)
+apply here by default
+([ENG-0008](https://github.com/qwts/playbook-engineering/blob/main/docs/decisions/ENG-0008-shared-sop-inheritance.md):
+inherit by default, vary by explicit delta).
+<!-- governed:shared-agent-discovery:end -->
 
 ## What is specific to this repository
 
