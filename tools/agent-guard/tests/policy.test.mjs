@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
 
-import { evaluateCommand, evaluateHookInput, heavyLaneFor, nodeRunScriptNames, normalizeCommand, npmScriptNames, otherPackageScriptNames, resolveExecutionDir, splitSegments, stripInertText } from '../guard-agent-command.mjs';
+import { evaluateCommand, evaluateHookInput, heavyLaneFor, nodeRunScriptNames, normalizeCommand, npmScriptNames, otherPackageScriptNames, resolveExecutionDir, resolveExecutionDirs, splitSegments, stripInertText } from '../guard-agent-command.mjs';
 import { classifyLane, evaluateLanePolicy, harnessName, isAgentSession, isCi, listGrants, readGrant, revokeGrant, writeGrant } from '../lib/policy.mjs';
 import { ensureStateDirs } from '../lib/protocol.mjs';
 
@@ -337,6 +337,12 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('bash -c "npx vitest"', opts()).allow, false);
     assert.equal(evaluateCommand('sh -c "vitest run"', opts()).allow, false);
     assert.equal(evaluateCommand('bash -c npx\\ vitest', opts()).allow, false);
+    assert.equal(evaluateCommand("command sh -c 'npm run ci'", opts()).allow, false);
+    assert.equal(evaluateCommand("nice sh -c 'npm run ci'", opts()).allow, false);
+    assert.equal(evaluateCommand("env -i sh -c 'npm run ci'", opts()).allow, false);
+    assert.equal(evaluateCommand("time bash -c 'npx vitest'", opts()).allow, false);
+    assert.equal(evaluateCommand("nohup bash -c 'npx vitest'", opts()).allow, false);
+    assert.equal(evaluateCommand("bash -cl 'npx vitest'", opts()).allow, false);
   });
 
   test('eval and package-manager command strings are scanned as commands', () => {
@@ -408,6 +414,9 @@ describe('hook helpers', () => {
     assert.equal(resolveExecutionDir('/outside', 'cd /tmp && cd /project && npm run ci'), '/project');
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'cd /tmp && cd /project && npm run ci' }, '/project').allow, false);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'cd /tmp && (cd /project && npm run ci)' }, '/project').allow, false);
+    assert.deepEqual(resolveExecutionDirs('/project', '(cd /tmp) && npx vitest'), ['/project', '/tmp']);
+    assert.equal(evaluateHookInput({ cwd: '/project', command: '(cd /tmp) && npx vitest' }, '/project').allow, false);
+    assert.equal(evaluateHookInput({ cwd: '/outside', command: 'true && cd /project && npm run ci' }, '/project').allow, false);
   });
 
   test('quoted text is blanked while shell payloads are promoted', () => {
