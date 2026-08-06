@@ -3,7 +3,7 @@
 // enforces all of it across three harnesses.
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
@@ -445,6 +445,20 @@ describe('command hook', () => {
     assert.equal(evaluateCommand("bash -cl 'npx vitest'", opts()).allow, false);
   });
 
+  test('quoted runtime executables and command-launching prefixes are classified', () => {
+    for (const command of [
+      '"python3" -c \'import os; os.system("npm run ci")\'',
+      '"perl" -e \'system q(npm run ci)\'',
+      '"ruby" -e \'system %q(npm run ci)\'',
+      '"php" -r \'system("npm run ci");\'',
+      '"awk" \'BEGIN { system("npm run ci") }\'',
+      '"find" . -maxdepth 0 -exec npm run ci \\;',
+      '"script" -q /dev/null -c \'npm run ci\'',
+      'ionice npm run ci',
+      'parallel npm run ci -- x',
+    ]) assert.equal(evaluateCommand(command, opts()).allow, false, `expected the hook to deny: ${command}`);
+  });
+
   test('eval and package-manager command strings are scanned as commands', () => {
     assert.equal(evaluateCommand("eval 'npm run ci'", opts()).allow, false);
     assert.equal(evaluateCommand("eval 'node --test'", opts()).allow, false);
@@ -492,6 +506,17 @@ describe('command hook', () => {
     assert.equal(evaluateCommand("tar -cf /tmp/a.tar --checkpoint=1 --checkpoint-action=exec='npm run ci' README.md", opts()).allow, false);
   });
 
+  test('Node environment preloads and direct shell scripts stay behind approval', () => {
+    assert.equal(evaluateCommand('NODE_OPTIONS=--require=/tmp/preload.cjs npm run lint', opts()).allow, false);
+    assert.equal(evaluateCommand("env 'NODE_OPTIONS=--import=data:text/javascript,export default 1' npm run lint", opts()).allow, false);
+    assert.equal(evaluateCommand('. /tmp/lane', opts()).allow, false);
+    const lane = path.join(env.AGENT_GUARD_STATE_DIR, 'lane');
+    writeFileSync(lane, '#!/bin/sh\nnpx vitest\n');
+    assert.equal(evaluateCommand(lane, { ...opts(), cwd: env.AGENT_GUARD_STATE_DIR }).allow, false);
+    assert.equal(evaluateCommand('BASH_ENV=/tmp/preload.sh bash -c true', opts()).allow, false);
+    assert.equal(evaluateCommand('PATH=/tmp:$PATH npm run lint', opts()).allow, false);
+  });
+
   test('authoritative lease state is inaccessible to agent commands', () => {
     assert.equal(evaluateCommand('rm -rf ~/.cache/agent-guard/leases', opts()).allow, false);
     assert.equal(evaluateCommand(': > ~/Library/Caches/agent-guard/leases/live.json', opts()).allow, false);
@@ -501,6 +526,9 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('rm -rf ~/.cache/agent-guard/./leases', opts()).allow, false);
     assert.equal(evaluateCommand('rm -rf ~/.cache/agent-guard/foo/../leases', opts()).allow, false);
     assert.equal(evaluateCommand('rm -rf ~/.cache/agen[t]-guard/leases', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf ~/.cache/agent-guard/lease?', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf ~/.cache/agent-guard/[l]eases', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf ~/.cache/agent-guard/lea{ses,se}', opts()).allow, false);
     assert.equal(evaluateCommand('d=~/.cache/agent-guard; rm -rf "$d/leases"', opts()).allow, false);
     assert.equal(evaluateCommand('cat agent-health-guard/leases/live.json', opts()).allow, true);
     assert.equal(evaluateCommand('mkdir -p /tmp/agent-app-guard/leases', opts()).allow, true);
@@ -595,6 +623,7 @@ describe('hook helpers', () => {
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'command cd /project && npm run ci' }, '/project').allow, false);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'builtin cd /project && npm run ci' }, '/project').allow, false);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'ln -s /project /tmp/guard-link; cd /tmp/guard-link && npm run ci' }, '/project').allow, false);
+    assert.equal(evaluateHookInput({ cwd: '/outside', command: 'tar -xf /tmp/link.tar -C /tmp; cd /tmp/link && npm run ci' }, '/project').allow, false);
   });
 
   test('quoted text is blanked while shell payloads are promoted', () => {
