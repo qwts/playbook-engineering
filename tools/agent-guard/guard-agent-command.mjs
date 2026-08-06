@@ -8,13 +8,14 @@
 // caused half of.
 //
 // It denies four things:
-//   1. Heavy local suites, for agents, without an owner grant — the lanes that
+//   1. Heavy local suites, for agents — the lanes that
 //      actually bricked the machine (`npm run ci`, e2e, storybook, perf, cov).
 //   2. Direct test-binary invocations that skip the wrapper entirely.
 //   3. Tampering with the guard's own controls: the human escape hatch, the
 //      assume-human override, and redirecting the state directory (which would
 //      hand the session a private lease namespace and undo machine scoping).
-//   4. Self-granting: `arbiter.mjs grant` is the owner's opt-in.
+//   4. Legacy grant commands, which cannot authenticate a human when the
+//      agent shares the same OS user.
 //
 // Scoping: only commands that execute inside a guarded checkout are policed;
 // cross-repo work from the same session is left alone. Blocked text inside
@@ -32,21 +33,23 @@ import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { HEAVY_LANES, readGrant } from './lib/policy.mjs';
+import { HEAVY_LANES } from './lib/policy.mjs';
+
+const GUARD_GUIDE = 'https://github.com/qwts/playbook-engineering/blob/main/docs/reference/agent-memory-guard.md';
 
 // Two different blocks need two different next steps, and a refusal whose
 // advice does not fit is one an agent argues with instead of following.
 const GUIDANCE =
   'Push the branch and let GitHub CI verify — CI is the authoritative lane and is exempt from this guard. ' +
-  'See docs/reference/agent-memory-guard.md.';
+  `See ${GUARD_GUIDE}.`;
 
 // A direct binary is not necessarily a heavy run — in a tooling repo `node
 // --test` is the light, normal path. What is wrong with it is that it skips
 // the wrapper, so the fix is the repo's own guarded entrypoint, not CI.
 const USE_ENTRYPOINT =
-  "Use the repository's npm test entrypoints instead (`npm test`, `npm run test:*`); they wrap " +
+  "Use a repository-documented guarded npm test entrypoint instead (normally `npm test`); it must wrap " +
   'tools/agent-guard/run-guarded.mjs, which derives a ceiling from this machine and checks the machine-wide ' +
-  'memory budget first. See docs/reference/agent-memory-guard.md.';
+  `memory budget first. See ${GUARD_GUIDE}.`;
 
 // Markers that identify a checkout governed by this policy. The second is the
 // pre-rollout location, so a repo mid-migration is still policed.
@@ -75,17 +78,16 @@ const BLOCKED = [
     what: 'direct Storybook test-runner invocation',
   },
   {
-    pattern: /(^|[\s;(&|])(npx\s+)?vitest(?:\s|$)/u,
+    pattern: /^(?:(?:time|command)\s+|env\s+(?:\w+=\S*\s+)*)*(?:\w+=\S*\s+)*(?:\S*\/)?(?:npx(?:\s+-\S+)*\s+)?(?:\S*\/)?vitest(?:\s|$)/u,
     what: 'direct Vitest invocation',
   },
   {
-    pattern: /(^|[\s;(&|])(npx\s+)?c8\s/u,
+    pattern: /^(?:(?:time|command)\s+|env\s+(?:\w+=\S*\s+)*)*(?:\w+=\S*\s+)*(?:\S*\/)?(?:npx(?:\s+-\S+)*\s+)?(?:\S*\/)?c8(?:\s|$)/u,
     what: 'direct c8 coverage invocation',
   },
   {
-    // Inner/unguarded npm scripts (test:dom:run, *:inner).
-    pattern: /\bnpm\s+run\s+[\w:.-]*:(run|inner)(?![\w:-])/u,
-    what: 'unguarded inner npm script',
+    pattern: /^(?:(?:time|command)\s+|env\s+(?:\w+=\S*\s+)*)*(?:\w+=\S*\s+)*(?:\S*\/)?npm\s+(?:exec|x)\s+(?:-\S+\s+)*(?:\S*\/)?(?:vitest|c8|playwright|test-storybook)(?:\s|$)/u,
+    what: 'direct test-binary invocation through npm exec',
   },
   {
     // Headed/interactive runs open GUI windows on the shared desktop.
@@ -101,6 +103,12 @@ const BLOCKED = [
 // `AGENT_GUARD_FORCE=1 node tools/agent-guard/run-guarded.mjs …` cannot slip
 // through as a sanctioned run.
 const TAMPERING = [
+  {
+    pattern: /(?:^|[\s;&|])(?:CI|GITHUB_ACTIONS|CONTINUOUS_INTEGRATION|BUILDKITE|GITLAB_CI|JENKINS_URL)=/u,
+    reason:
+      'Blocked a command-local CI marker: hosted CI is exempt from admission because its runner is isolated, but a ' +
+      `local command cannot grant itself that exemption. Remove the assignment and use the guarded entrypoint. ${GUIDANCE}`,
+  },
   {
     pattern: /\bAGENT_GUARD_FORCE=/u,
     reason:
@@ -122,8 +130,8 @@ const TAMPERING = [
   {
     pattern: /\barbiter\.mjs\s+grant\b/u,
     reason:
-      'Blocked `arbiter.mjs grant`: the heavy-lane opt-in belongs to the owner. Ask them to run it; an agent granting ' +
-      'itself permission is not permission.',
+      'Blocked `arbiter.mjs grant`: same-user local grants cannot authenticate human approval and are disabled. ' +
+      'The owner can run the lane directly from their own terminal, or the agent can use GitHub CI.',
   },
   {
     // The wrapper sets this for its own children so nested guarded scripts do
@@ -142,16 +150,33 @@ const TAMPERING = [
 // blocked one in the next. Quotes are already blanked by stripInertText, so
 // these separators are structural rather than incidental text.
 export function splitSegments(command) {
+  const REDIRECTION_AMPERSAND = '\0';
+  const ESCAPED_SEMICOLON = '\u0001';
+  const ESCAPED_AMPERSAND = '\u0002';
+  const ESCAPED_PIPE = '\u0003';
   return command
+    .replace(/\\;/gu, ESCAPED_SEMICOLON)
+    .replace(/\\&/gu, ESCAPED_AMPERSAND)
+    .replace(/\\\|/gu, ESCAPED_PIPE)
+    .replace(/(\d*>)&(?=\d|-)/gu, `$1${REDIRECTION_AMPERSAND}`)
+    .replace(/&(?=>>?)/gu, REDIRECTION_AMPERSAND)
     .split(/\|\||&&|[;\n|&]/u)
-    .map((segment) => segment.trim())
+    .map((segment) =>
+      segment
+        .replaceAll(REDIRECTION_AMPERSAND, '&')
+        .replaceAll(ESCAPED_SEMICOLON, '\\;')
+        .replaceAll(ESCAPED_AMPERSAND, '\\&')
+        .replaceAll(ESCAPED_PIPE, '\\|')
+        .trim(),
+    )
     .filter(Boolean);
 }
 
 // A segment that IS a wrapper invocation: optional env assignments, then node
 // (however it is pathed), then run-guarded.mjs as its script argument. Merely
 // mentioning the filename elsewhere in the segment does not qualify.
-const WRAPPER_SEGMENT = /^(?:\w+=\S*\s+)*(?:\S*\/)?node\s+(?:-\S+\s+)*\S*run-guarded\.mjs(?:\s|$)/u;
+const ANY_WRAPPER_SEGMENT = /^(?:\w+=\S*\s+)*(?:\S*\/)?node\s+(?:-\S+\s+)*\S*run-guarded\.mjs(?:\s|$)/u;
+const WRAPPER_SEGMENT = /^(?:\w+=\S*\s+)*(?:\S*\/)?node\s+(?:-\S+\s+)*(?:\.\/)?(?:tools\/agent-guard|scripts)\/run-guarded\.mjs(?:\s|$)/u;
 
 function tryRealpath(target) {
   try {
@@ -172,7 +197,7 @@ function isWithin(child, parent) {
 // checkout from the same session).
 export function resolveExecutionDir(cwd, command) {
   if (typeof cwd !== 'string' || cwd.length === 0) return null;
-  const match = typeof command === 'string' ? /^\s*cd\s+(?:--\s+)?(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))\s*(?:&&|;)/u.exec(command) : null;
+  const match = typeof command === 'string' ? /^\s*cd\s+(?:--\s+)?(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))\s*(?:&&|;|\n)/u.exec(command) : null;
   if (!match) return cwd;
   let target = match[1] ?? match[2] ?? match[3];
   if (target.startsWith('~')) {
@@ -183,12 +208,246 @@ export function resolveExecutionDir(cwd, command) {
   return isAbsolute(target) ? target : resolve(cwd, target);
 }
 
-const QUOTED = /'[^']*'|"(?:[^"\\]|\\.)*"/u;
-const SHELL_C_TAIL = /(?:^|[\s;&|(`{])(?:env\s+(?:\w+=\S*\s+)*)?(?:ba|da|z)?sh\s+(?:-\S+\s+)*-\S*c\s+$/u;
+const QUOTED = /\$'(?:[^'\\]|\\.)*'|'[^']*'|"(?:[^"\\]|\\.)*"/u;
+
+function endsWithShellC(scanned) {
+  const segment = scanned.split(/\|\||&&|[;\n|&]/u).at(-1).trim();
+  const tokens = segment.split(/\s+/u).filter(Boolean);
+  let i = 0;
+  if (tokens[i] === 'env') {
+    i += 1;
+    while (/^\w+=\S*$/u.test(tokens[i] ?? '')) i += 1;
+  }
+  if (!/(?:^|\/)(?:ba|da|z)?sh$/u.test(tokens[i] ?? '')) return false;
+  i += 1;
+  while (i < tokens.length) {
+    const token = tokens[i];
+    if (/^-\S*c$/u.test(token)) return i === tokens.length - 1;
+    if (/^(?:-[A-Za-z]*[oO]|--(?:option|shopt))$/u.test(token)) {
+      if (i + 1 >= tokens.length) return false;
+      i += 2;
+      continue;
+    }
+    if (!token.startsWith('-')) return false;
+    i += 1;
+  }
+  return false;
+}
+
+function shellHeredocBody(command, offset, body) {
+  const prefix = command.slice(0, offset);
+  const segment = prefix.split(/\|\||&&|[;\n|&]/u).at(-1).trim();
+  const tokens = segment.split(/\s+/u).filter(Boolean);
+  let i = 0;
+  if (tokens[i] === 'env') {
+    i += 1;
+    while (/^\w+=\S*$/u.test(tokens[i] ?? '')) i += 1;
+  }
+  return /(?:^|\/)(?:ba|da|z)?sh$/u.test(tokens[i] ?? '') ? `\n${body}\n` : ' ';
+}
+
+function commandSubstitutionBodies(text) {
+  const bodies = [];
+  for (let i = 0; i < text.length - 1; i += 1) {
+    if (text[i] === '\\') {
+      i += 1;
+      continue;
+    }
+    if (text[i] === '$' && text[i + 1] === '(') {
+      let depth = 1;
+      let j = i + 2;
+      let quote = null;
+      for (; j < text.length && depth > 0; j += 1) {
+        if (text[j] === '\\') {
+          j += 1;
+        } else if (quote !== null) {
+          if (text[j] === quote) quote = null;
+        } else if (text[j] === "'" || text[j] === '"' || text[j] === '`') {
+          quote = text[j];
+        } else if (text[j] === '$' && text[j + 1] === '(') {
+          depth += 1;
+          j += 1;
+        } else if (text[j] === '(') {
+          depth += 1;
+        } else if (text[j] === ')') {
+          depth -= 1;
+        }
+      }
+      if (depth === 0) {
+        bodies.push(text.slice(i + 2, j - 1));
+        i = j - 1;
+      }
+      continue;
+    }
+    if (text[i] === '`') {
+      let j = i + 1;
+      while (j < text.length) {
+        if (text[j] === '\\') {
+          j += 2;
+          continue;
+        }
+        if (text[j] === '`') break;
+        j += 1;
+      }
+      if (j < text.length) {
+        bodies.push(text.slice(i + 1, j));
+        i = j;
+      }
+    }
+  }
+  return bodies;
+}
+
+function decodeAnsiCWord(quoted) {
+  const text = quoted.slice(2, -1);
+  let decoded = '';
+  const simple = new Map([
+    ['a', '\x07'],
+    ['b', '\b'],
+    ['e', '\x1b'],
+    ['E', '\x1b'],
+    ['f', '\f'],
+    ['n', '\n'],
+    ['r', '\r'],
+    ['t', '\t'],
+    ['v', '\v'],
+    ['\\', '\\'],
+    ["'", "'"],
+    ['"', '"'],
+    ['?', '?'],
+  ]);
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] !== '\\' || i + 1 >= text.length) {
+      decoded += text[i];
+      continue;
+    }
+    const escaped = text[++i];
+    if (simple.has(escaped)) {
+      decoded += simple.get(escaped);
+      continue;
+    }
+    if (/[0-7]/u.test(escaped)) {
+      let digits = escaped;
+      while (digits.length < 3 && /[0-7]/u.test(text[i + 1] ?? '')) digits += text[++i];
+      decoded += String.fromCodePoint(Number.parseInt(digits, 8));
+      continue;
+    }
+    const widths = { x: 2, u: 4, U: 8 };
+    const width = widths[escaped];
+    if (width !== undefined) {
+      let digits = '';
+      while (digits.length < width && /[0-9A-Fa-f]/u.test(text[i + 1] ?? '')) digits += text[++i];
+      const point = Number.parseInt(digits, 16);
+      decoded += digits.length > 0 && Number.isSafeInteger(point) && point <= 0x10ffff ? String.fromCodePoint(point) : escaped;
+      continue;
+    }
+    if (escaped === 'c' && i + 1 < text.length) {
+      decoded += String.fromCodePoint(text[++i].toUpperCase().codePointAt(0) & 0x1f);
+      continue;
+    }
+    if (escaped !== '\n') decoded += `\\${escaped}`;
+  }
+  return decoded;
+}
 
 function quotedWord(quoted) {
-  const inner = quoted.startsWith("'") ? quoted.slice(1, -1) : quoted.slice(1, -1).replace(/\\(["\\$`])/gu, '$1');
+  const inner = quoted.startsWith("$'")
+    ? decodeAnsiCWord(quoted)
+    : quoted.startsWith("'")
+      ? quoted.slice(1, -1)
+      : quoted.slice(1, -1).replace(/\\(["\\$`])/gu, '$1');
   return /\s|[;&|]/u.test(inner) ? null : inner;
+}
+
+function normalizeUnquotedEscapes(text) {
+  const ESCAPED_SPACE = '\u0004';
+  let normalized = '';
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] !== '\\' || i + 1 >= text.length) {
+      normalized += text[i];
+      continue;
+    }
+    const next = text[i + 1];
+    if (next === '\n') {
+      i += 1;
+    } else if (next === ' ' || next === '\t') {
+      // An escaped blank stays inside one shell word. A command-string
+      // consumer (-c/eval/--call) restores it before scanning the payload.
+      normalized += ESCAPED_SPACE;
+      i += 1;
+    } else if (/[;&|$`]/u.test(next)) {
+      // Keep escaped shell structure visibly escaped; splitSegments masks it.
+      normalized += `\\${next}`;
+      i += 1;
+    } else {
+      normalized += next;
+      i += 1;
+    }
+  }
+  return normalized;
+}
+
+function endsWithExecutableString(scanned) {
+  if (endsWithShellC(scanned)) return true;
+  const segment = scanned.split(/\|\||&&|[;\n|&]/u).at(-1).trim();
+  const tokens = commandAfterPrefixes(segment).split(/\s+/u).filter(Boolean);
+  if (tokens[0]?.split('/').at(-1) === 'eval' && tokens.length === 1) return true;
+  const npmAt = tokens.findIndex((token) => token.split('/').at(-1) === 'npm');
+  if (npmAt < 0) return false;
+  const execAt = tokens.findIndex((token, index) => index > npmAt && (token === 'exec' || token === 'x'));
+  return execAt >= 0 && /^-(?:c|-call)$/u.test(tokens.at(-1) ?? '');
+}
+
+function commandStringPayloads(command) {
+  const ESCAPED_SPACE = '\u0004';
+  const restore = (value) => value?.replaceAll(ESCAPED_SPACE, ' ');
+  const payloads = [];
+  for (const segment of splitSegments(command)) {
+    const executable = commandAfterPrefixes(segment);
+    const tokens = executable.split(/\s+/u).filter(Boolean);
+    const commandName = tokens[0]?.split('/').at(-1);
+    if (commandName === 'eval' && tokens.length > 1) payloads.push(restore(tokens.slice(1).join(' ')));
+    if (/(?:^|\/)(?:ba|da|z)?sh$/u.test(tokens[0] ?? '')) {
+      for (let i = 1; i < tokens.length - 1; i += 1) {
+        if (tokens[i] === '-c' || /^-[A-Za-z]*c$/u.test(tokens[i])) {
+          payloads.push(restore(tokens[i + 1]));
+          break;
+        }
+        if (/^(?:-[A-Za-z]*[oO]|--(?:option|shopt))$/u.test(tokens[i])) i += 1;
+      }
+    }
+    const npmAt = tokens.findIndex((token) => token.split('/').at(-1) === 'npm');
+    const execAt = tokens.findIndex((token, index) => index > npmAt && (token === 'exec' || token === 'x'));
+    if (npmAt >= 0 && execAt >= 0) {
+      for (let i = execAt + 1; i < tokens.length; i += 1) {
+        if (tokens[i] === '-c' || tokens[i] === '--call') {
+          if (tokens[i + 1] !== undefined) payloads.push(restore(tokens[i + 1]));
+          break;
+        }
+        if (tokens[i].startsWith('--call=')) {
+          payloads.push(restore(tokens[i].slice('--call='.length)));
+          break;
+        }
+      }
+    }
+  }
+  return payloads.filter(Boolean);
+}
+
+function isWordCharacter(character) {
+  return character !== undefined && !/[\s;&|]/u.test(character);
+}
+
+function followsEnvCommand(scanned) {
+  const tokens = scanned
+    .split(/\|\||&&|[;\n|&]/u)
+    .at(-1)
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean);
+  const envAt = tokens.findLastIndex((token) => /(?:^|\/)env$/u.test(token));
+  if (envAt < 0) return false;
+  return tokens.slice(envAt + 1).every((token) => token.startsWith('-') || /^\w+=\S*$/u.test(token));
 }
 
 // Quoting an argv word does not make it inert: `npm run "ci"` and
@@ -196,7 +455,7 @@ function quotedWord(quoted) {
 // Preserve only words occupying a command or script slot; quoted prose passed
 // to `git commit -m` or `gh pr create --body` remains blanked below.
 function isExecutableQuotedWord(scanned, word) {
-  if (!word) return false;
+  if (word === null) return false;
   const segment = scanned.split(/\|\||&&|[;\n|&]/u).at(-1).trim();
   const tokens = segment.split(/\s+/u).filter(Boolean);
   if (tokens.length === 0) {
@@ -214,11 +473,13 @@ function isExecutableQuotedWord(scanned, word) {
     const rest = tokens.slice(npmAt + 1);
     const aliasAt = rest.findIndex((token) => NPM_RUN_ALIASES.has(token));
     const candidates = aliasAt >= 0 ? rest.slice(aliasAt + 1) : rest;
-    if (!candidates.some((token) => !token.startsWith('-'))) return true;
+    if (firstNpmScriptToken(candidates) === undefined) return true;
   }
 
   const last = tokens.at(-1);
+  if (/^\w+=\S*$/u.test(word) && followsEnvCommand(scanned)) return true;
   if (last === 'npx' && /^(vitest|playwright|test-storybook)$/u.test(word)) return true;
+  if (last === '--run' && tokens.some((token) => /(?:^|\/)node$/u.test(token))) return true;
   return /(?:^|\/)(?:node|electron)$/u.test(last ?? '') && word === '--test';
 }
 
@@ -228,28 +489,56 @@ function isExecutableQuotedWord(scanned, word) {
 // `bash -c "npm run test:e2e"` is blanked before its inner text is inspected.
 export function stripInertText(command) {
   let scanned = '';
-  let rest = command.replace(/<<-?\s*(["']?)([A-Za-z_][A-Za-z0-9_]*)\1[\s\S]*?(\n\2(?=\n|$)|$)/gu, ' ');
-  for (let i = 0; i < 200; i += 1) {
+  let rest = command.replace(
+    /<<-?\s*(["']?)([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*\n([\s\S]*?)(?:\n\2(?=\n|$)|$)/gu,
+    (match, quote, delimiter, body, offset) => shellHeredocBody(command, offset, body),
+  );
+  for (;;) {
     const match = QUOTED.exec(rest);
     if (!match) break;
     const quoted = match[0];
     scanned += rest.slice(0, match.index);
     rest = rest.slice(match.index + quoted.length);
-    if (SHELL_C_TAIL.test(scanned)) {
-      const inner = quoted.startsWith("'") ? quoted.slice(1, -1) : quoted.slice(1, -1).replace(/\\(["\\$`])/gu, '$1');
+    if (endsWithExecutableString(scanned)) {
+      const inner = quoted.startsWith("$'")
+        ? decodeAnsiCWord(quoted)
+        : quoted.startsWith("'")
+          ? quoted.slice(1, -1)
+          : quoted.slice(1, -1).replace(/\\(["\\$`])/gu, '$1');
       rest = `${inner}${rest}`;
-    } else if (isExecutableQuotedWord(scanned, quotedWord(quoted))) {
-      scanned += quotedWord(quoted);
+      scanned += '\n';
     } else {
-      scanned += quoted.startsWith("'") ? "''" : '""';
+      const substitutions = quoted.startsWith('"') ? commandSubstitutionBodies(quoted.slice(1, -1)) : [];
+      if (substitutions.length > 0) {
+        rest = `${substitutions.join('\n')}${rest}`;
+        scanned += '""\n';
+      } else if (isWordCharacter(scanned.at(-1)) || isWordCharacter(rest[0])) {
+        // Shell quote removal concatenates adjacent fragments into one argv
+        // word: c""i and "c"i both become ci. Preserve such fragments rather
+        // than leaving quote bytes that hide executable or script names.
+        const word = quotedWord(quoted);
+        scanned += word ?? (quoted.startsWith("'") ? "''" : '""');
+      } else if (isExecutableQuotedWord(scanned, quotedWord(quoted))) {
+        scanned += quotedWord(quoted);
+      } else {
+        scanned += quoted.startsWith("'") ? "''" : '""';
+      }
     }
   }
-  return scanned + rest;
+  const effective = normalizeUnquotedEscapes(scanned + rest);
+  const substitutions = commandSubstitutionBodies(effective);
+  const payloads = commandStringPayloads(effective);
+  const promoted = [...substitutions, ...payloads];
+  return promoted.length > 0 ? `${effective}\n${promoted.join('\n')}` : effective;
 }
 
 // Codex's shell tool submits argv arrays; the patterns match command text.
 export function normalizeCommand(command) {
-  if (Array.isArray(command) && command.every((part) => typeof part === 'string')) return command.join(' ');
+  if (Array.isArray(command) && command.every((part) => typeof part === 'string')) {
+    return command
+      .map((part) => (/^[A-Za-z0-9_./:=+-]+$/u.test(part) ? part : `"${part.replace(/\\/gu, '\\\\').replace(/"/gu, '\\"').replace(/[$`]/gu, '\\$&')}"`))
+      .join(' ');
+  }
   return command;
 }
 
@@ -257,6 +546,22 @@ export function normalizeCommand(command) {
 // is the same run as `npm run test:e2e`, and a matcher that only knows `run`
 // blocks one and waves the other through.
 const NPM_RUN_ALIASES = new Set(['run', 'run-script', 'rum', 'urn']);
+const NPM_OPTIONS_WITH_OPERANDS = new Set(['-w', '--workspace', '--prefix', '--userconfig', '--cache', '--registry', '--scope', '--tag', '--otp']);
+const NPM_IMPLICIT_SCRIPTS = new Set(['test', 'start', 'stop', 'restart']);
+
+function firstNpmScriptToken(tokens) {
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token === '--') continue;
+    if (NPM_OPTIONS_WITH_OPERANDS.has(token)) {
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('-')) continue;
+    return token;
+  }
+  return undefined;
+}
 
 /**
  * The script names an npm invocation would run, per shell segment.
@@ -278,10 +583,148 @@ export function npmScriptNames(command) {
     const rest = tokens.slice(start + 1);
     const aliasAt = rest.findIndex((token) => NPM_RUN_ALIASES.has(token));
     const candidates = aliasAt >= 0 ? rest.slice(aliasAt + 1) : rest;
-    const script = candidates.find((token) => !token.startsWith('-'));
+    const script = firstNpmScriptToken(candidates);
+    if (aliasAt < 0 && !NPM_IMPLICIT_SCRIPTS.has(script)) continue;
     if (script !== undefined) names.push(script);
   }
   return names;
+}
+
+const OTHER_PACKAGE_MANAGERS = new Set(['pnpm', 'yarn', 'bun']);
+const OTHER_PACKAGE_OPTIONS_WITH_OPERANDS = new Set([
+  '-C',
+  '-F',
+  '--cwd',
+  '--dir',
+  '--filter',
+  '--workspace',
+  '-w',
+]);
+
+function firstOtherPackageScriptToken(tokens) {
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token === '--') continue;
+    if (OTHER_PACKAGE_OPTIONS_WITH_OPERANDS.has(token)) {
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('-')) continue;
+    return token;
+  }
+  return undefined;
+}
+
+function otherPackageScriptToken(manager, tokens) {
+  let index = 0;
+  while (index < tokens.length) {
+    const token = tokens[index];
+    if (token === '--') {
+      index += 1;
+      break;
+    }
+    if (OTHER_PACKAGE_OPTIONS_WITH_OPERANDS.has(token)) {
+      index += 2;
+      continue;
+    }
+    if (token.startsWith('-')) {
+      index += 1;
+      continue;
+    }
+    break;
+  }
+  if (manager === 'yarn' && tokens[index] === 'workspace') {
+    index += 2; // selector plus workspace name
+    while (tokens[index]?.startsWith('-')) index += 1;
+  }
+  if (tokens[index] === 'run' || tokens[index] === 'run-script') index += 1;
+  return firstOtherPackageScriptToken(tokens.slice(index));
+}
+
+// pnpm, Yarn and Bun all expose package scripts as `run <script>` and also
+// accept a direct script spelling. They share the same heavy-lane policy as
+// npm; otherwise changing package manager would silently remove admission.
+export function otherPackageScriptNames(command) {
+  const names = [];
+  for (const segment of splitSegments(command)) {
+    const tokens = segment.split(/\s+/u).filter(Boolean);
+    const start = tokens.findIndex((token) => OTHER_PACKAGE_MANAGERS.has(token.split('/').at(-1)));
+    if (start < 0) continue;
+    const manager = tokens[start].split('/').at(-1);
+    const rest = tokens.slice(start + 1);
+    const script = otherPackageScriptToken(manager, rest);
+    if (script !== undefined) names.push(script);
+  }
+  return names;
+}
+
+const TEST_BINARIES = new Set(['vitest', 'c8', 'playwright', 'test-storybook']);
+const EXEC_OPTIONS_WITH_OPERANDS = new Set([...NPM_OPTIONS_WITH_OPERANDS, ...OTHER_PACKAGE_OPTIONS_WITH_OPERANDS, '--package', '-p']);
+
+function skipCliOptions(tokens, start, optionsWithOperands) {
+  let index = start;
+  while (index < tokens.length) {
+    const token = tokens[index];
+    if (token === '--') return index + 1;
+    if (optionsWithOperands.has(token)) {
+      index += 2;
+      continue;
+    }
+    if (token.startsWith('-')) {
+      index += 1;
+      continue;
+    }
+    break;
+  }
+  return index;
+}
+
+function directTestBinaryThroughExec(segment) {
+  const tokens = segment.split(/\s+/u).filter(Boolean);
+  const command = tokens[0]?.split('/').at(-1);
+  if (command === 'npx' || command === 'bunx') {
+    const binaryAt = skipCliOptions(tokens, 1, EXEC_OPTIONS_WITH_OPERANDS);
+    return TEST_BINARIES.has(tokens[binaryAt]?.split('/').at(-1));
+  }
+  if (!['npm', 'pnpm', 'yarn', 'bun'].includes(command)) return false;
+  const options = EXEC_OPTIONS_WITH_OPERANDS;
+  const verbAt = skipCliOptions(tokens, 1, options);
+  if (!['exec', 'x', 'dlx'].includes(tokens[verbAt])) return false;
+  const binaryAt = skipCliOptions(tokens, verbAt + 1, options);
+  return TEST_BINARIES.has(tokens[binaryAt]?.split('/').at(-1));
+}
+
+function packageScriptNames(command) {
+  return [...npmScriptNames(command), ...nodeRunScriptNames(command), ...otherPackageScriptNames(command)];
+}
+
+// Node >=22 exposes package.json scripts through `node --run <script>` and
+// `node --run=<script>`. Those spellings have the same admission policy as npm.
+export function nodeRunScriptNames(command) {
+  const names = [];
+  for (const segment of splitSegments(command)) {
+    const tokens = segment.split(/\s+/u).filter(Boolean);
+    const start = tokens.findIndex((token) => /(?:^|\/)node$/u.test(token));
+    if (start < 0) continue;
+    const rest = tokens.slice(start + 1);
+    for (let i = 0; i < rest.length; i += 1) {
+      const token = rest[i];
+      if (token.startsWith('--run=')) {
+        const script = token.slice('--run='.length);
+        if (script) names.push(script);
+        break;
+      }
+      if (token === '--run' && rest[i + 1] !== undefined) {
+        names.push(rest[i + 1]);
+        break;
+      }
+    }
+  }
+  return names;
+}
+
+function isUnguardedInnerScript(command) {
+  return packageScriptNames(command).some((script) => /:(?:run|inner)$/u.test(script));
 }
 
 /**
@@ -293,7 +736,7 @@ export function npmScriptNames(command) {
  * themselves count here.
  */
 export function heavyLaneFor(command) {
-  for (const script of npmScriptNames(command)) {
+  for (const script of packageScriptNames(command)) {
     const lane = HEAVY_LANES.find((entry) => entry.pattern.test(script));
     if (lane) return lane;
   }
@@ -306,7 +749,62 @@ export function heavyLaneFor(command) {
   return null;
 }
 
-export function evaluateCommand(command, { env = process.env, now = Date.now() } = {}) {
+function commandAfterPrefixes(segment) {
+  const tokens = segment.split(/\s+/u).filter(Boolean);
+  let index = 0;
+  while (index < tokens.length) {
+    while (/^\w+=\S*$/u.test(tokens[index] ?? '')) index += 1;
+    const command = tokens[index]?.split('/').at(-1);
+    if (command === 'command') {
+      if (tokens.slice(index + 1).some((token) => token === '-v' || token === '-V')) break;
+      index += 1;
+      while (tokens[index]?.startsWith('-')) index += 1;
+      continue;
+    }
+    if (command === 'time' || command === 'nohup') {
+      index += 1;
+      while (tokens[index]?.startsWith('-')) index += 1;
+      continue;
+    }
+    if (command === 'nice') {
+      index += 1;
+      while (tokens[index]?.startsWith('-')) {
+        const option = tokens[index++];
+        if ((option === '-n' || option === '--adjustment') && index < tokens.length) index += 1;
+      }
+      continue;
+    }
+    if (command === 'exec') {
+      index += 1;
+      while (tokens[index]?.startsWith('-')) {
+        const option = tokens[index++];
+        if (option === '-a' && index < tokens.length) index += 1;
+      }
+      continue;
+    }
+    if (command === 'env') {
+      index += 1;
+      while (index < tokens.length) {
+        const token = tokens[index];
+        if (/^\w+=\S*$/u.test(token)) {
+          index += 1;
+          continue;
+        }
+        if (token.startsWith('-')) {
+          index += 1;
+          if (/^(?:-u|--unset|--chdir|-C)$/u.test(token) && index < tokens.length) index += 1;
+          continue;
+        }
+        break;
+      }
+      continue;
+    }
+    break;
+  }
+  return tokens.slice(index).join(' ');
+}
+
+export function evaluateCommand(command) {
   if (typeof command !== 'string' || command.length === 0) return { allow: true };
   const effective = stripInertText(command);
 
@@ -315,13 +813,13 @@ export function evaluateCommand(command, { env = process.env, now = Date.now() }
   }
 
   const lane = heavyLaneFor(effective);
-  if (lane && !readGrant(lane.id, env, now)) {
+  if (lane) {
     return {
       allow: false,
       reason:
         `Blocked the "${lane.id}" lane: ${lane.why}, and on a small machine several of these in parallel across repos and ` +
         `agents is what exhausts memory. Agents do not run it locally by default. ${GUIDANCE} ` +
-        `If a local run is genuinely required, ask the owner to run: node tools/agent-guard/arbiter.mjs grant ${lane.id} --minutes 30`,
+        'If a local run is genuinely required, the owner can run it directly from their own terminal; agent sessions cannot receive forgeable local grants.',
     };
   }
 
@@ -331,9 +829,28 @@ export function evaluateCommand(command, { env = process.env, now = Date.now() }
   // `node run-guarded.mjs -- npm run lint && node --test …`: the sanctioned
   // call is real, and the blocked binary rides along beside it.
   for (const segment of splitSegments(effective)) {
-    if (WRAPPER_SEGMENT.test(segment)) continue;
+    const executableSegment = commandAfterPrefixes(segment);
+    if (ANY_WRAPPER_SEGMENT.test(executableSegment) && !WRAPPER_SEGMENT.test(executableSegment)) {
+      return {
+        allow: false,
+        reason: `Blocked a non-canonical run-guarded.mjs path: only the repository guard may claim the wrapper exemption. ${USE_ENTRYPOINT}`,
+      };
+    }
+    if (WRAPPER_SEGMENT.test(executableSegment)) continue;
+    if (directTestBinaryThroughExec(executableSegment)) {
+      return {
+        allow: false,
+        reason: `Blocked direct test-binary invocation through a package-manager exec shim: it bypasses the machine-scoped memory guard. ${USE_ENTRYPOINT}`,
+      };
+    }
+    if (isUnguardedInnerScript(segment)) {
+      return {
+        allow: false,
+        reason: `Blocked unguarded inner package script: it bypasses the machine-scoped memory guard. ${USE_ENTRYPOINT}`,
+      };
+    }
     for (const { pattern, what, reason } of BLOCKED) {
-      if (pattern.test(segment)) {
+      if (pattern.test(executableSegment)) {
         return {
           allow: false,
           reason: reason ?? `Blocked ${what}: it bypasses the machine-scoped memory guard. ${USE_ENTRYPOINT}`,

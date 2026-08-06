@@ -44,6 +44,11 @@ describe('platform memory probes', () => {
     assert.equal(pageSize, 4096);
   });
 
+  test('vm_stat accepts the current macOS compressor label', () => {
+    const current = VM_STAT.replace('Pages occupying compressor', 'Pages occupied by compressor');
+    assert.equal(parseVmStat(current).compressedMb, Math.round((41000 * 16384) / (1024 * 1024)));
+  });
+
   test('sysctl swapusage parses the M suffix', () => {
     assert.deepEqual(parseSwapusage(SWAPUSAGE), { swapTotalMb: 7168, swapUsedMb: 6090 });
   });
@@ -279,5 +284,11 @@ describe('lease accounting helpers', () => {
     assert.equal(outstandingMb(leases), 3000);
     // A run that overshot its own estimate contributes zero, never a negative.
     assert.equal(unmaterializedMb(leases), 750);
+  });
+
+  test('malformed observed usage cannot manufacture admission headroom', () => {
+    for (const observedMb of ['1024', Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      assert.equal(unmaterializedMb([{ estimatedMb: 2048, observedMb }]), 2048);
+    }
   });
 });

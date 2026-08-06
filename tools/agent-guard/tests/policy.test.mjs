@@ -1,6 +1,6 @@
 // Who may run what: the CI exemption, the agent-vs-human boundary, the
-// heavy-lane table, out-of-band grants, and the command hook that enforces all
-// of it across three harnesses.
+// heavy-lane table, non-delegable human boundary, and the command hook that
+// enforces all of it across three harnesses.
 
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
 
-import { evaluateCommand, heavyLaneFor, normalizeCommand, npmScriptNames, resolveExecutionDir, splitSegments, stripInertText } from '../guard-agent-command.mjs';
+import { evaluateCommand, heavyLaneFor, nodeRunScriptNames, normalizeCommand, npmScriptNames, otherPackageScriptNames, resolveExecutionDir, splitSegments, stripInertText } from '../guard-agent-command.mjs';
 import { classifyLane, evaluateLanePolicy, harnessName, isAgentSession, isCi, listGrants, readGrant, revokeGrant, writeGrant } from '../lib/policy.mjs';
 import { ensureStateDirs } from '../lib/protocol.mjs';
 
@@ -86,7 +86,7 @@ describe('lane policy', () => {
     const verdict = evaluateLanePolicy({ label: 'test:e2e', env: { ...env, CLAUDECODE: '1' } });
     assert.equal(verdict.allowed, false);
     assert.match(verdict.message, /Push the branch and let GitHub CI verify/u);
-    assert.match(verdict.message, /arbiter\.mjs grant e2e/u);
+    assert.match(verdict.message, /owner can run it directly/u);
   });
 
   test('the owner is never refused by policy', () => {
@@ -98,11 +98,11 @@ describe('lane policy', () => {
     assert.equal(evaluateLanePolicy({ label: 'test:dom', env: { ...env, CLAUDECODE: '1' } }).allowed, true);
   });
 
-  test('an owner grant admits the agent for that lane only', () => {
+  test('a same-user grant file never admits an agent', () => {
     writeGrant({ laneId: 'e2e', minutes: 30, env });
     const agent = { ...env, CLAUDECODE: '1' };
-    assert.equal(evaluateLanePolicy({ label: 'test:e2e', env: agent }).allowed, true);
-    assert.equal(evaluateLanePolicy({ label: 'test:stories:ci', env: agent }).allowed, false, 'a grant is per lane, not a blanket pass');
+    assert.equal(evaluateLanePolicy({ label: 'test:e2e', env: agent }).allowed, false);
+    assert.equal(evaluateLanePolicy({ label: 'test:stories:ci', env: agent }).allowed, false);
   });
 });
 
@@ -124,8 +124,9 @@ describe('grants', () => {
   test('grants can be listed and revoked', () => {
     writeGrant({ laneId: 'e2e', minutes: 30, env });
     assert.equal(listGrants(env).length, 1);
-    revokeGrant('e2e', env);
+    assert.equal(revokeGrant('e2e', env), true);
     assert.equal(listGrants(env).length, 0);
+    assert.equal(revokeGrant('e2e', env), false, 'a missing grant is not reported as revoked');
   });
 
   test('a missing grant is null, not a crash', () => {
@@ -150,7 +151,30 @@ describe('command hook', () => {
       'node --test .test-dist-dom/index.js',
       'npx playwright test',
       'test-storybook --ci',
+      './node_modules/.bin/vitest run src/example.test.ts',
+      'node_modules/.bin/c8 node script.js',
+      'npm exec -- vitest run src/example.test.ts',
+      'npm x -- c8 node script.js',
+      'npm --silent exec -- vitest',
+      'npm --workspace app exec -- vitest',
+      'pnpm exec vitest',
+      'pnpm dlx vitest',
+      'yarn exec vitest',
+      'yarn dlx vitest',
+      'bunx vitest',
+      'bun x vitest',
+      'npx --package vitest vitest',
+      'nice vitest',
+      'nice -n 5 vitest',
+      'nohup vitest',
+      'exec vitest',
+      'time npx vitest',
+      'env FOO=1 npx c8 vitest run',
+      'command ./node_modules/.bin/vitest run src/example.test.ts',
       'npm run test:dom:run',
+      'npm run-script test:inner',
+      'npm rum test:inner',
+      'npm run -w pkg test:inner',
     ]) {
       assert.equal(evaluateCommand(command, opts()).allow, false, `expected the hook to deny: ${command}`);
     }
@@ -168,18 +192,19 @@ describe('command hook', () => {
 
     assert.equal(evaluateCommand('AGENT_GUARD_ASSUME_HUMAN=1 npm run test:e2e', opts()).allow, false);
     assert.equal(evaluateCommand('AGENT_GUARD_STATE_DIR=/tmp/mine npm run test:dom', opts()).allow, false);
+    assert.equal(evaluateCommand('CI=true npm test', opts()).allow, false);
   });
 
   test('an agent cannot grant itself the opt-in', () => {
     const verdict = evaluateCommand('node tools/agent-guard/arbiter.mjs grant e2e --minutes 60', opts());
     assert.equal(verdict.allow, false);
-    assert.match(verdict.reason, /is not permission/u);
+    assert.match(verdict.reason, /cannot authenticate human approval/u);
   });
 
-  test('an owner grant unblocks the lane at the hook too', () => {
+  test('a forged grant does not unblock the lane at the hook', () => {
     assert.equal(evaluateCommand('npm run test:e2e', opts()).allow, false);
     writeGrant({ laneId: 'e2e', minutes: 30, env });
-    assert.equal(evaluateCommand('npm run test:e2e', opts()).allow, true);
+    assert.equal(evaluateCommand('npm run test:e2e', opts()).allow, false);
   });
 
   test('ordinary development commands are untouched', () => {
@@ -192,6 +217,7 @@ describe('command hook', () => {
       'node tools/agent-guard/arbiter.mjs status',
       'grep -rn perf src/',
       'ls e2e/',
+      'npm ci',
     ]) {
       assert.equal(evaluateCommand(command, opts()).allow, true, `expected the hook to allow: ${command}`);
     }
@@ -215,6 +241,10 @@ describe('command hook', () => {
 
   test('merely naming the wrapper does not sanction a segment', () => {
     assert.equal(evaluateCommand('echo "see run-guarded.mjs" && node --test x.js', opts()).allow, false);
+    assert.equal(evaluateCommand('node fake-run-guarded.mjs -- npx vitest', opts()).allow, false);
+    assert.equal(evaluateCommand('env FOO=1 node fake-run-guarded.mjs -- npx vitest', opts()).allow, false);
+    assert.equal(evaluateCommand('time node fake-run-guarded.mjs -- npx vitest', opts()).allow, false);
+    assert.equal(evaluateCommand('command node fake-run-guarded.mjs -- npx vitest', opts()).allow, false);
   });
 
   // PR #139 review, P1: npm's own aliases and option forms walked past the
@@ -227,6 +257,26 @@ describe('command hook', () => {
       'npm run --silent test:e2e',
       'npm --silent run test:stories:ci',
       'npm --workspace pkg run test:e2e',
+      'npm run -w pkg ci',
+      'npm run --workspace pkg test:e2e',
+      'node --run ci',
+      'node --run=test:e2e',
+    ]) {
+      assert.equal(evaluateCommand(command, opts()).allow, false, `expected the hook to deny: ${command}`);
+    }
+  });
+
+  test('heavy lanes are caught under other package managers', () => {
+    for (const command of [
+      'pnpm run test:e2e',
+      'pnpm --filter app run ci',
+      'yarn run test:stories:ci',
+      'yarn test:cov',
+      'bun run test:perf',
+      'yarn workspace app test:e2e',
+      'yarn workspace app run test:e2e',
+      'bun -F app test:e2e',
+      'bun --filter=app test:e2e',
     ]) {
       assert.equal(evaluateCommand(command, opts()).allow, false, `expected the hook to deny: ${command}`);
     }
@@ -240,6 +290,13 @@ describe('command hook', () => {
       'npx "playwright" test',
       'node "--test" tests/example.test.mjs',
       'bash -lc "npm run \\"ci\\""',
+      'node --run "ci"',
+      'npm run c""i',
+      'npm run "c"i',
+      'n\\pm run c\\i',
+      "npm run $'ci'",
+      "npm run $'\\x63\\x69'",
+      "n$'px' vitest",
     ]) {
       assert.equal(evaluateCommand(command, opts()).allow, false, `expected the hook to deny: ${command}`);
     }
@@ -261,17 +318,67 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('gh pr create --body "vitest"', opts()).allow, true);
   });
 
+  test('direct-binary names in non-executable positions remain ordinary text', () => {
+    assert.equal(evaluateCommand('rg vitest', opts()).allow, true);
+    assert.equal(evaluateCommand('npm run lint -- --grep vitest', opts()).allow, true);
+  });
+
   test('a nested shell payload IS an invocation and is unwrapped', () => {
     assert.equal(evaluateCommand('bash -lc "npm run test:e2e"', opts()).allow, false);
+    assert.equal(evaluateCommand('/bin/bash -lc "npm run test:e2e"', opts()).allow, false);
+    assert.equal(evaluateCommand('bash -o pipefail -c "npm run test:e2e"', opts()).allow, false);
+    assert.equal(evaluateCommand('bash -euxo pipefail -c "npm run test:e2e"', opts()).allow, false);
+    assert.equal(evaluateCommand('bash -c "npx vitest"', opts()).allow, false);
+    assert.equal(evaluateCommand('sh -c "vitest run"', opts()).allow, false);
+    assert.equal(evaluateCommand('bash -c npx\\ vitest', opts()).allow, false);
+  });
+
+  test('eval and package-manager command strings are scanned as commands', () => {
+    assert.equal(evaluateCommand("eval 'npm run ci'", opts()).allow, false);
+    assert.equal(evaluateCommand("eval 'node --test'", opts()).allow, false);
+    assert.equal(evaluateCommand('npm exec -c "npx vitest"', opts()).allow, false);
+    assert.equal(evaluateCommand("npm exec --call 'vitest'", opts()).allow, false);
+    assert.equal(evaluateCommand('npm exec --call=npx\\ vitest', opts()).allow, false);
   });
 
   test('a heredoc body is inert', () => {
     assert.equal(evaluateCommand('cat <<EOF\nnpm run test:e2e\nEOF', opts()).allow, true);
+    assert.equal(evaluateCommand('bash <<EOF\nnpm run test:e2e\nEOF', opts()).allow, false);
+    assert.equal(evaluateCommand("/bin/sh <<'EOF'\nnpx vitest\nEOF", opts()).allow, false);
   });
 
   test("Codex's argv arrays are normalized before matching", () => {
-    assert.equal(normalizeCommand(['bash', '-lc', 'npm run test:e2e']), 'bash -lc npm run test:e2e');
+    assert.equal(normalizeCommand(['bash', '-lc', 'npm run test:e2e']), 'bash -lc "npm run test:e2e"');
     assert.equal(evaluateCommand(normalizeCommand(['bash', '-lc', 'npm run test:e2e']), opts()).allow, false);
+    assert.equal(evaluateCommand(normalizeCommand(['git', 'commit', '-m', 'mention npm run ci']), opts()).allow, true);
+  });
+
+  test('command substitutions inside double quotes remain executable', () => {
+    assert.equal(evaluateCommand('echo "$(npm run ci)"', opts()).allow, false);
+    assert.equal(evaluateCommand('echo "$(npx vitest)"', opts()).allow, false);
+    assert.equal(evaluateCommand('echo "`npm run ci`"', opts()).allow, false);
+    assert.equal(evaluateCommand("echo '$(npm run ci)'", opts()).allow, true);
+    assert.equal(evaluateCommand('echo "\\$(npm run ci)"', opts()).allow, true);
+    assert.equal(evaluateCommand('echo "$(printf \'(\'; npx vitest)"', opts()).allow, false);
+  });
+
+  test('unquoted command substitutions remain executable', () => {
+    assert.equal(evaluateCommand('echo $(npm run ci)', opts()).allow, false);
+    assert.equal(evaluateCommand('foo=$(npx vitest)', opts()).allow, false);
+    assert.equal(evaluateCommand('echo `npm run ci`', opts()).allow, false);
+    assert.equal(evaluateCommand('echo \\`npm run ci\\`', opts()).allow, true);
+  });
+
+  test('quoted env operands cannot tamper with admission', () => {
+    assert.equal(evaluateCommand('env "CI=true" node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
+    assert.equal(evaluateCommand("env 'AGENT_GUARD_STATE_DIR=/tmp/private' npm test", opts()).allow, false);
+    assert.equal(evaluateCommand("env C$'I=true' node tools/agent-guard/run-guarded.mjs -- npm test", opts()).allow, false);
+  });
+
+  test('quote normalization has no attacker-controlled iteration cap', () => {
+    const padding = Array.from({ length: 250 }, () => '""').join(' ');
+    assert.equal(evaluateCommand(`${padding} npm run "ci"`, opts()).allow, false);
+    assert.equal(evaluateCommand(`${padding} npx "playwright" test`, opts()).allow, false);
   });
 
   test('a malformed command is allowed rather than bricking every shell call', () => {
@@ -286,6 +393,7 @@ describe('hook helpers', () => {
     assert.equal(resolveExecutionDir('/a', 'cd /b && npm test'), '/b');
     assert.equal(resolveExecutionDir('/a', 'npm test'), '/a');
     assert.equal(resolveExecutionDir('/a', 'cd sub && npm test'), path.resolve('/a', 'sub'));
+    assert.equal(resolveExecutionDir('/a', 'cd /b\nnpm test'), '/b');
   });
 
   test('quoted text is blanked while shell payloads are promoted', () => {
@@ -295,6 +403,7 @@ describe('hook helpers', () => {
 
   test('segments are split on every shell separator', () => {
     assert.deepEqual(splitSegments('a && b || c; d | e & f'), ['a', 'b', 'c', 'd', 'e', 'f']);
+    assert.deepEqual(splitSegments('a 2>&1 && b &>out & c'), ['a 2>&1', 'b &>out', 'c']);
   });
 
   test('npm script names survive aliases and interleaved options', () => {
@@ -302,11 +411,31 @@ describe('hook helpers', () => {
     assert.deepEqual(npmScriptNames('npm run-script test:e2e'), ['test:e2e']);
     assert.deepEqual(npmScriptNames('npm --silent run test:e2e'), ['test:e2e']);
     assert.deepEqual(npmScriptNames('npm --workspace pkg run test:e2e'), ['test:e2e']);
+    assert.deepEqual(npmScriptNames('npm run -w pkg ci'), ['ci']);
+    assert.deepEqual(npmScriptNames('npm run --workspace pkg test:e2e'), ['test:e2e']);
     assert.deepEqual(npmScriptNames('npm run lint -- --fix'), ['lint']);
     assert.deepEqual(npmScriptNames('npm test'), ['test']);
+    assert.deepEqual(npmScriptNames('npm ci'), []);
     // Each segment is scanned, so a second invocation cannot hide behind the first.
     assert.deepEqual(npmScriptNames('npm run lint && npm run test:e2e'), ['lint', 'test:e2e']);
     assert.deepEqual(npmScriptNames('git status'), []);
+  });
+
+  test('node --run script names share npm script classification', () => {
+    assert.deepEqual(nodeRunScriptNames('node --run ci'), ['ci']);
+    assert.deepEqual(nodeRunScriptNames('node --run=test:e2e'), ['test:e2e']);
+    assert.notEqual(heavyLaneFor('node --run ci'), null);
+    assert.notEqual(heavyLaneFor('node --run=test:e2e'), null);
+    assert.equal(evaluateCommand('node --run test:inner').allow, false);
+  });
+
+  test('other package-manager script names share npm classification', () => {
+    assert.deepEqual(otherPackageScriptNames('pnpm --filter app run test:e2e'), ['test:e2e']);
+    assert.deepEqual(otherPackageScriptNames('yarn test:stories:ci'), ['test:stories:ci']);
+    assert.deepEqual(otherPackageScriptNames('bun run ci'), ['ci']);
+    assert.deepEqual(otherPackageScriptNames('yarn workspace app test:e2e'), ['test:e2e']);
+    assert.deepEqual(otherPackageScriptNames('bun -F app test:e2e'), ['test:e2e']);
+    assert.notEqual(heavyLaneFor('pnpm run test:e2e'), null);
   });
 
   test('heavy-lane matching on a raw command line does not fire on prose', () => {

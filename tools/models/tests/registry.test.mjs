@@ -37,7 +37,10 @@ test('an unverified slot may not carry a model name', () => {
 test('a verified or seeded slot must actually name a model', () => {
   const r = clone(base());
   r.tiers.T2.vendors.anthropic.build = { model: null, reasoning: 'medium', status: 'verified' };
-  assert.match(validateRegistry(r).join('\n'), /claims status verified but names no model/);
+  assert.match(validateRegistry(r).join('\n'), /claims status verified but must name both model and reasoning/);
+  r.tiers.T1.vendors.openai.build.model = 'gpt-example';
+  r.tiers.T1.vendors.openai.build.reasoning = null;
+  assert.match(validateRegistry(r).join('\n'), /claims status verified but must name both model and reasoning/);
 });
 
 test('a named model with nowhere to run it is rejected', () => {
@@ -113,6 +116,12 @@ test('unverified slots are rendered as unknown, not omitted', () => {
   const anthropic = rows.find((r) => r.vendor === 'anthropic');
   assert.match(anthropic.plan, /reasoning high/);
   assert.match(anthropic.plan, /provisional/, 'a hand-seeded slot must not read as confirmed');
+});
+
+test('routing fails explicitly when an exported caller supplies an invalid registry', () => {
+  const partial = clone(base());
+  delete partial.tiers.T1.vendors.openai;
+  assert.throws(() => routingFor(partial, 'T1'), /invalid model registry:.*missing vendor group openai/u);
 });
 
 test('staleness counts every slot, so nothing hides', () => {

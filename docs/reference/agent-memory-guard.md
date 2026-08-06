@@ -42,7 +42,9 @@ A run is granted only if all three hold:
 
 Leases heartbeat their real tree RSS, so a warmed-up run stops being counted
 twice — its resident memory is already reflected in what the kernel reports as
-available.
+available. After spawn, the lease follows the detached process group rather
+than the wrapper PID. If the wrapper is force-killed while descendants remain,
+their group stays live and continues holding the reservation.
 
 Reading the leases, deciding and taking the lease happen under one machine-wide
 mutex, so two runs starting at the same moment cannot both be admitted against
@@ -73,14 +75,10 @@ refusal in their own terminal. The hook blocks agents from using it: a run
 killed for real memory pressure is a real result, and reporting it is the
 expected behaviour.
 
-To let an agent run one heavy lane, briefly:
-
-```bash
-node tools/agent-guard/arbiter.mjs grant e2e --minutes 30
-```
-
-Grants are per lane, expire on their own, and cannot be created from an agent
-session — an opt-in an agent can write for itself is not an opt-in.
+Heavy lanes are not delegable back to an agent session. A local grant file
+would be writable by the same OS user as the agent and therefore cannot
+authenticate human intent. If a local run is required, the owner runs it
+directly from a non-agent terminal; otherwise the agent uses CI.
 
 ## Commands
 
@@ -89,9 +87,10 @@ node tools/agent-guard/arbiter.mjs status
 ```
 
 Machine limits, live availability and swap, every lease on the machine with the
-repo and harness holding it, and active grants. `check --rss-mb N` dry-runs an
-admission decision and exits non-zero when it would be refused; `doctor`
-verifies the probes and reports the resolved state directory.
+repo and harness holding it, and any legacy grant artifacts awaiting
+revocation. `check --rss-mb N` dry-runs an admission decision and exits
+non-zero when it would be refused; `doctor` verifies the probes and reports the
+resolved state directory.
 
 Wrapping a command:
 
