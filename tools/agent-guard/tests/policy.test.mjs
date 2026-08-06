@@ -190,6 +190,15 @@ describe('command hook', () => {
       'xargs --arg-file=inputs npx vitest',
       'xargs -I{} npx vitest {}',
       "printf x | xargs 'npx' vitest",
+      "printf 'ci\\n' | xargs npm run",
+      "printf 'vitest\\n' | xargs npx",
+      'find . -maxdepth 0 -exec npm run ci \\;',
+      'find . -maxdepth 0 -exec npx vitest {} +',
+      'node --require node:path node_modules/vitest/vitest.mjs run',
+      'node -r node:path node_modules/vitest/vitest.mjs run',
+      'node --import node:path node_modules/vitest/vitest.mjs run',
+      'node --require=node:path node_modules/vitest/vitest.mjs run',
+      "eval -- 'npx vitest'",
       'cat <(npx vitest)',
       'diff <(npm run ci) /dev/null',
       'tee >(npx vitest)',
@@ -221,8 +230,12 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('AGENT_GUARD_STATE_DIR=/tmp/mine npm run test:dom', opts()).allow, false);
     assert.equal(evaluateCommand('CI=true npm test', opts()).allow, false);
     assert.equal(evaluateCommand('env -i PATH=/usr/bin:/bin HOME=/tmp node tools/agent-guard/run-guarded.mjs --label test:e2e -- npm run test:e2e', opts()).allow, false);
+    assert.equal(evaluateCommand('env - PATH=/usr/bin:/bin HOME=/tmp node tools/agent-guard/run-guarded.mjs --label test:e2e -- npm run test:e2e', opts()).allow, false);
     assert.equal(evaluateCommand('env -u CODEX_THREAD_ID node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
     assert.equal(evaluateCommand('unset CLAUDECODE; node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
+    assert.equal(evaluateCommand('AI_AGENT= node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
+    assert.equal(evaluateCommand('CLAUDECODE=0 CLAUDE_CODE_ENTRYPOINT= node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
+    assert.equal(evaluateCommand('CODEX_THREAD_ID= node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
   });
 
   test('an agent cannot grant itself the opt-in', () => {
@@ -467,6 +480,7 @@ describe('hook helpers', () => {
     assert.deepEqual(resolveExecutionDirs('/outside', 'echo "(cd /tmp)"; cd project && npm run ci'), ['/outside', '/outside/project']);
     assert.deepEqual(resolveExecutionDirs('/outside', 'echo "$(cd /tmp)"; cd project && npm run ci'), ['/outside', '/tmp', '/outside/project']);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: "bash -c 'cd /project && npx vitest'" }, '/project').allow, false);
+    assert.equal(evaluateHookInput({ cwd: '/outside', command: "bash -c $'cd /project && npm run ci'" }, '/project').allow, false);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'command env -C /project npx vitest' }, '/project').allow, false);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'time env --chdir=/project npm run ci' }, '/project').allow, false);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'npm --prefix /project run ci' }, '/project').allow, false);
@@ -475,6 +489,9 @@ describe('hook helpers', () => {
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'pnpm -C /project run ci' }, '/project').allow, false);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'yarn --cwd /project run test:e2e' }, '/project').allow, false);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'bun --cwd=/project run coverage' }, '/project').allow, false);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'cd -P /project && npx vitest'), ['/outside', '/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'cd -L -e /project && npx vitest'), ['/outside', '/project']);
+    assert.equal(evaluateHookInput({ cwd: '/outside', command: 'cat <<EOF\ncd /project\nEOF\nnpm run ci' }, '/project').allow, true);
   });
 
   test('quoted text is blanked while shell payloads are promoted', () => {

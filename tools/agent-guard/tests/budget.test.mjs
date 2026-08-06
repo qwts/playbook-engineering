@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { SWAP_REFUSE_RATIO, clampCeiling, decideAdmission, deriveBudget, outstandingMb, unmaterializedMb } from '../lib/budget.mjs';
+import { SWAP_REFUSE_RATIO, clampCeiling, decideAdmission, deriveBudget, deriveBudgetForMemory, outstandingMb, unmaterializedMb } from '../lib/budget.mjs';
 import { parseMeminfo, parseSwapusage, parseVmStat, readMemoryStatus } from '../lib/system-memory.mjs';
 
 // Real output from the 8 GB machine during the incident this tool exists to
@@ -145,6 +145,10 @@ describe('budget derivation', () => {
     const budget = deriveBudget(2048);
     assert.ok(budget.machineBudgetMb >= 512);
     assert.ok(budget.maxRunMb >= 512);
+  });
+
+  test('the caller derives limits from the cgroup-adjusted memory total', () => {
+    assert.equal(deriveBudgetForMemory({ totalMb: 4096 }).maxRunMb, 1280);
   });
 });
 
