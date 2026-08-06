@@ -22,8 +22,9 @@ home rather than as duplicated runtime documentation.
 
 1. **One soul, one Agent Space.** An Agent Space is durable, secret-free local
    storage keyed by one transcript-bound `agent_<uuid>`. The Agent ID is a
-   lookup key and grants no authority. Reusing that Agent ID resolves the same
-   space; a newly minted or delegated Agent ID receives a different space.
+   lookup key and grants no authority. Reusing that Agent ID under the same
+   effective spaces root resolves the same space; a newly minted or delegated
+   Agent ID receives a different space.
 2. **Lifetime follows the soul, not its checkout.** The space survives
    worktree or scratchpad deletion, context compaction, session reuse, and
    execution-identity finalization. Finalization records provenance; it is not
@@ -33,11 +34,16 @@ home rather than as duplicated runtime documentation.
    command ships today, so spaces are not deleted or archived automatically.
    Retirement mechanics require separate runtime work before they can remove
    or relocate data.
-4. **Path selection is user-controlled and deterministic.** Resolution uses
-   `AGENT_BOT_SPACES_HOME/<agent-id>` when that override is present. Otherwise
-   it uses `$XDG_DATA_HOME/agent-bot/spaces/<agent-id>`, with XDG data home
-   defaulting to `~/.local/share`. Agents do not select arbitrary per-space
-   roots, and changing the configured root does not imply migration.
+4. **Path selection is user-controlled and deterministic.** Configured
+   `AGENT_BOT_SPACES_HOME` and `XDG_DATA_HOME` overrides must be non-empty
+   absolute paths. Resolution uses `AGENT_BOT_SPACES_HOME/<agent-id>` first,
+   then `$XDG_DATA_HOME/agent-bot/spaces/<agent-id>`, with XDG data home
+   defaulting to `~/.local/share`; empty values are treated as unset and fall
+   through. Through `0.x`, the runtime resolves a non-empty relative value
+   against the process working directory instead of falling back. That
+   compatibility behavior is not stable configuration and must be migrated to
+   an absolute override. Agents do not select arbitrary per-space roots, and
+   changing the configured root does not imply migration.
 5. **Agent Space is outside bot territory.** A space path does not become a bot
    checkout, commit-authority boundary, credential store, or `gh` identity
    boundary. Existing `.<tool>/worktrees` and recognized Claude scratchpad
