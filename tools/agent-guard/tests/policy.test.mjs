@@ -9,8 +9,8 @@ import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
 
 import { evaluateCommand, evaluateHookInput, heavyLaneFor, nodeRunScriptNames, normalizeCommand, npmScriptNames, otherPackageScriptNames, resolveExecutionDir, resolveExecutionDirs, splitSegments, stripInertText } from '../guard-agent-command.mjs';
-import { classifyLane, evaluateLanePolicy, harnessName, isAgentSession, isCi, listGrants, readGrant, revokeGrant, writeGrant } from '../lib/policy.mjs';
-import { ensureStateDirs } from '../lib/protocol.mjs';
+import { classifyLane, evaluateLanePolicy, harnessName, isAgentSession, isCi, isTrustedHostedCi, listGrants, readGrant, revokeGrant, writeGrant } from '../lib/policy.mjs';
+import { ensureStateDirs, stateDir } from '../lib/protocol.mjs';
 
 const roots = [];
 let env;
@@ -36,6 +36,24 @@ describe('CI exemption', () => {
   test('a local machine is not CI', () => {
     assert.equal(isCi({}), false);
     assert.equal(isCi({ CI: 'false' }), false);
+  });
+
+  test('only a process inside a GitHub-hosted workspace receives the bypass', () => {
+    const hosted = {
+      CI: 'true',
+      GITHUB_ACTIONS: 'true',
+      RUNNER_ENVIRONMENT: 'github-hosted',
+      GITHUB_WORKSPACE: '/home/runner/work/repo/repo',
+      RUNNER_TEMP: '/home/runner/work/_temp',
+    };
+    assert.equal(isTrustedHostedCi({ env: hosted, cwd: '/home/runner/work/repo/repo/subdir', platform: 'linux' }), true);
+    assert.equal(isTrustedHostedCi({ env: hosted, cwd: '/private/tmp/local-checkout', platform: 'linux' }), false);
+    assert.equal(isTrustedHostedCi({ env: { ...hosted, RUNNER_ENVIRONMENT: 'self-hosted' }, cwd: hosted.GITHUB_WORKSPACE, platform: 'linux' }), false);
+  });
+
+  test('production state cannot be redirected through process environment paths', () => {
+    assert.doesNotMatch(stateDir(process.env), /agent-guard-policy-/u);
+    assert.equal(stateDir({ ...process.env, AGENT_GUARD_STATE_DIR: env.AGENT_GUARD_STATE_DIR }), env.AGENT_GUARD_STATE_DIR);
   });
 });
 
@@ -384,6 +402,7 @@ describe('command hook', () => {
       "npm run $'ci'",
       "npm run $'\\x63\\x69'",
       "n$'px' vitest",
+      "ba\\sh -c 'npm run ci'",
     ]) {
       assert.equal(evaluateCommand(command, opts()).allow, false, `expected the hook to deny: ${command}`);
     }
@@ -456,6 +475,21 @@ describe('command hook', () => {
     assert.equal(evaluateCommand("python3 <<'PY'\nimport os\nos.system('npm run ci')\nPY", opts()).allow, false);
     assert.equal(evaluateCommand("node <<< \"require('node:child_process').execSync('npm run ci')\"", opts()).allow, false);
     assert.equal(evaluateCommand('printf x | node', opts()).allow, false);
+    assert.equal(evaluateCommand('cat <<FIRST <<SECOND\nnpm run ci\nFIRST\nnpx vitest\nSECOND', opts()).allow, true);
+  });
+
+  test('runtime option parsing cannot mistake option operands for scripts', () => {
+    assert.equal(evaluateCommand("python -qc 'import os; os.system(\"npm run ci\")'", opts()).allow, false);
+    assert.equal(evaluateCommand("python -Bc 'import os; os.system(\"npm run ci\")'", opts()).allow, false);
+    assert.equal(evaluateCommand('printf x | python -W ignore', opts()).allow, false);
+    assert.equal(evaluateCommand('printf x | python -X dev', opts()).allow, false);
+  });
+
+  test('runtime script files and tar command actions stay behind approval', () => {
+    assert.equal(evaluateCommand("printf 'npm run ci\\n' > /tmp/lane.sh && bash /tmp/lane.sh", opts()).allow, false);
+    assert.equal(evaluateCommand("printf 'child_process.execSync(\"npm run ci\")' > /tmp/lane.js && node /tmp/lane.js", opts()).allow, false);
+    assert.equal(evaluateCommand('python tools/task.py', opts()).allow, false);
+    assert.equal(evaluateCommand("tar -cf /tmp/a.tar --checkpoint=1 --checkpoint-action=exec='npm run ci' README.md", opts()).allow, false);
   });
 
   test('authoritative lease state is inaccessible to agent commands', () => {
@@ -464,6 +498,9 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('rm -rf ~/.cache/agent{-,}-guard/leases', opts()).allow, false);
     assert.equal(evaluateCommand('rm -rf ~/.cache/agent*-guard/leases', opts()).allow, false);
     assert.equal(evaluateCommand('rm -rf ~/.cache/agent-guard', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf ~/.cache/agent-guard/./leases', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf ~/.cache/agent-guard/foo/../leases', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf ~/.cache/agen[t]-guard/leases', opts()).allow, false);
     assert.equal(evaluateCommand('d=~/.cache/agent-guard; rm -rf "$d/leases"', opts()).allow, false);
     assert.equal(evaluateCommand('cat agent-health-guard/leases/live.json', opts()).allow, true);
     assert.equal(evaluateCommand('mkdir -p /tmp/agent-app-guard/leases', opts()).allow, true);
@@ -577,8 +614,8 @@ describe('hook helpers', () => {
     assert.equal(evaluateCommand("node --import='data:text/javascript,export default 1' script.js").allow, false);
     assert.equal(evaluateCommand("php -B 'system(\"npm run ci\");' < /dev/null").allow, false);
     assert.equal(evaluateCommand("php -E 'system(\"npm run ci\");' < /dev/null").allow, false);
-    assert.equal(evaluateCommand('perl -MFile::Spec script.pl').allow, true);
-    assert.equal(evaluateCommand('ruby -rbenchmark script.rb').allow, true);
+    assert.equal(evaluateCommand('perl -MFile::Spec script.pl').allow, false);
+    assert.equal(evaluateCommand('ruby -rbenchmark script.rb').allow, false);
     assert.equal(evaluateCommand('yarn workspace foo npm run ci').allow, false);
     assert.equal(evaluateCommand('taskset -c 0 npm run ci').allow, false);
   });
