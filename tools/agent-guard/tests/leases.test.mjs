@@ -184,18 +184,43 @@ describe('reaping', () => {
 // PR #139 review, P1: `AGENT_GUARDED=1` was enough to claim nesting, which
 // skipped the lease, the ceiling and the headroom check.
 describe('nested-run marker', () => {
-  test('only an id naming a held lease counts as nested', () => {
+  test('only an id naming a held lease in this process group counts as nested', () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 10_000)'], { detached: true, stdio: 'ignore' });
+    child.unref();
     const lease = acquireLease({ env, label: 'parent', estimatedMb: 512 });
-    assert.equal(leaseExists(lease.id, env), true);
-    assert.equal(leaseExists('1', env), false);
-    assert.equal(leaseExists(undefined, env), false);
-    assert.equal(leaseExists('', env), false);
+    try {
+      assert.equal(retargetLease(lease, { pid: child.pid, processGroupId: child.pid }), true);
+      assert.equal(leaseExists(lease.id, env, { processGroupId: child.pid }), true);
+      assert.equal(leaseExists(lease.id, env, { processGroupId: child.pid + 1 }), false, 'a copied live id is not transferable to another process group');
+      assert.equal(leaseExists('1', env, { processGroupId: child.pid }), false);
+      assert.equal(leaseExists(undefined, env, { processGroupId: child.pid }), false);
+      assert.equal(leaseExists('', env, { processGroupId: child.pid }), false);
+    } finally {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // The child may have exited independently.
+      }
+      releaseLease(lease);
+    }
   });
 
   test('the marker stops counting once the parent run ends', () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 10_000)'], { detached: true, stdio: 'ignore' });
+    child.unref();
     const lease = acquireLease({ env, label: 'parent', estimatedMb: 512 });
-    releaseLease(lease);
-    assert.equal(leaseExists(lease.id, env), false);
+    try {
+      assert.equal(retargetLease(lease, { pid: child.pid, processGroupId: child.pid }), true);
+      releaseLease(lease);
+      assert.equal(leaseExists(lease.id, env, { processGroupId: child.pid }), false);
+    } finally {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // The child may have exited independently.
+      }
+      releaseLease(lease);
+    }
   });
 });
 

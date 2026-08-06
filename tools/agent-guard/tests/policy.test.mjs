@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
 
-import { evaluateCommand, heavyLaneFor, nodeRunScriptNames, normalizeCommand, npmScriptNames, otherPackageScriptNames, resolveExecutionDir, splitSegments, stripInertText } from '../guard-agent-command.mjs';
+import { evaluateCommand, evaluateHookInput, heavyLaneFor, nodeRunScriptNames, normalizeCommand, npmScriptNames, otherPackageScriptNames, resolveExecutionDir, splitSegments, stripInertText } from '../guard-agent-command.mjs';
 import { classifyLane, evaluateLanePolicy, harnessName, isAgentSession, isCi, listGrants, readGrant, revokeGrant, writeGrant } from '../lib/policy.mjs';
 import { ensureStateDirs } from '../lib/protocol.mjs';
 
@@ -142,6 +142,12 @@ describe('command hook', () => {
       const verdict = evaluateCommand(command, opts());
       assert.equal(verdict.allow, false, `expected the hook to deny: ${command}`);
       assert.match(verdict.reason, /GitHub CI/u);
+    }
+  });
+
+  test('subshell grouping cannot hide a heavy lane or direct binary', () => {
+    for (const command of ['(npm run ci)', '(npm run test:e2e)', '(npx vitest)', '((npm run ci))', '(npx vitest) >/tmp/out', '{ npx vitest; }']) {
+      assert.equal(evaluateCommand(command, opts()).allow, false, `expected the hook to deny: ${command}`);
     }
   });
 
@@ -339,6 +345,11 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('npm exec -c "npx vitest"', opts()).allow, false);
     assert.equal(evaluateCommand("npm exec --call 'vitest'", opts()).allow, false);
     assert.equal(evaluateCommand('npm exec --call=npx\\ vitest', opts()).allow, false);
+    assert.equal(evaluateCommand("npm exec --call='npx vitest'", opts()).allow, false);
+    assert.equal(evaluateCommand("npm exec -c='npx vitest'", opts()).allow, false);
+    assert.equal(evaluateCommand("env -S 'npx vitest'", opts()).allow, false);
+    assert.equal(evaluateCommand("env --split-string='npx vitest'", opts()).allow, false);
+    assert.equal(evaluateCommand('env -S npx\\ vitest', opts()).allow, false);
   });
 
   test('a heredoc body is inert', () => {
@@ -394,6 +405,9 @@ describe('hook helpers', () => {
     assert.equal(resolveExecutionDir('/a', 'npm test'), '/a');
     assert.equal(resolveExecutionDir('/a', 'cd sub && npm test'), path.resolve('/a', 'sub'));
     assert.equal(resolveExecutionDir('/a', 'cd /b\nnpm test'), '/b');
+    assert.equal(resolveExecutionDir('/outside', 'cd /tmp && cd /project && npm run ci'), '/project');
+    assert.equal(evaluateHookInput({ cwd: '/outside', command: 'cd /tmp && cd /project && npm run ci' }, '/project').allow, false);
+    assert.equal(evaluateHookInput({ cwd: '/outside', command: 'cd /tmp && (cd /project && npm run ci)' }, '/project').allow, false);
   });
 
   test('quoted text is blanked while shell payloads are promoted', () => {
@@ -404,6 +418,7 @@ describe('hook helpers', () => {
   test('segments are split on every shell separator', () => {
     assert.deepEqual(splitSegments('a && b || c; d | e & f'), ['a', 'b', 'c', 'd', 'e', 'f']);
     assert.deepEqual(splitSegments('a 2>&1 && b &>out & c'), ['a 2>&1', 'b &>out', 'c']);
+    assert.deepEqual(splitSegments('((npm run ci))'), ['npm run ci']);
   });
 
   test('npm script names survive aliases and interleaved options', () => {

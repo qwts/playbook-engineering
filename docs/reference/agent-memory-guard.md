@@ -116,7 +116,7 @@ the machine is a failed test.
 | `AGENT_GUARD_WAIT_S` | How long to queue for headroom; humans default to 180, agents to 0 |
 | `AGENT_GUARD_FORCE` | Human escape hatch; blocked for agents |
 | `AGENT_GUARD_STATE_DIR` | Lease directory. **Tests only** — pointing a session elsewhere gives it a private budget nothing can see, which is the per-worktree bug again |
-| `AGENT_GUARDED` | Set by the guard for its own children, carrying the id of the lease it holds, so nested guarded scripts pass through. Honoured only when it names a live lease — a hand-supplied value is ignored and the run is guarded normally. Blocked for agents |
+| `AGENT_GUARDED` | Set by the guard for its own children, carrying the id of the lease it holds, so nested guarded scripts pass through. Honoured only when it names a live lease bound to the caller's own process group — a copied or hand-supplied value from an unrelated process is ignored and the run is guarded normally. Blocked for agents |
 
 ## Adopting it in a repo
 
