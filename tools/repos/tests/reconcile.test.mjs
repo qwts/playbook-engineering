@@ -222,6 +222,8 @@ test('the protected Git wrapper keeps destructive pushes behind normal approval'
     ['push', '--mirror', 'origin'],
     ['push', '--mir', 'origin'],
     ['push', '--pru', 'origin'],
+    ['push', '--exec=/tmp/receive-pack', '/tmp/remote', 'branch'],
+    ['push', '--receive-pack', '/tmp/receive-pack', '/tmp/remote', 'branch'],
     ['push', '--future-option', 'origin', 'branch'],
     ['push', 'origin', '+branch:branch'],
     ['push', 'origin', ':branch'],

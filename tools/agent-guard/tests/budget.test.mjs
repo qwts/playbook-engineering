@@ -72,6 +72,47 @@ describe('platform memory probes', () => {
     assert.equal(status.source, 'vm_stat+sysctl');
   });
 
+  test('linux status is clamped to a cgroup v2 limit and live usage', () => {
+    const files = new Map([
+      ['/proc/meminfo', MEMINFO],
+      ['/proc/self/cgroup', '0::/\n'],
+      ['/sys/fs/cgroup/memory.max', String(4096 * 1024 * 1024)],
+      ['/sys/fs/cgroup/memory.current', String(871 * 1024 * 1024)],
+    ]);
+    const status = readMemoryStatus({
+      platform: 'linux',
+      totalMb: 6073,
+      readFile: (path) => {
+        if (!files.has(path)) throw new Error(`missing fixture: ${path}`);
+        return files.get(path);
+      },
+    });
+    assert.equal(status.totalMb, 4096);
+    assert.equal(status.availableMb, 2048);
+    assert.equal(status.source, '/proc/meminfo+cgroup');
+    assert.equal(status.degraded, false);
+  });
+
+  test('linux status recognizes a nested cgroup v1 memory controller', () => {
+    const files = new Map([
+      ['/proc/meminfo', MEMINFO],
+      ['/proc/self/cgroup', '5:memory:/job\n'],
+      ['/sys/fs/cgroup/memory/job/memory.limit_in_bytes', String(1536 * 1024 * 1024)],
+      ['/sys/fs/cgroup/memory/job/memory.usage_in_bytes', String(512 * 1024 * 1024)],
+    ]);
+    const status = readMemoryStatus({
+      platform: 'linux',
+      totalMb: 6073,
+      readFile: (path) => {
+        if (!files.has(path)) throw new Error(`missing fixture: ${path}`);
+        return files.get(path);
+      },
+    });
+    assert.equal(status.totalMb, 1536);
+    assert.equal(status.availableMb, 1024);
+    assert.equal(status.source, '/proc/meminfo+cgroup');
+  });
+
   test('a failing probe degrades loudly rather than reporting a healthy machine', () => {
     const status = readMemoryStatus({
       platform: 'darwin',
