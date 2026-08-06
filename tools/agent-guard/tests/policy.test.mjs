@@ -45,13 +45,14 @@ describe('agent-vs-human detection', () => {
     assert.equal(isAgentSession({ CODEX_THREAD_ID: 'abc' }), true);
     assert.equal(isAgentSession({ CURSOR_TRACE_ID: 'abc' }), true);
     assert.equal(isAgentSession({ AI_AGENT: 'something-new' }), true);
+    assert.equal(isAgentSession({ AGENT_GUARD_ASSUME_HUMAN: '1', AI_AGENT: 'codex' }), true);
     assert.equal(harnessName({ CLAUDECODE: '1' }), 'claude');
     assert.equal(harnessName({ CODEX_THREAD_ID: 'abc' }), 'codex');
     assert.equal(harnessName({ CURSOR_TRACE_ID: 'abc' }), 'cursor');
   });
 
-  test('a plain terminal is human', () => {
-    assert.equal(isAgentSession({ TERM: 'xterm-256color', SHELL: '/bin/zsh' }), false);
+  test('an unmarked local caller fails closed', () => {
+    assert.equal(isAgentSession({ TERM: 'xterm-256color', SHELL: '/bin/zsh' }), true);
     assert.equal(harnessName({}), 'human');
   });
 
@@ -89,9 +90,9 @@ describe('lane policy', () => {
     assert.match(verdict.message, /owner can run it directly/u);
   });
 
-  test('the owner is never refused by policy', () => {
-    assert.equal(evaluateLanePolicy({ label: 'test:e2e', env }).allowed, true);
-    assert.equal(evaluateLanePolicy({ label: 'ci', env }).allowed, true);
+  test('an unmarked local caller cannot claim human authentication', () => {
+    assert.equal(evaluateLanePolicy({ label: 'test:e2e', env }).allowed, false);
+    assert.equal(evaluateLanePolicy({ label: 'ci', env }).allowed, false);
   });
 
   test('an agent may run ordinary lanes freely', () => {
@@ -449,6 +450,12 @@ describe('command hook', () => {
     assert.equal(evaluateCommand("cat > /tmp/doc <<'END-OF-FILE'\nnpm run \"$lane\"\nEND-OF-FILE", opts()).allow, true);
     assert.equal(evaluateCommand('cat > /tmp/doc <<.\nnpm run "$lane"\n.', opts()).allow, true);
     assert.equal(evaluateCommand('cat <<\\EOF\nharmless\nEOF\nnpm run ci', opts()).allow, false);
+    assert.equal(evaluateCommand('cat <<E"O"F\nharmless\nEOF\nnpm run ci', opts()).allow, false);
+    assert.equal(evaluateCommand('cat <<-EOF\nharmless\n\tEOF\nnpm run ci', opts()).allow, false);
+    assert.equal(evaluateCommand("cat <<$'E\\x4fF'\nharmless\nEOF\nnpm run ci", opts()).allow, false);
+    assert.equal(evaluateCommand("python3 <<'PY'\nimport os\nos.system('npm run ci')\nPY", opts()).allow, false);
+    assert.equal(evaluateCommand("node <<< \"require('node:child_process').execSync('npm run ci')\"", opts()).allow, false);
+    assert.equal(evaluateCommand('printf x | node', opts()).allow, false);
   });
 
   test('authoritative lease state is inaccessible to agent commands', () => {
@@ -456,6 +463,10 @@ describe('command hook', () => {
     assert.equal(evaluateCommand(': > ~/Library/Caches/agent-guard/leases/live.json', opts()).allow, false);
     assert.equal(evaluateCommand('rm -rf ~/.cache/agent{-,}-guard/leases', opts()).allow, false);
     assert.equal(evaluateCommand('rm -rf ~/.cache/agent*-guard/leases', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf ~/.cache/agent-guard', opts()).allow, false);
+    assert.equal(evaluateCommand('d=~/.cache/agent-guard; rm -rf "$d/leases"', opts()).allow, false);
+    assert.equal(evaluateCommand('cat agent-health-guard/leases/live.json', opts()).allow, true);
+    assert.equal(evaluateCommand('mkdir -p /tmp/agent-app-guard/leases', opts()).allow, true);
   });
 
   test("Codex's argv arrays are normalized before matching", () => {
@@ -484,6 +495,11 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('env "CI=true" node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
     assert.equal(evaluateCommand("env 'AGENT_GUARD_STATE_DIR=/tmp/private' npm test", opts()).allow, false);
     assert.equal(evaluateCommand("env C$'I=true' node tools/agent-guard/run-guarded.mjs -- npm test", opts()).allow, false);
+  });
+
+  test('identity removal is blocked even before a later shell command', () => {
+    assert.equal(evaluateCommand('unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT AI_AGENT').allow, false);
+    assert.equal(evaluateCommand('unset $(compgen -v CODEX_)').allow, false);
   });
 
   test('quote normalization has no attacker-controlled iteration cap', () => {
@@ -558,6 +574,11 @@ describe('hook helpers', () => {
     assert.equal(evaluateCommand("ruby -e 'system %q(npm run ci)'").allow, false);
     assert.equal(evaluateCommand("php -r 'system(\"npm run ci\");'").allow, false);
     assert.equal(evaluateCommand("awk 'BEGIN { system(\"npm run ci\") }'").allow, false);
+    assert.equal(evaluateCommand("node --import='data:text/javascript,export default 1' script.js").allow, false);
+    assert.equal(evaluateCommand("php -B 'system(\"npm run ci\");' < /dev/null").allow, false);
+    assert.equal(evaluateCommand("php -E 'system(\"npm run ci\");' < /dev/null").allow, false);
+    assert.equal(evaluateCommand('perl -MFile::Spec script.pl').allow, true);
+    assert.equal(evaluateCommand('ruby -rbenchmark script.rb').allow, true);
     assert.equal(evaluateCommand('yarn workspace foo npm run ci').allow, false);
     assert.equal(evaluateCommand('taskset -c 0 npm run ci').allow, false);
   });
