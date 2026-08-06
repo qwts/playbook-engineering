@@ -37,7 +37,10 @@ test('an unverified slot may not carry a model name', () => {
 test('a verified or seeded slot must actually name a model', () => {
   const r = clone(base());
   r.tiers.T2.vendors.anthropic.build = { model: null, reasoning: 'medium', status: 'verified' };
-  assert.match(validateRegistry(r).join('\n'), /claims status verified but names no model/);
+  assert.match(validateRegistry(r).join('\n'), /claims status verified but must name both model and reasoning/);
+  r.tiers.T1.vendors.openai.build.model = 'gpt-example';
+  r.tiers.T1.vendors.openai.build.reasoning = null;
+  assert.match(validateRegistry(r).join('\n'), /claims status verified but must name both model and reasoning/);
 });
 
 test('a named model with nowhere to run it is rejected', () => {
@@ -103,7 +106,7 @@ test('verified_at is a date or explicitly null, never a loose string', () => {
   assert.deepEqual(validateRegistry(r), []);
 });
 
-test('unverified slots are rendered as unknown, not omitted', () => {
+test('unverified and hand-seeded slots are withheld, while verified routes render', () => {
   // A silently dropped row reads as "no recommendation exists here". A visible
   // "unverified" is a gap the issue author will actually mention.
   const rows = routingFor(base(), 'T1');
@@ -111,8 +114,16 @@ test('unverified slots are rendered as unknown, not omitted', () => {
   const openai = rows.find((r) => r.vendor === 'openai');
   assert.match(openai.plan, /unverified — do not guess/);
   const anthropic = rows.find((r) => r.vendor === 'anthropic');
-  assert.match(anthropic.plan, /reasoning high/);
-  assert.match(anthropic.plan, /provisional/, 'a hand-seeded slot must not read as confirmed');
+  assert.match(anthropic.plan, /unverified — do not guess/, 'a hand-seeded slot must not become an actionable route');
+  const verified = clone(base());
+  verified.tiers.T1.vendors.anthropic.plan = { model: 'source-backed-model', reasoning: 'high', status: 'verified' };
+  assert.equal(routingFor(verified, 'T1').find((r) => r.vendor === 'anthropic').plan, 'source-backed-model (reasoning high)');
+});
+
+test('routing fails explicitly when an exported caller supplies an invalid registry', () => {
+  const partial = clone(base());
+  delete partial.tiers.T1.vendors.openai;
+  assert.throws(() => routingFor(partial, 'T1'), /invalid model registry:.*missing vendor group openai/u);
 });
 
 test('staleness counts every slot, so nothing hides', () => {

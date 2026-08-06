@@ -6,12 +6,24 @@
 // a different hat.
 
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
 
-import { acquireLease, heartbeatLease, isProcessAlive, leaseExists, readLeases, releaseLease, withAdmissionLock } from '../lib/leases.mjs';
+import {
+  acquireLease,
+  heartbeatLease,
+  isProcessAlive,
+  isProcessGroupAlive,
+  leaseExists,
+  psExecutable,
+  readLeases,
+  releaseLease,
+  retargetLease,
+  withAdmissionLock,
+} from '../lib/leases.mjs';
 import { ensureStateDirs, leasesDir, machineToken } from '../lib/protocol.mjs';
 
 const roots = [];
@@ -80,6 +92,27 @@ describe('reaping', () => {
     assert.equal(readdirSync(leasesDir(env)).filter((name) => name.endsWith('.json')).length, 0, 'and its file is removed');
   });
 
+  test('a detached child group keeps its lease after the wrapper pid dies', () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 10_000)'], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+    const lease = acquireLease({ env, label: 'detached', estimatedMb: 512 });
+    try {
+      assert.equal(isProcessGroupAlive(child.pid), true);
+      assert.equal(retargetLease(lease, { pid: DEAD_PID, processGroupId: child.pid }), true);
+      assert.equal(readLeases(env).length, 1, 'group liveness, not the dead wrapper pid, holds the reservation');
+    } finally {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // The child may have exited independently.
+      }
+      releaseLease(lease);
+    }
+  });
+
   test('validity is liveness — never a hostname (qwts/overlook#842)', () => {
     // #842: hostnames drift .local ↔ .lan with network state, which made
     // crashed same-machine locks permanently unreclaimable. A lease carrying a
@@ -104,6 +137,18 @@ describe('reaping', () => {
     writeFileSync(path.join(leasesDir(env), 'wrong-shape.json'), '"a string"');
     writeFileSync(path.join(leasesDir(env), 'missing-fields.json'), '{"protocol":1}');
     writeFileSync(path.join(leasesDir(env), 'not-a-lease.txt'), 'ignored');
+    assert.deepEqual(readLeases(env), []);
+  });
+
+  test('non-positive lease reservations cannot reduce the machine budget', () => {
+    for (const [name, pid, estimatedMb] of [
+      ['zero-pid', 0, 1024],
+      ['zero-budget', process.pid, 0],
+      ['negative-budget', process.pid, -1024],
+    ]) {
+      const invalid = { protocol: 1, id: name, pid, estimatedMb, grantedAt: new Date().toISOString(), machineToken: machineToken(env) };
+      writeFileSync(path.join(leasesDir(env), `${name}.json`), JSON.stringify(invalid));
+    }
     assert.deepEqual(readLeases(env), []);
   });
 
@@ -140,18 +185,43 @@ describe('reaping', () => {
 // PR #139 review, P1: `AGENT_GUARDED=1` was enough to claim nesting, which
 // skipped the lease, the ceiling and the headroom check.
 describe('nested-run marker', () => {
-  test('only an id naming a held lease counts as nested', () => {
+  test('only an id naming a held lease in this process group counts as nested', () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 10_000)'], { detached: true, stdio: 'ignore' });
+    child.unref();
     const lease = acquireLease({ env, label: 'parent', estimatedMb: 512 });
-    assert.equal(leaseExists(lease.id, env), true);
-    assert.equal(leaseExists('1', env), false);
-    assert.equal(leaseExists(undefined, env), false);
-    assert.equal(leaseExists('', env), false);
+    try {
+      assert.equal(retargetLease(lease, { pid: child.pid, processGroupId: child.pid }), true);
+      assert.equal(leaseExists(lease.id, env, { processGroupId: child.pid }), true);
+      assert.equal(leaseExists(lease.id, env, { processGroupId: child.pid + 1 }), false, 'a copied live id is not transferable to another process group');
+      assert.equal(leaseExists('1', env, { processGroupId: child.pid }), false);
+      assert.equal(leaseExists(undefined, env, { processGroupId: child.pid }), false);
+      assert.equal(leaseExists('', env, { processGroupId: child.pid }), false);
+    } finally {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // The child may have exited independently.
+      }
+      releaseLease(lease);
+    }
   });
 
   test('the marker stops counting once the parent run ends', () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 10_000)'], { detached: true, stdio: 'ignore' });
+    child.unref();
     const lease = acquireLease({ env, label: 'parent', estimatedMb: 512 });
-    releaseLease(lease);
-    assert.equal(leaseExists(lease.id, env), false);
+    try {
+      assert.equal(retargetLease(lease, { pid: child.pid, processGroupId: child.pid }), true);
+      releaseLease(lease);
+      assert.equal(leaseExists(lease.id, env, { processGroupId: child.pid }), false);
+    } finally {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // The child may have exited independently.
+      }
+      releaseLease(lease);
+    }
   });
 });
 
@@ -205,6 +275,24 @@ describe('admission mutex', () => {
     assert.equal(ran, 'entered');
   });
 
+  test('malformed metadata cannot evict a live lock owner', async () => {
+    const dir = path.join(env.AGENT_GUARD_STATE_DIR, 'admission.lock');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'owner.json'), JSON.stringify({ pid: process.pid, at: 'not-a-date' }));
+    let entered = false;
+    await assert.rejects(
+      withAdmissionLock(
+        env,
+        () => {
+          entered = true;
+        },
+        { timeoutMs: 75 },
+      ),
+      /refusing to proceed without machine-wide serialization/u,
+    );
+    assert.equal(entered, false, 'a contender must not run outside the lock');
+  });
+
   test('the lock is released even when the critical section throws', async () => {
     await assert.rejects(withAdmissionLock(env, () => {
       throw new Error('boom');
@@ -221,5 +309,9 @@ describe('liveness probe', () => {
 
   test('pid 1 is alive even though it belongs to another user (EPERM)', () => {
     assert.equal(isProcessAlive(1), true);
+  });
+
+  test('process inspection uses a portable absolute system binary', () => {
+    assert.match(psExecutable(), /^\/(?:usr\/)?bin\/ps$/u);
   });
 });

@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { SWAP_REFUSE_RATIO, clampCeiling, decideAdmission, deriveBudget, outstandingMb, unmaterializedMb } from '../lib/budget.mjs';
+import { SWAP_REFUSE_RATIO, clampCeiling, decideAdmission, deriveBudget, deriveBudgetForMemory, outstandingMb, unmaterializedMb } from '../lib/budget.mjs';
 import { parseMeminfo, parseSwapusage, parseVmStat, readMemoryStatus } from '../lib/system-memory.mjs';
 
 // Real output from the 8 GB machine during the incident this tool exists to
@@ -44,6 +44,11 @@ describe('platform memory probes', () => {
     assert.equal(pageSize, 4096);
   });
 
+  test('vm_stat accepts the current macOS compressor label', () => {
+    const current = VM_STAT.replace('Pages occupying compressor', 'Pages occupied by compressor');
+    assert.equal(parseVmStat(current).compressedMb, Math.round((41000 * 16384) / (1024 * 1024)));
+  });
+
   test('sysctl swapusage parses the M suffix', () => {
     assert.deepEqual(parseSwapusage(SWAPUSAGE), { swapTotalMb: 7168, swapUsedMb: 6090 });
   });
@@ -65,6 +70,47 @@ describe('platform memory probes', () => {
     assert.equal(status.degraded, false);
     assert.equal(status.swapUsedMb, 6090);
     assert.equal(status.source, 'vm_stat+sysctl');
+  });
+
+  test('linux status is clamped to a cgroup v2 limit and live usage', () => {
+    const files = new Map([
+      ['/proc/meminfo', MEMINFO],
+      ['/proc/self/cgroup', '0::/\n'],
+      ['/sys/fs/cgroup/memory.max', String(4096 * 1024 * 1024)],
+      ['/sys/fs/cgroup/memory.current', String(871 * 1024 * 1024)],
+    ]);
+    const status = readMemoryStatus({
+      platform: 'linux',
+      totalMb: 6073,
+      readFile: (path) => {
+        if (!files.has(path)) throw new Error(`missing fixture: ${path}`);
+        return files.get(path);
+      },
+    });
+    assert.equal(status.totalMb, 4096);
+    assert.equal(status.availableMb, 2048);
+    assert.equal(status.source, '/proc/meminfo+cgroup');
+    assert.equal(status.degraded, false);
+  });
+
+  test('linux status recognizes a nested cgroup v1 memory controller', () => {
+    const files = new Map([
+      ['/proc/meminfo', MEMINFO],
+      ['/proc/self/cgroup', '5:memory:/job\n'],
+      ['/sys/fs/cgroup/memory/job/memory.limit_in_bytes', String(1536 * 1024 * 1024)],
+      ['/sys/fs/cgroup/memory/job/memory.usage_in_bytes', String(512 * 1024 * 1024)],
+    ]);
+    const status = readMemoryStatus({
+      platform: 'linux',
+      totalMb: 6073,
+      readFile: (path) => {
+        if (!files.has(path)) throw new Error(`missing fixture: ${path}`);
+        return files.get(path);
+      },
+    });
+    assert.equal(status.totalMb, 1536);
+    assert.equal(status.availableMb, 1024);
+    assert.equal(status.source, '/proc/meminfo+cgroup');
   });
 
   test('a failing probe degrades loudly rather than reporting a healthy machine', () => {
@@ -99,6 +145,10 @@ describe('budget derivation', () => {
     const budget = deriveBudget(2048);
     assert.ok(budget.machineBudgetMb >= 512);
     assert.ok(budget.maxRunMb >= 512);
+  });
+
+  test('the caller derives limits from the cgroup-adjusted memory total', () => {
+    assert.equal(deriveBudgetForMemory({ totalMb: 4096 }).maxRunMb, 1280);
   });
 });
 
@@ -279,5 +329,11 @@ describe('lease accounting helpers', () => {
     assert.equal(outstandingMb(leases), 3000);
     // A run that overshot its own estimate contributes zero, never a negative.
     assert.equal(unmaterializedMb(leases), 750);
+  });
+
+  test('malformed observed usage cannot manufacture admission headroom', () => {
+    for (const observedMb of ['1024', Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      assert.equal(unmaterializedMb([{ estimatedMb: 2048, observedMb }]), 2048);
+    }
   });
 });

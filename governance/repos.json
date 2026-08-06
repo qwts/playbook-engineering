@@ -87,6 +87,15 @@
       "note": "Public redacted fleet dashboard; reads this manifest as its own source of truth."
     },
     {
+      "name": "agentic-code-analysis",
+      "visibility": "public",
+      "publish": true,
+      "status": "onboarding",
+      "sharedCi": false,
+      "delta": "",
+      "note": "Semantic-analysis supplier used by the fleet's governed size ratchets (ENG-0160); onboarding to the repository baseline."
+    },
+    {
       "name": "localnotes",
       "visibility": "public",
       "publish": true,

@@ -72,6 +72,12 @@
       "generatedProjection": null
     },
     {
+      "repository": "qwts/agentic-code-analysis",
+      "metadataSystem": "none",
+      "sourceInputPolicy": "not-applicable",
+      "generatedProjection": null
+    },
+    {
       "repository": "qwts/localnotes",
       "metadataSystem": "none",
       "sourceInputPolicy": "not-applicable",
