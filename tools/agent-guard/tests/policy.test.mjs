@@ -446,6 +446,8 @@ describe('command hook', () => {
     assert.equal(evaluateCommand("env bash <<'EOF'\nnpm run ci\nEOF", opts()).allow, false);
     assert.equal(evaluateCommand("cat > /tmp/doc <<'EOF'\nnpm run \"$lane\"\nEOF", opts()).allow, true);
     assert.equal(evaluateCommand("cat > /tmp/doc <<'0'\nnpm run \"$lane\"\n0", opts()).allow, true);
+    assert.equal(evaluateCommand("cat > /tmp/doc <<'END-OF-FILE'\nnpm run \"$lane\"\nEND-OF-FILE", opts()).allow, true);
+    assert.equal(evaluateCommand('cat > /tmp/doc <<.\nnpm run "$lane"\n.', opts()).allow, true);
   });
 
   test('authoritative lease state is inaccessible to agent commands', () => {
@@ -536,11 +538,15 @@ describe('hook helpers', () => {
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'pushd /project && npm run ci' }, '/project').allow, false);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'command cd /project && npm run ci' }, '/project').allow, false);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'builtin cd /project && npm run ci' }, '/project').allow, false);
+    assert.equal(evaluateHookInput({ cwd: '/outside', command: 'ln -s /project /tmp/guard-link; cd /tmp/guard-link && npm run ci' }, '/project').allow, false);
   });
 
   test('quoted text is blanked while shell payloads are promoted', () => {
     assert.match(stripInertText('echo "npm run ci"'), /""/u);
     assert.match(stripInertText('sh -c "npm run ci"'), /npm run ci/u);
+    assert.equal(evaluateCommand('node -e "require(\'node:child_process\').execSync(\'npm run ci\')"').allow, false);
+    assert.equal(evaluateCommand('node --eval="process.exit(0)"').allow, false);
+    assert.equal(evaluateCommand('script -q /dev/null -c "npm run ci"').allow, false);
   });
 
   test('segments are split on every shell separator', () => {

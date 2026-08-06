@@ -13,6 +13,7 @@
 // needed memory to run would be self-defeating.
 
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -220,5 +221,16 @@ describe('agent-guard conformance (ENG-0138)', () => {
     assert.equal(isCi({ GITHUB_ACTIONS: 'true' }), true);
     assert.equal(isCi({ CI: 'true' }), true);
     assert.equal(isCi({}), false);
+  });
+
+  test('an inherited CI marker does not exempt an agent process', () => {
+    const runner = path.join(root, 'tools/agent-guard/run-guarded.mjs');
+    const result = spawnSync(process.execPath, [runner, '--label', 'test:e2e', '--', process.execPath, '-e', 'process.exit(0)'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, AI_AGENT: 'codex', CI: '1' },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /agents do not run it on this machine/u);
   });
 });
