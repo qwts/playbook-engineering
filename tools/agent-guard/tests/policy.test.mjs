@@ -174,6 +174,10 @@ describe('command hook', () => {
       'nice -n 5 vitest',
       'nohup vitest',
       'exec vitest',
+      'timeout 60s npx vitest',
+      'watch npx vitest',
+      'setsid npx vitest',
+      'stdbuf -oL npx vitest',
       'time npx vitest',
       'env FOO=1 npx c8 vitest run',
       'command ./node_modules/.bin/vitest run src/example.test.ts',
@@ -283,6 +287,7 @@ describe('command hook', () => {
       'yarn workspace app run test:e2e',
       'bun -F app test:e2e',
       'bun --filter=app test:e2e',
+      'yarn workspaces foreach -Apt run ci',
     ]) {
       assert.equal(evaluateCommand(command, opts()).allow, false, `expected the hook to deny: ${command}`);
     }
@@ -394,8 +399,8 @@ describe('command hook', () => {
 
   test('quote normalization has no attacker-controlled iteration cap', () => {
     const padding = Array.from({ length: 250 }, () => '""').join(' ');
-    assert.equal(evaluateCommand(`${padding} npm run "ci"`, opts()).allow, false);
-    assert.equal(evaluateCommand(`${padding} npx "playwright" test`, opts()).allow, false);
+    assert.equal(evaluateCommand(`echo ${padding}; npm run "ci"`, opts()).allow, false);
+    assert.equal(evaluateCommand(`echo ${padding}; npx "playwright" test`, opts()).allow, false);
   });
 
   test('a malformed command is allowed rather than bricking every shell call', () => {
@@ -467,6 +472,10 @@ describe('hook helpers', () => {
     // "perf" anywhere would deny `grep perf src/`.
     assert.equal(heavyLaneFor('grep -rn perf src/'), null);
     assert.equal(heavyLaneFor('cat docs/e2e-notes.md'), null);
+    assert.equal(heavyLaneFor('rg pnpm run ci'), null);
+    assert.equal(heavyLaneFor('grep yarn test:e2e README.md'), null);
+    assert.equal(heavyLaneFor('git commit -m pnpm -m run -m ci'), null);
+    assert.equal(heavyLaneFor('rg node --run ci'), null);
     assert.notEqual(heavyLaneFor('npm run test:e2e'), null);
     assert.notEqual(heavyLaneFor('npm run ci'), null);
   });

@@ -18,6 +18,7 @@ import {
   isProcessAlive,
   isProcessGroupAlive,
   leaseExists,
+  psExecutable,
   readLeases,
   releaseLease,
   retargetLease,
@@ -308,5 +309,9 @@ describe('liveness probe', () => {
 
   test('pid 1 is alive even though it belongs to another user (EPERM)', () => {
     assert.equal(isProcessAlive(1), true);
+  });
+
+  test('process inspection uses a portable absolute system binary', () => {
+    assert.match(psExecutable(), /^\/(?:usr\/)?bin\/ps$/u);
   });
 });
