@@ -242,6 +242,7 @@ test('the protected Git wrapper keeps destructive pushes behind normal approval'
   const directRule = readFileSync(join(ROOT, '.codex/rules/environment.rules'), 'utf8')
     .split('# Trust standalone, non-destructive GitHub CLI development operations.')[0];
   assert.doesNotMatch(directRule, /^\s*"push",$/mu);
+  assert.doesNotMatch(directRule, /^\s*"grep",$/mu);
 });
 
 test('the governed Codex configuration enables hooks and protects GitHub identity', () => {

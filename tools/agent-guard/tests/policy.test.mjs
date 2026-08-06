@@ -194,6 +194,11 @@ describe('command hook', () => {
       "printf 'vitest\\n' | xargs npx",
       'find . -maxdepth 0 -exec npm run ci \\;',
       'find . -maxdepth 0 -exec npx vitest {} +',
+      'command find . -maxdepth 0 -exec npx vitest \\;',
+      'env find . -maxdepth 0 -exec npm run ci \\;',
+      "find . -maxdepth 0 -exec sh -c 'npm run ci' \\;",
+      'lane=ci; npm run "$lane"',
+      'npm run "$(printf ci)"',
       'node --require node:path node_modules/vitest/vitest.mjs run',
       'node -r node:path node_modules/vitest/vitest.mjs run',
       'node --import node:path node_modules/vitest/vitest.mjs run',
@@ -232,6 +237,7 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('env -i PATH=/usr/bin:/bin HOME=/tmp node tools/agent-guard/run-guarded.mjs --label test:e2e -- npm run test:e2e', opts()).allow, false);
     assert.equal(evaluateCommand('env - PATH=/usr/bin:/bin HOME=/tmp node tools/agent-guard/run-guarded.mjs --label test:e2e -- npm run test:e2e', opts()).allow, false);
     assert.equal(evaluateCommand('env -u CODEX_THREAD_ID node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
+    assert.equal(evaluateCommand('env -uCODEX_THREAD_ID node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
     assert.equal(evaluateCommand('unset CLAUDECODE; node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
     assert.equal(evaluateCommand('AI_AGENT= node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
     assert.equal(evaluateCommand('CLAUDECODE=0 CLAUDE_CODE_ENTRYPOINT= node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
@@ -411,6 +417,8 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('cat <<EOF\nnpm run test:e2e\nEOF', opts()).allow, true);
     assert.equal(evaluateCommand('bash <<EOF\nnpm run test:e2e\nEOF', opts()).allow, false);
     assert.equal(evaluateCommand("/bin/sh <<'EOF'\nnpx vitest\nEOF", opts()).allow, false);
+    assert.equal(evaluateCommand("command bash <<'EOF'\nnpx vitest\nEOF", opts()).allow, false);
+    assert.equal(evaluateCommand("env bash <<'EOF'\nnpm run ci\nEOF", opts()).allow, false);
   });
 
   test("Codex's argv arrays are normalized before matching", () => {
