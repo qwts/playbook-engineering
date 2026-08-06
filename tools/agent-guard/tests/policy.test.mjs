@@ -422,6 +422,19 @@ describe('hook helpers', () => {
     assert.deepEqual(resolveExecutionDirs('/project', '(cd /tmp) && npx vitest'), ['/project', '/tmp']);
     assert.equal(evaluateHookInput({ cwd: '/project', command: '(cd /tmp) && npx vitest' }, '/project').allow, false);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'true && cd /project && npm run ci' }, '/project').allow, false);
+    assert.deepEqual(resolveExecutionDirs('/outside', '(cd /tmp); cd project && npm run ci'), ['/outside', '/tmp', '/outside/project']);
+    assert.equal(evaluateHookInput({ cwd: '/outside', command: '(cd /tmp); cd project && npm run ci' }, '/outside/project').allow, false);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'env -C /project npx vitest'), ['/outside', '/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'env --chdir=/project npm run ci'), ['/outside', '/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'env --chdir "/project with spaces" npm run ci'), ['/outside', '/project with spaces']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'env -u TOKEN -C /project npm run ci'), ['/outside', '/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', "env -S '-u TOKEN -C /project npm run ci'"), ['/outside', '/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'env -C /project -C /elsewhere npm run ci'), ['/outside', '/elsewhere']);
+    assert.equal(evaluateHookInput({ cwd: '/outside', command: 'env -C /project npx vitest' }, '/project').allow, false);
+    assert.equal(evaluateHookInput({ cwd: '/outside', command: 'env --chdir=/project npm run ci' }, '/project').allow, false);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'env -C /tmp true; cd project && npm run ci'), ['/outside', '/tmp', '/outside/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'echo "(cd /tmp)"; cd project && npm run ci'), ['/outside', '/outside/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'echo "$(cd /tmp)"; cd project && npm run ci'), ['/outside', '/tmp', '/outside/project']);
   });
 
   test('quoted text is blanked while shell payloads are promoted', () => {
