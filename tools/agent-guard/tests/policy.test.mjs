@@ -205,10 +205,20 @@ describe('command hook', () => {
       'npm r${x:-u}n ci',
       'if true; then npm run ci; fi',
       'f(){ npm run test:e2e; }; f',
+      'case x in x) npx vitest;; esac',
+      'coproc npx vitest',
+      'runner () { npx vitest; }; runner',
       "bash <<< 'npm run ci'",
       "printf 'npm run ci\\n' | sh",
       'cat <<EOF | bash\nnpm run ci\nEOF',
       'find . -maxdepth 0 -exec bash -c npx\\ vitest \\;',
+      "find . '-exec' npm run ci \\;",
+      'find . -exec "npm" run ci \\;',
+      "payload='npm run ci'; bash -c \"$payload\"",
+      'npx npm run ci',
+      'bunx npm run ci',
+      'pnpm exec npm run ci',
+      'printf x | xargs --replace npm run ci',
       'node --require node:path node_modules/vitest/vitest.mjs run',
       'node -r node:path node_modules/vitest/vitest.mjs run',
       'node --import node:path node_modules/vitest/vitest.mjs run',
@@ -249,6 +259,10 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('env -u CODEX_THREAD_ID node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
     assert.equal(evaluateCommand('env -uCODEX_THREAD_ID node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
     assert.equal(evaluateCommand('key=AI_AGENT; env -u "$key" node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
+    assert.equal(evaluateCommand('unset -- AI_AGENT; node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
+    assert.equal(evaluateCommand('unset -v AI_AGENT; node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
+    assert.equal(evaluateCommand('name=CI; export "$name=true"; node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
+    assert.equal(evaluateCommand('printf -v CI 1; export CI; node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
     assert.equal(evaluateCommand('unset CLAUDECODE; node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
     assert.equal(evaluateCommand('AI_AGENT= node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
     assert.equal(evaluateCommand('CLAUDECODE=0 CLAUDE_CODE_ENTRYPOINT= node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
@@ -431,6 +445,7 @@ describe('command hook', () => {
     assert.equal(evaluateCommand("command bash <<'EOF'\nnpx vitest\nEOF", opts()).allow, false);
     assert.equal(evaluateCommand("env bash <<'EOF'\nnpm run ci\nEOF", opts()).allow, false);
     assert.equal(evaluateCommand("cat > /tmp/doc <<'EOF'\nnpm run \"$lane\"\nEOF", opts()).allow, true);
+    assert.equal(evaluateCommand("cat > /tmp/doc <<'0'\nnpm run \"$lane\"\n0", opts()).allow, true);
   });
 
   test('authoritative lease state is inaccessible to agent commands', () => {

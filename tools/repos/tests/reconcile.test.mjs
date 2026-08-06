@@ -229,6 +229,7 @@ test('the protected Git wrapper keeps destructive pushes behind normal approval'
     ['rebase', '--exe', '/tmp/command', 'main'],
     ['rebase', '-x/tmp/command', 'main'],
     ['clone', '--upload-pack=/tmp/program', '/tmp/remote'],
+    ['clone', '--upload-p=/tmp/program', '/tmp/remote'],
     ['fetch', '--upload-pack', '/tmp/program', 'origin'],
     ['push', '--future-option', 'origin', 'branch'],
     ['push', 'origin', '+branch:branch'],
@@ -245,6 +246,9 @@ test('the protected Git wrapper keeps destructive pushes behind normal approval'
     .split('# Trust standalone, non-destructive GitHub CLI development operations.')[0];
   assert.doesNotMatch(directRule, /^\s*"push",$/mu);
   assert.doesNotMatch(directRule, /^\s*"grep",$/mu);
+  for (const subcommand of ['clone', 'fetch', 'pull', 'rebase']) {
+    assert.doesNotMatch(directRule, new RegExp(`^\\s*"${subcommand}",$`, 'mu'));
+  }
   const gitWrapper = readFileSync(join(ROOT, '.codex/scripts/git-with-nvm.zsh'), 'utf8');
   assert.doesNotMatch(gitWrapper.split('case "$git_subcommand" in')[1].split('esac')[0], /\| grep \|/u);
 });
