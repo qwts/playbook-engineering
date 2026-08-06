@@ -448,11 +448,14 @@ describe('command hook', () => {
     assert.equal(evaluateCommand("cat > /tmp/doc <<'0'\nnpm run \"$lane\"\n0", opts()).allow, true);
     assert.equal(evaluateCommand("cat > /tmp/doc <<'END-OF-FILE'\nnpm run \"$lane\"\nEND-OF-FILE", opts()).allow, true);
     assert.equal(evaluateCommand('cat > /tmp/doc <<.\nnpm run "$lane"\n.', opts()).allow, true);
+    assert.equal(evaluateCommand('cat <<\\EOF\nharmless\nEOF\nnpm run ci', opts()).allow, false);
   });
 
   test('authoritative lease state is inaccessible to agent commands', () => {
     assert.equal(evaluateCommand('rm -rf ~/.cache/agent-guard/leases', opts()).allow, false);
     assert.equal(evaluateCommand(': > ~/Library/Caches/agent-guard/leases/live.json', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf ~/.cache/agent{-,}-guard/leases', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf ~/.cache/agent*-guard/leases', opts()).allow, false);
   });
 
   test("Codex's argv arrays are normalized before matching", () => {
@@ -546,7 +549,17 @@ describe('hook helpers', () => {
     assert.match(stripInertText('sh -c "npm run ci"'), /npm run ci/u);
     assert.equal(evaluateCommand('node -e "require(\'node:child_process\').execSync(\'npm run ci\')"').allow, false);
     assert.equal(evaluateCommand('node --eval="process.exit(0)"').allow, false);
+    assert.equal(evaluateCommand('node -pe "require(\'node:child_process\').execSync(\'npx vitest\')"').allow, false);
+    assert.equal(evaluateCommand("node -e\"require('node:child_process').execSync('npm run ci')\"").allow, false);
     assert.equal(evaluateCommand('script -q /dev/null -c "npm run ci"').allow, false);
+    assert.equal(evaluateCommand("script -q /dev/null --command='npx vitest'").allow, false);
+    assert.equal(evaluateCommand("python3 -c \"import os; os.system('npm run ci')\"").allow, false);
+    assert.equal(evaluateCommand("perl -e 'system q(npm run ci)'").allow, false);
+    assert.equal(evaluateCommand("ruby -e 'system %q(npm run ci)'").allow, false);
+    assert.equal(evaluateCommand("php -r 'system(\"npm run ci\");'").allow, false);
+    assert.equal(evaluateCommand("awk 'BEGIN { system(\"npm run ci\") }'").allow, false);
+    assert.equal(evaluateCommand('yarn workspace foo npm run ci').allow, false);
+    assert.equal(evaluateCommand('taskset -c 0 npm run ci').allow, false);
   });
 
   test('segments are split on every shell separator', () => {
