@@ -225,6 +225,8 @@ test('the protected Git wrapper keeps destructive pushes behind normal approval'
     ['push', '--exec=/tmp/receive-pack', '/tmp/remote', 'branch'],
     ['push', '--receive-pack', '/tmp/receive-pack', '/tmp/remote', 'branch'],
     ['rebase', '--exec', '/tmp/command', 'main'],
+    ['rebase', '--ex=/tmp/command', 'main'],
+    ['rebase', '--exe', '/tmp/command', 'main'],
     ['rebase', '-x/tmp/command', 'main'],
     ['clone', '--upload-pack=/tmp/program', '/tmp/remote'],
     ['fetch', '--upload-pack', '/tmp/program', 'origin'],
@@ -243,6 +245,8 @@ test('the protected Git wrapper keeps destructive pushes behind normal approval'
     .split('# Trust standalone, non-destructive GitHub CLI development operations.')[0];
   assert.doesNotMatch(directRule, /^\s*"push",$/mu);
   assert.doesNotMatch(directRule, /^\s*"grep",$/mu);
+  const gitWrapper = readFileSync(join(ROOT, '.codex/scripts/git-with-nvm.zsh'), 'utf8');
+  assert.doesNotMatch(gitWrapper.split('case "$git_subcommand" in')[1].split('esac')[0], /\| grep \|/u);
 });
 
 test('the governed Codex configuration enables hooks and protects GitHub identity', () => {
