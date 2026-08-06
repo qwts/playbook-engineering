@@ -156,6 +156,11 @@ describe('command hook', () => {
     }
   });
 
+  test('direct binaries select the matching grant lane', () => {
+    assert.equal(heavyLaneFor('npx playwright test')?.id, 'e2e');
+    assert.equal(heavyLaneFor('test-storybook --ci')?.id, 'stories');
+  });
+
   test('tampering with the guard is denied, including before a sanctioned wrapper call', () => {
     const force = evaluateCommand('AGENT_GUARD_FORCE=1 node tools/agent-guard/run-guarded.mjs -- npm run test:e2e', opts());
     assert.equal(force.allow, false);
@@ -227,6 +232,19 @@ describe('command hook', () => {
     }
   });
 
+  test('quoting executable words does not bypass the guard', () => {
+    for (const command of [
+      'npm run "ci"',
+      "npm run 'test:e2e'",
+      'npx "vitest" run src/example.test.ts',
+      'npx "playwright" test',
+      'node "--test" tests/example.test.mjs',
+      'bash -lc "npm run \\"ci\\""',
+    ]) {
+      assert.equal(evaluateCommand(command, opts()).allow, false, `expected the hook to deny: ${command}`);
+    }
+  });
+
   // PR #139 review, P1: AGENT_GUARDED=1 made the wrapper pass through with no
   // lease, ceiling or headroom check.
   test('claiming to be inside a guarded run is tampering', () => {
@@ -239,6 +257,8 @@ describe('command hook', () => {
     const commit = 'git commit -m "fix: stop npm run test:e2e from bricking the machine"';
     assert.equal(evaluateCommand(commit, opts()).allow, true);
     assert.equal(evaluateCommand("gh pr create --body 'blocked npm run ci locally'", opts()).allow, true);
+    assert.equal(evaluateCommand('git commit -m "ci"', opts()).allow, true);
+    assert.equal(evaluateCommand('gh pr create --body "vitest"', opts()).allow, true);
   });
 
   test('a nested shell payload IS an invocation and is unwrapped', () => {
