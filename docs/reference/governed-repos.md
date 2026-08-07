@@ -79,4 +79,5 @@ Cloning, drift detection, reconciliation, and harness synchronization are in
 | `playbook-dashboard` | public | active | no | managed | — |
 | `agentic-code-analysis` | public | onboarding | no | managed | — |
 | `localnotes` | public | onboarding | no | managed | — |
+| `universal-agentic-workflow` | private | onboarding | no | managed | — |
 <!-- END GENERATED governed-repos -->

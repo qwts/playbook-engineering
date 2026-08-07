@@ -103,6 +103,15 @@
       "sharedCi": false,
       "delta": "",
       "note": "Onboarded after a fleet CodeQL audit found it had lost code scanning with no governed replacement; carries no agent harness, CI, AGENTS.md or CONTRIBUTING.md yet."
+    },
+    {
+      "name": "universal-agentic-workflow",
+      "visibility": "private",
+      "publish": false,
+      "status": "onboarding",
+      "sharedCi": false,
+      "delta": "",
+      "note": "Private during the M0 cleanup window; onboarding to the repository baseline. Roadmap: https://github.com/qwts/universal-agentic-workflow/blob/main/docs/product/roadmap-v1.md."
     }
   ]
 }
