@@ -82,6 +82,12 @@
       "metadataSystem": "none",
       "sourceInputPolicy": "not-applicable",
       "generatedProjection": null
+    },
+    {
+      "repository": "qwts/universal-agentic-workflow",
+      "metadataSystem": "none",
+      "sourceInputPolicy": "not-applicable",
+      "generatedProjection": null
     }
   ]
 }
