@@ -3,6 +3,7 @@
 // enforces all of it across three harnesses.
 
 import assert from 'node:assert/strict';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -10,10 +11,86 @@ import { after, beforeEach, describe, test } from 'node:test';
 
 import { evaluateCommand, evaluateHookInput, heavyLaneFor, nodeRunScriptNames, normalizeCommand, npmScriptNames, otherPackageScriptNames, resolveExecutionDir, resolveExecutionDirs, splitSegments, stripInertText } from '../guard-agent-command.mjs';
 import { classifyLane, evaluateLanePolicy, harnessName, isAgentSession, isCi, isTrustedHostedCi, listGrants, readGrant, revokeGrant, writeGrant } from '../lib/policy.mjs';
+import { AGENT_GUARD_OIDC_AUDIENCE, GITHUB_OIDC_ISSUER, GITHUB_OIDC_JWKS } from '../lib/hosted-ci.mjs';
 import { ensureStateDirs, stateDir } from '../lib/protocol.mjs';
 
 const roots = [];
 let env;
+
+const { privateKey: oidcPrivateKey, publicKey: oidcPublicKey } = generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+});
+const oidcJwk = {
+  ...oidcPublicKey.export({ format: 'jwk' }),
+  alg: 'RS256',
+  kid: 'test-key',
+  use: 'sig',
+};
+
+function encoded(value) {
+  return Buffer.from(JSON.stringify(value)).toString('base64url');
+}
+
+function signedOidcToken(claims) {
+  const header = encoded({ alg: 'RS256', kid: oidcJwk.kid, typ: 'JWT' });
+  const payload = encoded(claims);
+  const signed = `${header}.${payload}`;
+  const signature = sign('RSA-SHA256', Buffer.from(signed), oidcPrivateKey).toString('base64url');
+  return `${signed}.${signature}`;
+}
+
+function hostedOidcFixture(now = Date.parse('2026-08-11T22:00:00Z')) {
+  const env = {
+    CI: 'true',
+    GITHUB_ACTIONS: 'true',
+    RUNNER_ENVIRONMENT: 'github-hosted',
+    ACTIONS_ID_TOKEN_REQUEST_URL: 'https://vstoken.actions.githubusercontent.com/oidc?api-version=2.0',
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'job-scoped-request-token',
+    GITHUB_REPOSITORY: 'qwts/playbook-engineering',
+    GITHUB_REPOSITORY_ID: '123456',
+    GITHUB_RUN_ID: '987654',
+    GITHUB_RUN_ATTEMPT: '1',
+    GITHUB_SHA: 'abc123',
+    GITHUB_REF: 'refs/heads/main',
+    GITHUB_EVENT_NAME: 'workflow_dispatch',
+    GITHUB_WORKFLOW_REF: 'qwts/playbook-engineering/.github/workflows/ci.yml@refs/heads/main',
+    GITHUB_WORKFLOW_SHA: 'def456',
+  };
+  const nowSeconds = Math.floor(now / 1000);
+  const claims = {
+    iss: GITHUB_OIDC_ISSUER,
+    aud: AGENT_GUARD_OIDC_AUDIENCE,
+    sub: 'repo:qwts/playbook-engineering:ref:refs/heads/main',
+    iat: nowSeconds - 5,
+    nbf: nowSeconds - 5,
+    exp: nowSeconds + 5 * 60,
+    runner_environment: 'github-hosted',
+    repository_owner: 'qwts',
+    repository_owner_id: '91036491',
+    repository: env.GITHUB_REPOSITORY,
+    repository_id: env.GITHUB_REPOSITORY_ID,
+    run_id: env.GITHUB_RUN_ID,
+    run_attempt: env.GITHUB_RUN_ATTEMPT,
+    sha: env.GITHUB_SHA,
+    ref: env.GITHUB_REF,
+    event_name: env.GITHUB_EVENT_NAME,
+    workflow_ref: env.GITHUB_WORKFLOW_REF,
+    workflow_sha: env.GITHUB_WORKFLOW_SHA,
+  };
+  const token = signedOidcToken(claims);
+  const fetchImpl = async (url, options = {}) => {
+    if (String(url) === GITHUB_OIDC_JWKS) {
+      return { ok: true, json: async () => ({ keys: [oidcJwk] }) };
+    }
+    const request = new URL(url);
+    assert.equal(request.hostname, 'vstoken.actions.githubusercontent.com');
+    assert.equal(request.searchParams.get('audience'), AGENT_GUARD_OIDC_AUDIENCE);
+    assert.equal(options.headers.authorization, `Bearer ${env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}`);
+    assert.equal(options.redirect, 'error');
+    return { ok: true, json: async () => ({ value: token }) };
+  };
+  return { env, claims, fetchImpl, now };
+}
 
 beforeEach(() => {
   const root = mkdtempSync(path.join(tmpdir(), 'agent-guard-policy-'));
@@ -38,7 +115,7 @@ describe('CI exemption', () => {
     assert.equal(isCi({ CI: 'false' }), false);
   });
 
-  test('only a process inside a GitHub-hosted workspace receives the bypass', () => {
+  test('hosted markers and root-owned runner paths never prove CI', async () => {
     const hosted = {
       CI: 'true',
       GITHUB_ACTIONS: 'true',
@@ -46,9 +123,49 @@ describe('CI exemption', () => {
       GITHUB_WORKSPACE: '/home/runner/work/repo/repo',
       RUNNER_TEMP: '/home/runner/work/_temp',
     };
-    assert.equal(isTrustedHostedCi({ env: hosted, cwd: '/home/runner/work/repo/repo/subdir', platform: 'linux' }), true);
-    assert.equal(isTrustedHostedCi({ env: hosted, cwd: '/private/tmp/local-checkout', platform: 'linux' }), false);
-    assert.equal(isTrustedHostedCi({ env: { ...hosted, RUNNER_ENVIRONMENT: 'self-hosted' }, cwd: hosted.GITHUB_WORKSPACE, platform: 'linux' }), false);
+    assert.equal(await isTrustedHostedCi({ env: hosted }), false);
+    assert.equal(await isTrustedHostedCi({
+      env: {
+        ...hosted,
+        GITHUB_WORKSPACE: '/Users/runner/work/repo/repo',
+        RUNNER_TEMP: '/Users/runner/work/_temp',
+      },
+    }), false);
+  });
+
+  test('a current GitHub OIDC token bound to this hosted job receives the bypass', async () => {
+    const fixture = hostedOidcFixture();
+    assert.equal(await isTrustedHostedCi(fixture), true);
+  });
+
+  test('OIDC trust rejects hostile endpoints, replayed context, and tampered claims', async () => {
+    const fixture = hostedOidcFixture();
+    let leaked = false;
+    assert.equal(await isTrustedHostedCi({
+      ...fixture,
+      env: { ...fixture.env, ACTIONS_ID_TOKEN_REQUEST_URL: 'https://attacker.invalid/token' },
+      fetchImpl: async () => {
+        leaked = true;
+        throw new Error('must not send the request credential');
+      },
+    }), false);
+    assert.equal(leaked, false);
+
+    assert.equal(await isTrustedHostedCi({
+      ...fixture,
+      env: { ...fixture.env, GITHUB_RUN_ID: 'different-run' },
+    }), false);
+
+    const tamperedClaims = { ...fixture.claims, runner_environment: 'self-hosted' };
+    const tamperedToken = signedOidcToken(tamperedClaims);
+    assert.equal(await isTrustedHostedCi({
+      ...fixture,
+      fetchImpl: async (url) => (
+        String(url) === GITHUB_OIDC_JWKS
+          ? { ok: true, json: async () => ({ keys: [oidcJwk] }) }
+          : { ok: true, json: async () => ({ value: tamperedToken }) }
+      ),
+    }), false);
   });
 
   test('production state cannot be redirected through process environment paths', () => {

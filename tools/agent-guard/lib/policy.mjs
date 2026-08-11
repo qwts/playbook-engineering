@@ -1,10 +1,9 @@
 // Who is asking, what they are asking to run, and whether they are allowed to.
 //
 // Three separable questions, kept separate:
-//   1. Is this CI?      → the entire mechanism is off. Hosted runners are
-//                         disposable, isolated, and already bounded by
-//                         job timeouts. They were never the problem and must
-//                         not be slowed down.
+//   1. Is this cryptographically attested GitHub-hosted CI? → the entire
+//                         mechanism is off. Environment and filesystem hints
+//                         alone are never sufficient for this bypass.
 //   2. Is this an agent? → agents do not get the heavy local suites. They push
 //                         and let GitHub CI verify, which is the authoritative
 //                         lane regardless.
@@ -15,10 +14,11 @@ import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { ensureStateDirs, grantsDir } from './protocol.mjs';
+export { githubHostedCiTrust, isTrustedHostedCi } from './hosted-ci.mjs';
 
 /**
- * CI detection. Broad on purpose — a false positive costs a hosted runner
- * nothing, while a false negative slows down every build in the fleet.
+ * Informational CI-marker detection. Broad by design, but never a trust
+ * decision: only signed GitHub OIDC attestation can grant the bypass.
  */
 export function isCi(env = process.env) {
   return (
@@ -30,24 +30,6 @@ export function isCi(env = process.env) {
     typeof env.GITLAB_CI === 'string' ||
     typeof env.JENKINS_URL === 'string'
   );
-}
-
-/**
- * A CI marker is forgeable by a local process.  The bypass is therefore
- * limited to the filesystem boundary of a GitHub-hosted runner: the process
- * must actually be executing inside the hosted workspace tree, with the
- * matching hosted-runner metadata and temp directory.  A local agent can copy
- * these environment variables, but it cannot move its cwd underneath the
- * runner-owned absolute root.
- */
-export function isTrustedHostedCi({ env = process.env, cwd = process.cwd(), platform = process.platform } = {}) {
-  if (!isCi(env) || env.GITHUB_ACTIONS !== 'true' || env.RUNNER_ENVIRONMENT !== 'github-hosted') return false;
-  const runnerRoot = platform === 'darwin' ? '/Users/runner/work' : platform === 'linux' ? '/home/runner/work' : null;
-  if (runnerRoot === null) return false;
-  const workspace = typeof env.GITHUB_WORKSPACE === 'string' ? path.resolve(env.GITHUB_WORKSPACE) : '';
-  const runnerTemp = typeof env.RUNNER_TEMP === 'string' ? path.resolve(env.RUNNER_TEMP) : '';
-  const inside = (child, parent) => child === parent || child.startsWith(`${parent}${path.sep}`);
-  return inside(workspace, runnerRoot) && inside(path.resolve(cwd), workspace) && inside(runnerTemp, runnerRoot);
 }
 
 /**
@@ -64,8 +46,9 @@ export function isTrustedHostedCi({ env = process.env, cwd = process.cwd(), plat
  *
  * Absence of a marker is not human authentication: an agent-controlled script
  * can unset ordinary environment variables before invoking the wrapper. Local
- * callers therefore fail closed. Hosted CI is exempted separately before lane
- * policy runs; a human owner can run the underlying lane directly.
+ * callers therefore fail closed. OIDC-attested GitHub-hosted CI is exempted
+ * separately before lane policy runs; a human owner can run the underlying
+ * lane directly.
  */
 export function isAgentSession(_env = process.env) {
   return true;
@@ -178,7 +161,7 @@ export function evaluateLanePolicy({ label, command, env = process.env }) {
     actor: 'agent',
     message:
       `The "${lane.id}" lane is a heavy local suite (${lane.why}) and agents do not run it on this machine by default. ` +
-      'Push the branch and let GitHub CI verify — CI is the authoritative lane, and it is exempt from this guard. ' +
+      'Push the branch and let GitHub CI verify — attested GitHub-hosted CI is the authoritative exempt lane. ' +
       'If a local run is genuinely required, the owner can run it directly from their own terminal; agent sessions cannot receive forgeable local grants.',
   };
 }

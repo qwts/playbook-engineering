@@ -47,6 +47,7 @@ describe('agent-guard conformance (ENG-0138)', () => {
       'tools/agent-guard/guard-agent-command.mjs',
       'tools/agent-guard/arbiter.mjs',
       'tools/agent-guard/lib/budget.mjs',
+      'tools/agent-guard/lib/hosted-ci.mjs',
       'tools/agent-guard/lib/leases.mjs',
       'tools/agent-guard/lib/policy.mjs',
       'tools/agent-guard/lib/protocol.mjs',
@@ -274,7 +275,7 @@ describe('agent-guard conformance (ENG-0138)', () => {
     assert.equal(status.availableMb, 3225);
   });
 
-  test('CI is exempt, so this never slows a hosted runner down', () => {
+  test('CI markers alone never grant the hosted-runner exemption', async () => {
     assert.equal(isCi({ GITHUB_ACTIONS: 'true' }), true);
     assert.equal(isCi({ CI: 'true' }), true);
     assert.equal(isCi({}), false);
@@ -285,8 +286,7 @@ describe('agent-guard conformance (ENG-0138)', () => {
       GITHUB_WORKSPACE: '/home/runner/work/repo/repo',
       RUNNER_TEMP: '/home/runner/work/_temp',
     };
-    assert.equal(isTrustedHostedCi({ env: hosted, cwd: hosted.GITHUB_WORKSPACE, platform: 'linux' }), true);
-    assert.equal(isTrustedHostedCi({ env: hosted, cwd: root, platform: 'linux' }), false);
+    assert.equal(await isTrustedHostedCi({ env: hosted }), false);
   });
 
   test('an inherited CI marker does not exempt an agent process', () => {
@@ -317,5 +317,22 @@ describe('agent-guard conformance (ENG-0138)', () => {
       env: { HOME: process.env.HOME, PATH: process.env.PATH },
     });
     assert.notEqual(strippedIdentity.status, 0);
+    const forgedHosted = spawnSync(process.execPath, [runner, '--label', 'test:e2e', '--', process.execPath, '-e', 'process.exit(0)'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...localProcessEnv,
+        CI: 'true',
+        GITHUB_ACTIONS: 'true',
+        RUNNER_ENVIRONMENT: 'github-hosted',
+        GITHUB_WORKSPACE: '/home/runner/work/repo/repo',
+        RUNNER_TEMP: '/home/runner/work/_temp',
+        ACTIONS_ID_TOKEN_REQUEST_URL: 'https://attacker.invalid/token',
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'forged',
+      },
+    });
+    assert.notEqual(forgedHosted.status, 0);
+    assert.match(forgedHosted.stderr, /hosted-CI attestation failed/u);
+    assert.match(forgedHosted.stderr, /agents do not run it on this machine/u);
   });
 });

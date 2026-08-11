@@ -108,8 +108,8 @@ const TAMPERING = [
   {
     pattern: /(?:^|[\s;&|])(?:CI|GITHUB_ACTIONS|CONTINUOUS_INTEGRATION|BUILDKITE|GITLAB_CI|JENKINS_URL)=/u,
     reason:
-      'Blocked a command-local CI marker: hosted CI is exempt from admission because its runner is isolated, but a ' +
-      `local command cannot grant itself that exemption. Remove the assignment and use the guarded entrypoint. ${GUIDANCE}`,
+      'Blocked a command-local CI marker: only OIDC-attested GitHub-hosted CI is exempt from admission, and a ' +
+      `local command cannot mint that proof. Remove the assignment and use the guarded entrypoint. ${GUIDANCE}`,
   },
   {
     pattern: /\bAGENT_GUARD_FORCE=/u,
