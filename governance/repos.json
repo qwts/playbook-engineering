@@ -65,6 +65,21 @@
       "publish": true,
       "status": "active",
       "sharedCi": false,
+      "codexSync": {
+        "enabled": true,
+        "exclude": [],
+        "preserveJsonArrayEntries": {
+          ".claude/settings.json": [
+            "agent-bot agent-hook"
+          ],
+          ".codex/hooks.json": [
+            "agent-bot agent-hook"
+          ],
+          ".cursor/hooks.json": [
+            "agent-bot agent-hook"
+          ]
+        }
+      },
       "delta": "",
       "note": "Standalone source of truth for agent identity runtime code and operational mechanics (ENG-0128)."
     },

@@ -22,6 +22,15 @@ export const GOVERNED_CLAUDE_FILES = ['.claude/settings.json'];
 
 export const GOVERNED_CURSOR_FILES = ['.cursor/hooks.json'];
 
+// JSON composition is intentionally narrower than the governed harness: only
+// hook adapters may retain repository-generated entries. Canonical registries
+// and other governed JSON must remain byte-identical across the fleet.
+export const GOVERNED_HOOK_ADAPTER_FILES = [
+  ...GOVERNED_CODEX_HOOK_FILES,
+  ...GOVERNED_CLAUDE_FILES,
+  ...GOVERNED_CURSOR_FILES,
+];
+
 // The machine memory guard (ENG-0138). Shipped as governed files rather than
 // left to each repo to copy, because two hand-maintained copies is what the
 // record is fixing: overlook and image-trail each carried their own drifted
@@ -62,9 +71,7 @@ export const GOVERNED_MODEL_ROUTING_FILES = [
 // downstream PR is matched on.
 export const GOVERNED_HARNESS_FILES = [
   ...GOVERNED_CODEX_FILES,
-  ...GOVERNED_CODEX_HOOK_FILES,
-  ...GOVERNED_CLAUDE_FILES,
-  ...GOVERNED_CURSOR_FILES,
+  ...GOVERNED_HOOK_ADAPTER_FILES,
   ...GOVERNED_AGENT_GUARD_FILES,
   ...GOVERNED_MODEL_ROUTING_FILES,
 ];

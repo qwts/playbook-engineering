@@ -8,7 +8,10 @@
 // hand, so a bare checkout can run the check with no install.
 
 import { readFileSync } from 'node:fs';
-import { GOVERNED_HARNESS_FILES } from './baseline-files.mjs';
+import {
+  GOVERNED_HARNESS_FILES,
+  GOVERNED_HOOK_ADAPTER_FILES,
+} from './baseline-files.mjs';
 
 export const VALID_VISIBILITY = ['public', 'private'];
 export const VALID_STATUS = ['active', 'onboarding', 'retired'];
@@ -109,6 +112,51 @@ export function validateManifest(manifest) {
                 errors.push(`${where}.codexSync.exclude contains duplicate path ${JSON.stringify(path)}`);
               }
               excluded.add(path);
+            }
+          }
+        }
+        if (repo.codexSync.preserveJsonArrayEntries !== undefined) {
+          const compositions = repo.codexSync.preserveJsonArrayEntries;
+          if (compositions === null || typeof compositions !== 'object' || Array.isArray(compositions)) {
+            errors.push(`${where}.codexSync.preserveJsonArrayEntries must be an object when present`);
+          } else {
+            const excluded = new Set(
+              Array.isArray(repo.codexSync.exclude) ? repo.codexSync.exclude : [],
+            );
+            for (const [path, markers] of Object.entries(compositions)) {
+              if (!GOVERNED_HARNESS_FILES.includes(path) || !path.endsWith('.json')) {
+                errors.push(
+                  `${where}.codexSync.preserveJsonArrayEntries contains unmanaged JSON path ${JSON.stringify(path)}`,
+                );
+              } else if (!GOVERNED_HOOK_ADAPTER_FILES.includes(path)) {
+                errors.push(
+                  `${where}.codexSync.preserveJsonArrayEntries contains non-hook-adapter JSON path ${JSON.stringify(path)}`,
+                );
+              }
+              if (excluded.has(path)) {
+                errors.push(
+                  `${where}.codexSync.preserveJsonArrayEntries configures excluded path ${JSON.stringify(path)}`,
+                );
+              }
+              if (!Array.isArray(markers) || markers.length === 0) {
+                errors.push(
+                  `${where}.codexSync.preserveJsonArrayEntries.${path} must be a non-empty array`,
+                );
+                continue;
+              }
+              const seenMarkers = new Set();
+              for (const marker of markers) {
+                if (typeof marker !== 'string' || marker.length === 0) {
+                  errors.push(
+                    `${where}.codexSync.preserveJsonArrayEntries.${path} contains an invalid marker`,
+                  );
+                } else if (seenMarkers.has(marker)) {
+                  errors.push(
+                    `${where}.codexSync.preserveJsonArrayEntries.${path} contains duplicate marker ${JSON.stringify(marker)}`,
+                  );
+                }
+                seenMarkers.add(marker);
+              }
             }
           }
         }
