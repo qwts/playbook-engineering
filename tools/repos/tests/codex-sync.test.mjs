@@ -258,6 +258,35 @@ test('Claude composition keeps repo configuration while replacing governed hooks
   assert.equal(merged.hooks.SessionStart.length, 1);
 });
 
+test('composition rejects arrays that collide with canonical non-array paths', () => {
+  const marker = 'agent-bot agent-hook';
+  const source = canonical('.codex/hooks.json', `${JSON.stringify({
+    hooks: {
+      PreToolUse: [{ command: 'managed-guard' }],
+    },
+  }, null, 2)}\n`);
+  const target = Buffer.from(`${JSON.stringify({
+    hooks: [{ command: marker }],
+  }, null, 2)}\n`);
+
+  assert.throws(
+    () => mergeManagedFile(source, target, { preserveArrayEntriesContaining: [marker] }),
+    /preserved array path hooks collides with canonical non-array value/,
+  );
+});
+
+test('composition rejects prototype-sensitive paths without mutating prototypes', () => {
+  const marker = 'agent-bot agent-hook';
+  const source = canonical('.codex/hooks.json', '{}\n');
+  const target = Buffer.from(`{"__proto__":{"polluted":[{"command":"${marker}"}]}}\n`);
+
+  assert.throws(
+    () => mergeManagedFile(source, target, { preserveArrayEntriesContaining: [marker] }),
+    /prototype-sensitive JSON path segment "__proto__"/,
+  );
+  assert.equal(Object.hasOwn(Object.prototype, 'polluted'), false);
+});
+
 test('managed JSON overlays reject canonical keys without declared ownership', () => {
   const source = canonical('.claude/settings.json', JSON.stringify({
     permissions: { defaultMode: 'acceptEdits' },

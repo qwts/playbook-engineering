@@ -117,7 +117,9 @@ export function validateManifest(manifest) {
           if (compositions === null || typeof compositions !== 'object' || Array.isArray(compositions)) {
             errors.push(`${where}.codexSync.preserveJsonArrayEntries must be an object when present`);
           } else {
-            const excluded = new Set(repo.codexSync.exclude ?? []);
+            const excluded = new Set(
+              Array.isArray(repo.codexSync.exclude) ? repo.codexSync.exclude : [],
+            );
             for (const [path, markers] of Object.entries(compositions)) {
               if (!GOVERNED_HARNESS_FILES.includes(path) || !path.endsWith('.json')) {
                 errors.push(

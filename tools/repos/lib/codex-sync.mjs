@@ -55,7 +55,15 @@ function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+const PROTOTYPE_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
+
+function assertSafeJsonPath(path) {
+  const unsafe = path.find((segment) => PROTOTYPE_PATH_SEGMENTS.has(segment));
+  if (unsafe) throw new Error(`refusing prototype-sensitive JSON path segment ${JSON.stringify(unsafe)}`);
+}
+
 function pathValue(source, path) {
+  assertSafeJsonPath(path);
   let value = source;
   for (const segment of path) {
     if (!isPlainObject(value) || !Object.hasOwn(value, segment)) {
@@ -67,15 +75,20 @@ function pathValue(source, path) {
 }
 
 function setPathValue(target, path, value) {
+  assertSafeJsonPath(path);
   let parent = target;
   for (const segment of path.slice(0, -1)) {
-    if (!isPlainObject(parent[segment])) parent[segment] = {};
+    if (!Object.hasOwn(parent, segment)) parent[segment] = {};
+    else if (!isPlainObject(parent[segment])) {
+      throw new Error(`JSON path ${path.join('.')} collides with non-object ${segment}`);
+    }
     parent = parent[segment];
   }
   parent[path.at(-1)] = value;
 }
 
 function deletePathValue(target, path) {
+  assertSafeJsonPath(path);
   let parent = target;
   for (const segment of path.slice(0, -1)) {
     if (!isPlainObject(parent[segment])) return;
@@ -119,7 +132,12 @@ function preservedArrayEntries(value, markers, parent = [], found = []) {
 function composePreservedArrayEntries(managed, preservedEntries, markers) {
   for (const preserved of preservedEntries) {
     const candidate = pathValue(managed, preserved.path);
-    const current = candidate.exists && Array.isArray(candidate.value) ? candidate.value : [];
+    if (candidate.exists && !Array.isArray(candidate.value)) {
+      throw new Error(
+        `preserved array path ${preserved.path.join('.')} collides with canonical non-array value`,
+      );
+    }
+    const current = candidate.exists ? candidate.value : [];
     const foreign = current.filter((entry) => !containsAnyMarker(entry, markers));
     setPathValue(managed, preserved.path, [...foreign, ...preserved.entries]);
   }

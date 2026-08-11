@@ -152,6 +152,19 @@ test('rejects invalid downstream JSON array-entry ownership', () => {
   assert.ok(errors.some((error) => error.includes('must be a non-empty array')));
 });
 
+test('invalid exclusions do not crash composition validation', () => {
+  const m = validManifest();
+  m.repos[1].codexSync = {
+    exclude: {},
+    preserveJsonArrayEntries: {
+      '.codex/hooks.json': ['agent-bot agent-hook'],
+    },
+  };
+
+  assert.doesNotThrow(() => validateManifest(m));
+  assert.ok(validateManifest(m).some((error) => error.includes('exclude must be an array')));
+});
+
 // --- rendering ----------------------------------------------------------
 
 test('renderTable is deterministic for identical input', () => {
