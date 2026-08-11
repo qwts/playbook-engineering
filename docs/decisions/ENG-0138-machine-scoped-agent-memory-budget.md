@@ -77,9 +77,10 @@ repos. Concretely:
    opt-in for an agent is an out-of-band, time-boxed grant the owner creates:
    an environment variable would be an opt-in the agent grants itself, since the
    agent composes its own command lines.
-6. **CI is exempt entirely.** Hosted runners are disposable, isolated and
-   already bounded by job timeouts. They were never the problem and must not be
-   slowed down.
+6. **The wrapper never infers a CI exemption.** Markers and paths are forgeable,
+   while GitHub OIDC uses a transferable bearer credential that does not prove
+   process location. Hosted workflows invoke underlying CI commands directly,
+   keeping CI outside the local wrapper without a replayable bypass.
 7. **Enforcement covers every harness.** Claude Code `PreToolUse`, Cursor
    `beforeShellExecution` and Codex `PreToolUse` all invoke the same hook. A
    guard only one harness honours does not solve a problem that Codex sessions
@@ -95,7 +96,8 @@ and rejected on structural grounds:
 - **The docs-gov model** (an env-gated external checkout, pinned to `@v1`) runs
   the tooling *in GitHub Actions against the caller's repo*. This guard must run
   on a local machine, inside a pre-execution hook, at the moment a command is
-  typed — and CI is exempt by design. There is no CI job for it to live in.
+  typed. Hosted workflows use their direct CI entrypoints, so there is no CI
+  job for the guard itself to live in.
 - **`skills/`** is manual symlink distribution into `~/.claude/skills`, and is
   Claude-only. Codex and Cursor do not read it, and the wrapper must be
   invocable as a repo-relative path from `package.json`.

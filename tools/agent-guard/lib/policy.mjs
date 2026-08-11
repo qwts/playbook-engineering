@@ -1,13 +1,9 @@
 // Who is asking, what they are asking to run, and whether they are allowed to.
 //
-// Three separable questions, kept separate:
-//   1. Is this CI?      → the entire mechanism is off. Hosted runners are
-//                         disposable, isolated, and already bounded by
-//                         job timeouts. They were never the problem and must
-//                         not be slowed down.
-//   2. Is this an agent? → agents do not get the heavy local suites. They push
-//                         and let GitHub CI verify, which is the authoritative
-//                         lane regardless.
+// One authorization question: is this an agent? Agents do not get the heavy
+// local suites. They push and let GitHub CI verify, which is the authoritative
+// lane regardless. The wrapper does not try to infer whether it is running in
+// CI because no available process-local evidence proves process locality.
 // Heavy lanes are never delegated back to an agent process. A same-user file
 // or local token is forgeable by that process and cannot prove human approval.
 
@@ -17,8 +13,8 @@ import path from 'node:path';
 import { ensureStateDirs, grantsDir } from './protocol.mjs';
 
 /**
- * CI detection. Broad on purpose — a false positive costs a hosted runner
- * nothing, while a false negative slows down every build in the fleet.
+ * Informational CI-marker detection. Broad by design, but never a trust or
+ * authorization decision: process-local evidence cannot prove process locality.
  */
 export function isCi(env = process.env) {
   return (
@@ -30,24 +26,6 @@ export function isCi(env = process.env) {
     typeof env.GITLAB_CI === 'string' ||
     typeof env.JENKINS_URL === 'string'
   );
-}
-
-/**
- * A CI marker is forgeable by a local process.  The bypass is therefore
- * limited to the filesystem boundary of a GitHub-hosted runner: the process
- * must actually be executing inside the hosted workspace tree, with the
- * matching hosted-runner metadata and temp directory.  A local agent can copy
- * these environment variables, but it cannot move its cwd underneath the
- * runner-owned absolute root.
- */
-export function isTrustedHostedCi({ env = process.env, cwd = process.cwd(), platform = process.platform } = {}) {
-  if (!isCi(env) || env.GITHUB_ACTIONS !== 'true' || env.RUNNER_ENVIRONMENT !== 'github-hosted') return false;
-  const runnerRoot = platform === 'darwin' ? '/Users/runner/work' : platform === 'linux' ? '/home/runner/work' : null;
-  if (runnerRoot === null) return false;
-  const workspace = typeof env.GITHUB_WORKSPACE === 'string' ? path.resolve(env.GITHUB_WORKSPACE) : '';
-  const runnerTemp = typeof env.RUNNER_TEMP === 'string' ? path.resolve(env.RUNNER_TEMP) : '';
-  const inside = (child, parent) => child === parent || child.startsWith(`${parent}${path.sep}`);
-  return inside(workspace, runnerRoot) && inside(path.resolve(cwd), workspace) && inside(runnerTemp, runnerRoot);
 }
 
 /**
@@ -64,8 +42,9 @@ export function isTrustedHostedCi({ env = process.env, cwd = process.cwd(), plat
  *
  * Absence of a marker is not human authentication: an agent-controlled script
  * can unset ordinary environment variables before invoking the wrapper. Local
- * callers therefore fail closed. Hosted CI is exempted separately before lane
- * policy runs; a human owner can run the underlying lane directly.
+ * callers therefore fail closed. GitHub workflows run the underlying CI
+ * entrypoints directly instead of asking this local wrapper to infer where it
+ * is executing; a human owner can run the underlying lane directly too.
  */
 export function isAgentSession(_env = process.env) {
   return true;
@@ -178,7 +157,7 @@ export function evaluateLanePolicy({ label, command, env = process.env }) {
     actor: 'agent',
     message:
       `The "${lane.id}" lane is a heavy local suite (${lane.why}) and agents do not run it on this machine by default. ` +
-      'Push the branch and let GitHub CI verify — CI is the authoritative lane, and it is exempt from this guard. ' +
+      'Push the branch and let GitHub CI verify — the workflow invokes its underlying CI entrypoint directly. ' +
       'If a local run is genuinely required, the owner can run it directly from their own terminal; agent sessions cannot receive forgeable local grants.',
   };
 }

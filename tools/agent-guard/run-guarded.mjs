@@ -4,7 +4,7 @@
 // governed repo carried its own drifting copy of.
 //
 // What it does, in order:
-//   1. Gets out of the way in CI, and for nested guarded commands.
+//   1. Gets out of the way for nested guarded commands.
 //   2. Applies the agent-vs-human lane policy (lib/policy.mjs).
 //   3. Derives the ceiling from the effective machine/cgroup total and CLAMPS the request down to
 //      it — an `--rss-mb 8192` inherited from an old npm script becomes 3072 on
@@ -30,7 +30,7 @@ import process from 'node:process';
 
 import { clampCeiling, decideAdmission, deriveBudgetForMemory } from './lib/budget.mjs';
 import { acquireLease, heartbeatLease, leaseExists, psExecutable, readLeases, releaseLease, retargetLease, withAdmissionLock } from './lib/leases.mjs';
-import { evaluateLanePolicy, harnessName, isAgentSession, isTrustedHostedCi } from './lib/policy.mjs';
+import { evaluateLanePolicy, harnessName, isAgentSession } from './lib/policy.mjs';
 import { readMemoryStatus, topConsumers } from './lib/system-memory.mjs';
 
 const POLL_MS = 250;
@@ -148,7 +148,7 @@ function describeRefusal(decision, env) {
   if (consumers.length > 0) {
     lines.push(`Largest resident processes: ${consumers.map((entry) => `${entry.name} ${entry.rssMb} MB`).join(', ')}`);
   }
-  lines.push('CI is exempt from this guard — pushing and letting GitHub verify is always available.');
+  lines.push('GitHub CI runs the underlying CI entrypoint directly, so pushing and letting GitHub verify is always available.');
   return lines.join('\n[guard] ');
 }
 
@@ -208,10 +208,6 @@ async function main() {
   const { options, command } = parsed;
   if (command.length === 0) fail('no command given');
 
-  // Hosted CI is exempt only when the process is actually inside the fixed
-  // GitHub-hosted runner workspace. CI variables alone are ordinary process
-  // environment and are not sufficient proof of an isolated runner.
-  if (isTrustedHostedCi({ env: process.env, cwd: process.cwd(), platform: process.platform })) return passthrough(command);
   // Nested guarded scripts pass through — but only when the marker names a
   // live lease bound to this caller's process group. Lease ids are visible to
   // same-user processes, so id knowledge alone cannot prove nesting. A copied

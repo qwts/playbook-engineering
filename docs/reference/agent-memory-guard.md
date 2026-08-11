@@ -8,8 +8,11 @@ other. Decision record: [ENG-0138](../decisions/ENG-0138-machine-scoped-agent-me
 The tooling lives in [`tools/agent-guard/`](../../tools/agent-guard/run-guarded.mjs)
 and reaches governed repos through the fleet harness sync.
 
-**CI is exempt.** `CI=true` or `GITHUB_ACTIONS=true` makes the whole mechanism a
-no-op. Nothing here slows a hosted runner down.
+**The wrapper has no CI exemption.** Environment markers, runner-looking paths,
+and GitHub OIDC job credentials are all transferable to another process, so
+none can prove where the current wrapper is executing. GitHub workflows retain
+a reliable no-op path by invoking their underlying CI commands directly rather
+than entering this local-machine wrapper.
 
 ## Limits, and where they come from
 
@@ -66,8 +69,9 @@ Agents are denied these lanes locally by default:
 | `full-ci` | chains lint, typecheck, the suites and a build |
 
 **An agent's correct move is to push and let GitHub CI verify.** CI is the
-authoritative lane and is exempt from this guard, so nothing is lost but
-latency.
+authoritative lane. Its workflow invokes the underlying CI entrypoint directly,
+so nothing is lost but latency and no process-local signal has to authorize a
+wrapper bypass.
 
 The owner is never refused by policy — their runs are clamped and
 headroom-checked like anything else, and `AGENT_GUARD_FORCE=1` overrides a
@@ -124,12 +128,15 @@ The files arrive by harness sync. A consuming repo then:
 
 1. Points its guarded npm scripts at `tools/agent-guard/run-guarded.mjs` and
    deletes any local fork of the old guard.
-2. Removes heavy lanes from `permissions.allow` in `.claude/settings.json` —
+2. Points hosted workflows at the underlying CI scripts rather than the guarded
+   local aliases. No CI marker, runner path, or job credential changes wrapper
+   policy.
+3. Removes heavy lanes from `permissions.allow` in `.claude/settings.json` —
    pre-approving them is how they became routine.
-3. Adds `tools/agent-guard/tests/conformance.test.mjs` to its test command. This
+4. Adds `tools/agent-guard/tests/conformance.test.mjs` to its test command. This
    is not optional: it is what fails a future sync that drops the hook wiring,
    which has already happened once.
-4. Rewrites its `AGENTS.md` validation section to say push-and-let-CI-verify
+5. Rewrites its `AGENTS.md` validation section to say push-and-let-CI-verify
    rather than run-the-suites-locally.
 
 ## Limitations
@@ -142,4 +149,7 @@ The files arrive by harness sync. A consuming repo then:
   reduced availability for everyone else.
 - The guard cannot see memory pressure caused by applications rather than runs,
   beyond what the availability and swap readings already reflect.
+- GitHub does not provide a job credential bound to the current process or
+  machine. Its OIDC request credential is a transferable bearer credential, so
+  the wrapper deliberately has no hosted-CI detection or bypass.
 - Windows falls back to passthrough; the probes target macOS and Linux.

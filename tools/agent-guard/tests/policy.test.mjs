@@ -9,7 +9,7 @@ import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
 
 import { evaluateCommand, evaluateHookInput, heavyLaneFor, nodeRunScriptNames, normalizeCommand, npmScriptNames, otherPackageScriptNames, resolveExecutionDir, resolveExecutionDirs, splitSegments, stripInertText } from '../guard-agent-command.mjs';
-import { classifyLane, evaluateLanePolicy, harnessName, isAgentSession, isCi, isTrustedHostedCi, listGrants, readGrant, revokeGrant, writeGrant } from '../lib/policy.mjs';
+import { classifyLane, evaluateLanePolicy, harnessName, isAgentSession, isCi, listGrants, readGrant, revokeGrant, writeGrant } from '../lib/policy.mjs';
 import { ensureStateDirs, stateDir } from '../lib/protocol.mjs';
 
 const roots = [];
@@ -26,7 +26,7 @@ after(() => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
-describe('CI exemption', () => {
+describe('CI markers', () => {
   test('the hosted lanes this org actually uses are detected', () => {
     assert.equal(isCi({ GITHUB_ACTIONS: 'true' }), true);
     assert.equal(isCi({ CI: 'true' }), true);
@@ -38,17 +38,20 @@ describe('CI exemption', () => {
     assert.equal(isCi({ CI: 'false' }), false);
   });
 
-  test('only a process inside a GitHub-hosted workspace receives the bypass', () => {
-    const hosted = {
-      CI: 'true',
-      GITHUB_ACTIONS: 'true',
-      RUNNER_ENVIRONMENT: 'github-hosted',
-      GITHUB_WORKSPACE: '/home/runner/work/repo/repo',
-      RUNNER_TEMP: '/home/runner/work/_temp',
-    };
-    assert.equal(isTrustedHostedCi({ env: hosted, cwd: '/home/runner/work/repo/repo/subdir', platform: 'linux' }), true);
-    assert.equal(isTrustedHostedCi({ env: hosted, cwd: '/private/tmp/local-checkout', platform: 'linux' }), false);
-    assert.equal(isTrustedHostedCi({ env: { ...hosted, RUNNER_ENVIRONMENT: 'self-hosted' }, cwd: hosted.GITHUB_WORKSPACE, platform: 'linux' }), false);
+  test('hosted markers, runner paths, and job credentials never authorize a heavy lane', () => {
+    for (const runnerRoot of ['/home/runner/work', '/Users/runner/work']) {
+      const hosted = {
+        CI: 'true',
+        GITHUB_ACTIONS: 'true',
+        RUNNER_ENVIRONMENT: 'github-hosted',
+        GITHUB_WORKSPACE: `${runnerRoot}/repo/repo`,
+        RUNNER_TEMP: `${runnerRoot}/_temp`,
+        ACTIONS_ID_TOKEN_REQUEST_URL: 'https://vstoken.actions.githubusercontent.com/oidc',
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'replayable-job-credential',
+      };
+      assert.equal(isCi(hosted), true);
+      assert.equal(evaluateLanePolicy({ label: 'test:e2e', env: hosted }).allowed, false);
+    }
   });
 
   test('production state cannot be redirected through process environment paths', () => {
