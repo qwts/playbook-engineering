@@ -112,6 +112,45 @@ export function validateManifest(manifest) {
             }
           }
         }
+        if (repo.codexSync.preserveJsonArrayEntries !== undefined) {
+          const compositions = repo.codexSync.preserveJsonArrayEntries;
+          if (compositions === null || typeof compositions !== 'object' || Array.isArray(compositions)) {
+            errors.push(`${where}.codexSync.preserveJsonArrayEntries must be an object when present`);
+          } else {
+            const excluded = new Set(repo.codexSync.exclude ?? []);
+            for (const [path, markers] of Object.entries(compositions)) {
+              if (!GOVERNED_HARNESS_FILES.includes(path) || !path.endsWith('.json')) {
+                errors.push(
+                  `${where}.codexSync.preserveJsonArrayEntries contains unmanaged JSON path ${JSON.stringify(path)}`,
+                );
+              }
+              if (excluded.has(path)) {
+                errors.push(
+                  `${where}.codexSync.preserveJsonArrayEntries configures excluded path ${JSON.stringify(path)}`,
+                );
+              }
+              if (!Array.isArray(markers) || markers.length === 0) {
+                errors.push(
+                  `${where}.codexSync.preserveJsonArrayEntries.${path} must be a non-empty array`,
+                );
+                continue;
+              }
+              const seenMarkers = new Set();
+              for (const marker of markers) {
+                if (typeof marker !== 'string' || marker.length === 0) {
+                  errors.push(
+                    `${where}.codexSync.preserveJsonArrayEntries.${path} contains an invalid marker`,
+                  );
+                } else if (seenMarkers.has(marker)) {
+                  errors.push(
+                    `${where}.codexSync.preserveJsonArrayEntries.${path} contains duplicate marker ${JSON.stringify(marker)}`,
+                  );
+                }
+                seenMarkers.add(marker);
+              }
+            }
+          }
+        }
       }
     }
   });

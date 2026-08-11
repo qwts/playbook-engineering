@@ -155,6 +155,109 @@ test('managed JSON ownership propagates deletions without removing repository ho
   assert.equal(Object.hasOwn(merged.hooks, 'WorktreeCreate'), false);
 });
 
+test('manifest-declared composition preserves generated hook adapters exactly once', () => {
+  const marker = 'agent-bot agent-hook';
+  const generated = (event) => ({
+    hooks: [{ type: 'command', command: `agent-hook --event ${event} # ${marker}` }],
+  });
+  const options = { preserveArrayEntriesContaining: [marker] };
+  const cases = [
+    {
+      path: '.codex/hooks.json',
+      source: {
+        description: 'current shared policy',
+        hooks: { PreToolUse: [{ hooks: [{ command: 'current-codex-guard' }] }] },
+      },
+      target: {
+        description: 'stale shared policy',
+        hooks: {
+          PreToolUse: [
+            { hooks: [{ command: 'stale-codex-guard' }] },
+            generated('pre-tool-use'),
+            generated('pre-tool-use'),
+          ],
+          SessionStart: [generated('session-start')],
+        },
+      },
+      sharedEvent: 'PreToolUse',
+      sharedCommand: 'current-codex-guard',
+    },
+    {
+      path: '.cursor/hooks.json',
+      source: {
+        version: 1,
+        hooks: { beforeShellExecution: [{ command: 'current-cursor-guard' }] },
+      },
+      target: {
+        version: 1,
+        hooks: {
+          beforeShellExecution: [
+            { command: 'stale-cursor-guard' },
+            { command: `agent-hook --event pre-command # ${marker}` },
+            { command: `agent-hook --event pre-command # ${marker}` },
+          ],
+          sessionStart: [{ command: `agent-hook --event session-start # ${marker}` }],
+        },
+      },
+      sharedEvent: 'beforeShellExecution',
+      sharedCommand: 'current-cursor-guard',
+    },
+  ];
+
+  for (const fixture of cases) {
+    const source = canonical(fixture.path, `${JSON.stringify(fixture.source, null, 2)}\n`);
+    const target = Buffer.from(`${JSON.stringify(fixture.target, null, 2)}\n`);
+    const first = mergeManagedFile(source, target, options);
+    const second = mergeManagedFile(source, first.content, options);
+    const merged = JSON.parse(first.content.toString('utf8'));
+    const shared = merged.hooks[fixture.sharedEvent];
+
+    assert.equal(first.content.toString('utf8'), second.content.toString('utf8'), fixture.path);
+    assert.match(JSON.stringify(shared[0]), new RegExp(fixture.sharedCommand));
+    assert.equal(shared.filter((entry) => JSON.stringify(entry).includes(marker)).length, 1);
+    assert.equal(JSON.stringify(merged).includes('stale-'), false);
+  }
+});
+
+test('Claude composition keeps repo configuration while replacing governed hooks', () => {
+  const path = '.claude/settings.json';
+  const marker = 'agent-bot agent-hook';
+  const generated = (event) => ({
+    hooks: [{ type: 'command', command: `agent-hook --event ${event} # ${marker}` }],
+  });
+  const source = canonical(path, `${JSON.stringify({
+    $schema: 'current-schema',
+    hooks: {
+      PreToolUse: [{ matcher: 'Bash', hooks: [{ command: 'current-guard' }] }],
+      WorktreeCreate: [{ hooks: [{ command: 'current-worktree' }] }],
+    },
+  }, null, 2)}\n`);
+  const target = Buffer.from(`${JSON.stringify({
+    permissions: { defaultMode: 'acceptEdits' },
+    hooks: {
+      WorktreeCreate: [{ hooks: [{ command: 'stale-worktree' }] }],
+      PreToolUse: [
+        { matcher: 'Bash', hooks: [{ command: 'stale-guard' }] },
+        generated('pre-tool-use'),
+        generated('pre-tool-use'),
+      ],
+      SessionStart: [generated('session-start')],
+    },
+  }, null, 2)}\n`);
+  const options = { preserveArrayEntriesContaining: [marker] };
+  const first = mergeManagedFile(source, target, options);
+  const second = mergeManagedFile(source, first.content, options);
+  const merged = JSON.parse(first.content.toString('utf8'));
+
+  assert.equal(first.content.toString('utf8'), second.content.toString('utf8'));
+  assert.deepEqual(merged.permissions, { defaultMode: 'acceptEdits' });
+  assert.equal(merged.$schema, 'current-schema');
+  assert.equal(merged.hooks.PreToolUse[0].hooks[0].command, 'current-guard');
+  assert.equal(merged.hooks.PreToolUse.filter((entry) => JSON.stringify(entry).includes(marker)).length, 1);
+  assert.equal(merged.hooks.WorktreeCreate[0].hooks[0].command, 'current-worktree');
+  assert.equal(merged.hooks.SessionStart.length, 1);
+});
+
 test('managed JSON overlays reject canonical keys without declared ownership', () => {
   const source = canonical('.claude/settings.json', JSON.stringify({
     permissions: { defaultMode: 'acceptEdits' },
@@ -292,6 +395,8 @@ test('an open sync pull repairs a JSON overlay from the target default branch', 
     permissions: { defaultMode: 'acceptEdits' },
     hooks: {
       PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'stale-local-guard' }] }],
+      // Repository-generated projection owned by the target manifest entry.
+      GeneratedHook: [{ hooks: [{ type: 'command', command: 'agent-bot agent-hook' }] }],
       SessionStart: [{ hooks: [{ type: 'command', command: 'repo-session' }] }],
       WorktreeCreate: [{ hooks: [{ type: 'command', command: 'managed' }] }],
     },
@@ -371,6 +476,9 @@ test('an open sync pull repairs a JSON overlay from the target default branch', 
       name: 'target',
       codexSync: {
         exclude: GOVERNED_HARNESS_FILES.filter((candidate) => candidate !== path),
+        preserveJsonArrayEntries: {
+          [path]: ['agent-bot agent-hook'],
+        },
       },
     },
     canonicalFiles: new Map([[path, source]]),
@@ -384,6 +492,9 @@ test('an open sync pull repairs a JSON overlay from the target default branch', 
   assert.equal(merged.hooks.PreToolUse[0].hooks[0].command, 'managed-guard');
   assert.deepEqual(merged.hooks.SessionStart, [{
     hooks: [{ type: 'command', command: 'repo-session' }],
+  }]);
+  assert.deepEqual(merged.hooks.GeneratedHook, [{
+    hooks: [{ type: 'command', command: 'agent-bot agent-hook' }],
   }]);
   assert.equal(merged.hooks.WorktreeCreate[0].hooks[0].command, 'managed');
 });

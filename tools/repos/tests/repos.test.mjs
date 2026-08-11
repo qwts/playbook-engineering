@@ -123,6 +123,35 @@ test('rejects invalid managed Codex exclusions', () => {
   assert.ok(errors.some((error) => error.includes('duplicate path')));
 });
 
+test('accepts explicit downstream JSON array-entry ownership', () => {
+  const m = validManifest();
+  m.repos[1].codexSync = {
+    preserveJsonArrayEntries: {
+      '.codex/hooks.json': ['agent-bot agent-hook'],
+    },
+  };
+  assert.deepEqual(validateManifest(m), []);
+});
+
+test('rejects invalid downstream JSON array-entry ownership', () => {
+  const m = validManifest();
+  m.repos[1].codexSync = {
+    exclude: ['.cursor/hooks.json'],
+    preserveJsonArrayEntries: {
+      'README.md': ['marker'],
+      '.codex/hooks.json': ['marker', 'marker', ''],
+      '.cursor/hooks.json': ['marker'],
+      '.claude/settings.json': [],
+    },
+  };
+  const errors = validateManifest(m);
+  assert.ok(errors.some((error) => error.includes('unmanaged JSON path')));
+  assert.ok(errors.some((error) => error.includes('duplicate marker')));
+  assert.ok(errors.some((error) => error.includes('invalid marker')));
+  assert.ok(errors.some((error) => error.includes('configures excluded path')));
+  assert.ok(errors.some((error) => error.includes('must be a non-empty array')));
+});
+
 // --- rendering ----------------------------------------------------------
 
 test('renderTable is deterministic for identical input', () => {
