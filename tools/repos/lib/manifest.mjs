@@ -8,7 +8,10 @@
 // hand, so a bare checkout can run the check with no install.
 
 import { readFileSync } from 'node:fs';
-import { GOVERNED_HARNESS_FILES } from './baseline-files.mjs';
+import {
+  GOVERNED_HARNESS_FILES,
+  GOVERNED_HOOK_ADAPTER_FILES,
+} from './baseline-files.mjs';
 
 export const VALID_VISIBILITY = ['public', 'private'];
 export const VALID_STATUS = ['active', 'onboarding', 'retired'];
@@ -124,6 +127,10 @@ export function validateManifest(manifest) {
               if (!GOVERNED_HARNESS_FILES.includes(path) || !path.endsWith('.json')) {
                 errors.push(
                   `${where}.codexSync.preserveJsonArrayEntries contains unmanaged JSON path ${JSON.stringify(path)}`,
+                );
+              } else if (!GOVERNED_HOOK_ADAPTER_FILES.includes(path)) {
+                errors.push(
+                  `${where}.codexSync.preserveJsonArrayEntries contains non-hook-adapter JSON path ${JSON.stringify(path)}`,
                 );
               }
               if (excluded.has(path)) {

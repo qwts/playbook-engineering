@@ -49,9 +49,11 @@ generated table below by hand.
   and `.claude/settings.json`; the field keeps its original name). Set
   `enabled: false` to skip a repository, or list managed paths under
   `exclude`. A repository that owns generated entries inside a managed JSON
-  adapter declares their stable markers under `preserveJsonArrayEntries`;
+  hook adapter declares their stable markers under
+  `preserveJsonArrayEntries`. Composition is restricted to
+  `.claude/settings.json`, `.codex/hooks.json`, and `.cursor/hooks.json`;
   synchronization composes those entries as data and never executes target
-  code. Unknown paths, empty markers, and duplicates fail validation.
+  code. Other paths, empty markers, and duplicates fail validation.
 - `delta` — the one-line variance this repo carries from the shared baseline, or
   empty for a pure consumer. Deltas are surveyed in
   [the SOP inventory](../sop/inventory.md).

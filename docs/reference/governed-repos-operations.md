@@ -111,12 +111,15 @@ Synchronization compares blobs and modes; most files are exact replacements.
 `.claude/settings.json` applies declared central paths only: values and
 deletions propagate while other target settings survive. Invalid JSON or
 undeclared source keys fail closed. A target that owns generated entries in a
-managed JSON adapter declares the file and stable entry marker under
-`codexSync.preserveJsonArrayEntries` in the manifest. Synchronization starts
-from canonical shared policy, appends only matching target array entries,
-deduplicates exact matches, and never executes downstream generators with its
-write credential. This composition is deterministic: central deletion and
-reordering still propagate, while a second run produces no new diff. Drift
+managed hook adapter declares the file and stable entry marker under
+`codexSync.preserveJsonArrayEntries` in the manifest. Preservation is limited
+to `.claude/settings.json`, `.codex/hooks.json`, and `.cursor/hooks.json` so
+canonical registries and other governed JSON remain byte-identical.
+Synchronization starts from canonical shared policy, appends only matching
+target array entries, deduplicates exact matches, and never executes downstream
+generators with its write credential. This composition is deterministic:
+central deletion and reordering still propagate, while a second run produces
+no new diff. Drift
 uses the stable `governance/harness-sync` branch and a `chores-dumb` pull
 request; default branches stay protected. Existing PRs are reconciled even
 when the base is current. The source sets `codexSync.enabled: false` because
