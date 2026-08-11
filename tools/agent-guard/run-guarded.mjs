@@ -4,8 +4,7 @@
 // governed repo carried its own drifting copy of.
 //
 // What it does, in order:
-//   1. Gets out of the way in OIDC-attested GitHub-hosted CI, and for nested
-//      guarded commands.
+//   1. Gets out of the way for nested guarded commands.
 //   2. Applies the agent-vs-human lane policy (lib/policy.mjs).
 //   3. Derives the ceiling from the effective machine/cgroup total and CLAMPS the request down to
 //      it — an `--rss-mb 8192` inherited from an old npm script becomes 3072 on
@@ -31,7 +30,7 @@ import process from 'node:process';
 
 import { clampCeiling, decideAdmission, deriveBudgetForMemory } from './lib/budget.mjs';
 import { acquireLease, heartbeatLease, leaseExists, psExecutable, readLeases, releaseLease, retargetLease, withAdmissionLock } from './lib/leases.mjs';
-import { evaluateLanePolicy, githubHostedCiTrust, harnessName, isAgentSession } from './lib/policy.mjs';
+import { evaluateLanePolicy, harnessName, isAgentSession } from './lib/policy.mjs';
 import { readMemoryStatus, topConsumers } from './lib/system-memory.mjs';
 
 const POLL_MS = 250;
@@ -149,7 +148,7 @@ function describeRefusal(decision, env) {
   if (consumers.length > 0) {
     lines.push(`Largest resident processes: ${consumers.map((entry) => `${entry.name} ${entry.rssMb} MB`).join(', ')}`);
   }
-  lines.push('OIDC-attested GitHub-hosted CI is exempt from this guard — pushing and letting GitHub verify is always available.');
+  lines.push('GitHub CI runs the underlying CI entrypoint directly, so pushing and letting GitHub verify is always available.');
   return lines.join('\n[guard] ');
 }
 
@@ -209,15 +208,6 @@ async function main() {
   const { options, command } = parsed;
   if (command.length === 0) fail('no command given');
 
-  // Hosted CI is exempt only after GitHub's OIDC issuer signs a short-lived
-  // token bound to this exact repository, workflow SHA, run, ref, and hosted
-  // runner. A root process can forge every local marker and path, so no local
-  // filesystem heuristic participates in this decision.
-  const hostedCi = await githubHostedCiTrust({ env: process.env });
-  if (hostedCi.trusted) return passthrough(command);
-  if (process.env.GITHUB_ACTIONS === 'true') {
-    note(`GitHub Actions markers are present but hosted-CI attestation failed (${hostedCi.reason}); applying local policy.`);
-  }
   // Nested guarded scripts pass through — but only when the marker names a
   // live lease bound to this caller's process group. Lease ids are visible to
   // same-user processes, so id knowledge alone cannot prove nesting. A copied

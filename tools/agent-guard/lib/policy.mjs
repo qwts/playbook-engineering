@@ -1,12 +1,9 @@
 // Who is asking, what they are asking to run, and whether they are allowed to.
 //
-// Three separable questions, kept separate:
-//   1. Is this cryptographically attested GitHub-hosted CI? → the entire
-//                         mechanism is off. Environment and filesystem hints
-//                         alone are never sufficient for this bypass.
-//   2. Is this an agent? → agents do not get the heavy local suites. They push
-//                         and let GitHub CI verify, which is the authoritative
-//                         lane regardless.
+// One authorization question: is this an agent? Agents do not get the heavy
+// local suites. They push and let GitHub CI verify, which is the authoritative
+// lane regardless. The wrapper does not try to infer whether it is running in
+// CI because no available process-local evidence proves process locality.
 // Heavy lanes are never delegated back to an agent process. A same-user file
 // or local token is forgeable by that process and cannot prove human approval.
 
@@ -14,11 +11,10 @@ import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { ensureStateDirs, grantsDir } from './protocol.mjs';
-export { githubHostedCiTrust, isTrustedHostedCi } from './hosted-ci.mjs';
 
 /**
- * Informational CI-marker detection. Broad by design, but never a trust
- * decision: only signed GitHub OIDC attestation can grant the bypass.
+ * Informational CI-marker detection. Broad by design, but never a trust or
+ * authorization decision: process-local evidence cannot prove process locality.
  */
 export function isCi(env = process.env) {
   return (
@@ -46,9 +42,9 @@ export function isCi(env = process.env) {
  *
  * Absence of a marker is not human authentication: an agent-controlled script
  * can unset ordinary environment variables before invoking the wrapper. Local
- * callers therefore fail closed. OIDC-attested GitHub-hosted CI is exempted
- * separately before lane policy runs; a human owner can run the underlying
- * lane directly.
+ * callers therefore fail closed. GitHub workflows run the underlying CI
+ * entrypoints directly instead of asking this local wrapper to infer where it
+ * is executing; a human owner can run the underlying lane directly too.
  */
 export function isAgentSession(_env = process.env) {
   return true;
@@ -161,7 +157,7 @@ export function evaluateLanePolicy({ label, command, env = process.env }) {
     actor: 'agent',
     message:
       `The "${lane.id}" lane is a heavy local suite (${lane.why}) and agents do not run it on this machine by default. ` +
-      'Push the branch and let GitHub CI verify — attested GitHub-hosted CI is the authoritative exempt lane. ' +
+      'Push the branch and let GitHub CI verify — the workflow invokes its underlying CI entrypoint directly. ' +
       'If a local run is genuinely required, the owner can run it directly from their own terminal; agent sessions cannot receive forgeable local grants.',
   };
 }

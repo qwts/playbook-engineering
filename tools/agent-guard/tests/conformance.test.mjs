@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 import { evaluateCommand, evaluateHookInput } from '../guard-agent-command.mjs';
 import { clampCeiling, deriveBudget } from '../lib/budget.mjs';
-import { isCi, isTrustedHostedCi } from '../lib/policy.mjs';
+import { isCi } from '../lib/policy.mjs';
 import { readMemoryStatus } from '../lib/system-memory.mjs';
 
 // <repo>/tools/agent-guard/tests/this-file → <repo>
@@ -47,7 +47,6 @@ describe('agent-guard conformance (ENG-0138)', () => {
       'tools/agent-guard/guard-agent-command.mjs',
       'tools/agent-guard/arbiter.mjs',
       'tools/agent-guard/lib/budget.mjs',
-      'tools/agent-guard/lib/hosted-ci.mjs',
       'tools/agent-guard/lib/leases.mjs',
       'tools/agent-guard/lib/policy.mjs',
       'tools/agent-guard/lib/protocol.mjs',
@@ -275,7 +274,7 @@ describe('agent-guard conformance (ENG-0138)', () => {
     assert.equal(status.availableMb, 3225);
   });
 
-  test('CI markers alone never grant the hosted-runner exemption', async () => {
+  test('CI markers are informational and never grant a wrapper exemption', () => {
     assert.equal(isCi({ GITHUB_ACTIONS: 'true' }), true);
     assert.equal(isCi({ CI: 'true' }), true);
     assert.equal(isCi({}), false);
@@ -286,7 +285,7 @@ describe('agent-guard conformance (ENG-0138)', () => {
       GITHUB_WORKSPACE: '/home/runner/work/repo/repo',
       RUNNER_TEMP: '/home/runner/work/_temp',
     };
-    assert.equal(await isTrustedHostedCi({ env: hosted }), false);
+    assert.equal(isCi(hosted), true);
   });
 
   test('an inherited CI marker does not exempt an agent process', () => {
@@ -332,7 +331,6 @@ describe('agent-guard conformance (ENG-0138)', () => {
       },
     });
     assert.notEqual(forgedHosted.status, 0);
-    assert.match(forgedHosted.stderr, /hosted-CI attestation failed/u);
     assert.match(forgedHosted.stderr, /agents do not run it on this machine/u);
   });
 });

@@ -89,9 +89,6 @@ jobs:
       ((needs.policy.outputs.run_full == 'true' && needs.preflight-evidence.outputs.validated != 'true') ||
       (needs.policy.outputs.run_post_merge == 'true' && needs.merge-evidence.outputs.validated != 'true'))
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -100,8 +97,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Verify GitHub-hosted runner attestation
-        run: node tools/agent-guard/run-guarded.mjs --label test:e2e -- node -e "process.stdout.write('hosted CI attested\\n')"
       - run: npm ci
       - name: Lint and configuration checks
         run: npm run lint:markdown && npm run docs:gov && npm run repos:check

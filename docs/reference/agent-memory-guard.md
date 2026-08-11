@@ -8,12 +8,11 @@ other. Decision record: [ENG-0138](../decisions/ENG-0138-machine-scoped-agent-me
 The tooling lives in [`tools/agent-guard/`](../../tools/agent-guard/run-guarded.mjs)
 and reaches governed repos through the fleet harness sync.
 
-**Attested GitHub-hosted CI is exempt.** The wrapper requests a short-lived
-GitHub OIDC token and verifies its signature, audience, hosted-runner claim,
-repository owner, and exact workflow-run context before making the guard a
-no-op. Environment markers and runner-looking paths alone are forgeable and
-never grant the bypass. Jobs that invoke guarded scripts therefore need
-`id-token: write`; missing or invalid attestation falls through to local policy.
+**The wrapper has no CI exemption.** Environment markers, runner-looking paths,
+and GitHub OIDC job credentials are all transferable to another process, so
+none can prove where the current wrapper is executing. GitHub workflows retain
+a reliable no-op path by invoking their underlying CI commands directly rather
+than entering this local-machine wrapper.
 
 ## Limits, and where they come from
 
@@ -70,9 +69,9 @@ Agents are denied these lanes locally by default:
 | `full-ci` | chains lint, typecheck, the suites and a build |
 
 **An agent's correct move is to push and let GitHub CI verify.** CI is the
-authoritative lane. A GitHub-hosted job with verified OIDC attestation is exempt
-from this guard, so nothing is lost but latency; self-hosted or unattested jobs
-remain guarded.
+authoritative lane. Its workflow invokes the underlying CI entrypoint directly,
+so nothing is lost but latency and no process-local signal has to authorize a
+wrapper bypass.
 
 The owner is never refused by policy — their runs are clamped and
 headroom-checked like anything else, and `AGENT_GUARD_FORCE=1` overrides a
@@ -129,9 +128,9 @@ The files arrive by harness sync. A consuming repo then:
 
 1. Points its guarded npm scripts at `tools/agent-guard/run-guarded.mjs` and
    deletes any local fork of the old guard.
-2. Grants `id-token: write` only to GitHub-hosted workflow jobs that execute
-   guarded scripts. The wrapper requests and verifies the token itself; no token
-   is persisted or passed in a command line.
+2. Points hosted workflows at the underlying CI scripts rather than the guarded
+   local aliases. No CI marker, runner path, or job credential changes wrapper
+   policy.
 3. Removes heavy lanes from `permissions.allow` in `.claude/settings.json` —
    pre-approving them is how they became routine.
 4. Adds `tools/agent-guard/tests/conformance.test.mjs` to its test command. This
@@ -150,10 +149,7 @@ The files arrive by harness sync. A consuming repo then:
   reduced availability for everyone else.
 - The guard cannot see memory pressure caused by applications rather than runs,
   beyond what the availability and swap readings already reflect.
-- The hosted-CI bypass requires network access to GitHub's OIDC issuer and a
-  job-scoped `id-token: write` permission. Failure to obtain or verify
-  attestation is fail-closed: the process receives local policy, never a
-  marker-based bypass.
-- Self-hosted Actions runners never receive the bypass, even with valid GitHub
-  OIDC, because their machine isolation and capacity are not implied by GitHub.
+- GitHub does not provide a job credential bound to the current process or
+  machine. Its OIDC request credential is a transferable bearer credential, so
+  the wrapper deliberately has no hosted-CI detection or bypass.
 - Windows falls back to passthrough; the probes target macOS and Linux.

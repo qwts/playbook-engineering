@@ -41,7 +41,6 @@ export const GOVERNED_AGENT_GUARD_FILES = [
   'tools/agent-guard/arbiter.mjs',
   'tools/agent-guard/guard-agent-command.mjs',
   'tools/agent-guard/run-guarded.mjs',
-  'tools/agent-guard/lib/hosted-ci.mjs',
   'tools/agent-guard/lib/budget.mjs',
   'tools/agent-guard/lib/leases.mjs',
   'tools/agent-guard/lib/policy.mjs',

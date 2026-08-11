@@ -42,7 +42,7 @@ const GUARD_GUIDE = 'https://github.com/qwts/playbook-engineering/blob/main/docs
 // Two different blocks need two different next steps, and a refusal whose
 // advice does not fit is one an agent argues with instead of following.
 const GUIDANCE =
-  'Push the branch and let GitHub CI verify — CI is the authoritative lane and is exempt from this guard. ' +
+  'Push the branch and let GitHub CI verify — its workflow invokes the underlying CI entrypoint directly. ' +
   `See ${GUARD_GUIDE}.`;
 
 // A direct binary is not necessarily a heavy run — in a tooling repo `node
@@ -108,8 +108,8 @@ const TAMPERING = [
   {
     pattern: /(?:^|[\s;&|])(?:CI|GITHUB_ACTIONS|CONTINUOUS_INTEGRATION|BUILDKITE|GITLAB_CI|JENKINS_URL)=/u,
     reason:
-      'Blocked a command-local CI marker: only OIDC-attested GitHub-hosted CI is exempt from admission, and a ' +
-      `local command cannot mint that proof. Remove the assignment and use the guarded entrypoint. ${GUIDANCE}`,
+      'Blocked a command-local CI marker: CI markers and bearer credentials never exempt this wrapper, and a ' +
+      `local command cannot change that policy. Remove the assignment and use the guarded entrypoint. ${GUIDANCE}`,
   },
   {
     pattern: /\bAGENT_GUARD_FORCE=/u,
