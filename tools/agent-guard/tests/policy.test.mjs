@@ -510,6 +510,16 @@ describe('command hook', () => {
     assert.equal(evaluateCommand("tar -cf /tmp/a.tar --checkpoint=1 --checkpoint-action=exec='npm run ci' README.md", opts()).allow, false);
   });
 
+  test('a script generated and dispatched in one line is denied before it exists (#189)', () => {
+    assert.equal(evaluateCommand("printf 'npx vitest\\n' > lane && chmod +x lane && ./lane", opts()).allow, false);
+    assert.equal(evaluateCommand("printf 'npx vitest\\n' > lane\nchmod +x lane\n./lane", opts()).allow, false);
+    assert.equal(evaluateCommand('./lane "$(printf x > lane)"', opts()).allow, false);
+    // A first-segment dispatch of a nonexistent path has no creator, and a
+    // relative path in argument position is data: both stay allowed.
+    assert.equal(evaluateCommand('./does-not-exist-here', opts()).allow, true);
+    assert.equal(evaluateCommand("printf 'x\\n' > lane && wc -l lane", opts()).allow, true);
+  });
+
   test('checked-in Node helpers pass by reviewed provenance; edits and additions do not (#191)', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'agent-guard-provenance-'));
     roots.push(repo);
@@ -538,6 +548,13 @@ describe('command hook', () => {
       false
     );
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs $(date)', local).allow, false);
+    // A double-quoted substitution is promoted to a *trailing* segment by
+    // stripInertText although it executes first — segment count, not
+    // order, is what fails closed here.
+    assert.equal(
+      evaluateCommand('node scripts/check-traceability.mjs "$(printf x > scripts/check-traceability.mjs)"', local).allow,
+      false
+    );
     // An edited helper no longer matches the reviewed blob: denied.
     writeFileSync(path.join(repo, 'scripts', 'check-traceability.mjs'), "require('child_process').execSync('npx vitest');\n");
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs', local).allow, false);
