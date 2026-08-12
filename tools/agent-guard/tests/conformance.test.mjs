@@ -224,6 +224,12 @@ describe('agent-guard conformance (ENG-0138)', () => {
       "printf 'npx vitest\\n' > 'lane' && chmod +x 'lane' && './lane'",
       "printf 'npx vitest\\n' > /tmp/lane-189 && chmod +x /tmp/lane-189 && /tmp/lane-189",
       'touch ./lane && ./lane',
+      // Quoting the deletion target does not make it prose (#198).
+      'rm -rf "$XDG_CACHE_HOME/agent-guard"',
+      'rm -rf "$HOME/.cache/agent-guard/leases"',
+      'rm -rf ~/".cache/agent-guard"',
+      'rm -rf "$HOME"/.cache/agent-guard/leases',
+      ': > "$HOME/.cache/agent-guard/leases/live.json"',
     ]) {
       assert.equal(evaluateCommand(command, { env }).allow, false, `expected the guard to deny: ${command}`);
     }
