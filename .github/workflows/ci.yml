@@ -99,7 +99,9 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Lint and configuration checks
-        run: npm run lint:markdown && npm run docs:gov && npm run repos:check
+        run: npm run lint:markdown && npm run docs:gov && npm run repos:check && npm run pins:check
+        env:
+          GH_DRIFT_TOKEN: ${{ github.token }}
       - name: Unit and workflow-tooling tests
         run: npm test
 
