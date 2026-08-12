@@ -518,6 +518,11 @@ describe('command hook', () => {
     assert.equal(evaluateCommand(lane, { ...opts(), cwd: env.AGENT_GUARD_STATE_DIR }).allow, false);
     assert.equal(evaluateCommand('BASH_ENV=/tmp/preload.sh bash -c true', opts()).allow, false);
     assert.equal(evaluateCommand('PATH=/tmp:$PATH npm run lint', opts()).allow, false);
+    // Wrapper option operands must not end the scan while a quoted
+    // assignment still follows (sudo run form: … [-u user] [VAR=value] …).
+    assert.equal(evaluateCommand("sudo -u root 'NODE_OPTIONS=--require=/tmp/preload.cjs' npm run lint", opts()).allow, false);
+    assert.equal(evaluateCommand("env -u FOO 'PATH=/tmp' npm run lint", opts()).allow, false);
+    assert.equal(evaluateCommand("timeout -s TERM 5 env 'BASH_ENV=/tmp/preload.sh' bash -c true", opts()).allow, false);
   });
 
   test('authoritative lease state is inaccessible to agent commands', () => {
