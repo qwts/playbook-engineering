@@ -5,11 +5,21 @@ name: Governed harness sync
 on:
   push:
     branches: [main]
+    # Every governed source root, so a change to any synced file propagates on
+    # merge instead of waiting for the weekly repair run. Must cover the
+    # governed harness manifest — the codex-sync test asserts that it does,
+    # because a path missing here is a fix that silently does not ship (the
+    # guard fixes #197–#205 sat on main unsynced because tools/agent-guard/**
+    # was absent from this list).
     paths:
       - '.codex/**'
       - '.claude/settings.json'
+      - '.cursor/hooks.json'
       - '.github/workflows/codex-sync.yml'
       - 'governance/repos.json'
+      - 'governance/agent-models.json'
+      - 'tools/agent-guard/**'
+      - 'tools/models/**'
       - 'tools/repos/lib/agent-bot-client.mjs'
       - 'tools/repos/lib/baseline-files.mjs'
       - 'tools/repos/lib/codex-sync.mjs'
