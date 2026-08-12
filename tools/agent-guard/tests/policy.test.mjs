@@ -598,6 +598,10 @@ describe('command hook', () => {
 
   test('authoritative lease state is inaccessible to agent commands', () => {
     assert.equal(evaluateCommand('rm -rf ~/.cache/agent-guard/leases', opts()).allow, false);
+    // The peak store shrinks future reservations; planting a low peak must
+    // be as impossible from a shell as deleting a lease (#203 review).
+    assert.equal(evaluateCommand('rm -rf ~/.cache/agent-guard/lane-peaks', opts()).allow, false);
+    assert.equal(evaluateCommand(': > $XDG_CACHE_HOME/agent-guard/lane-peaks/x.json', opts()).allow, false);
     assert.equal(evaluateCommand(': > ~/Library/Caches/agent-guard/leases/live.json', opts()).allow, false);
     assert.equal(evaluateCommand('rm -rf ~/.cache/agent{-,}-guard/leases', opts()).allow, false);
     assert.equal(evaluateCommand('rm -rf ~/.cache/agent*-guard/leases', opts()).allow, false);

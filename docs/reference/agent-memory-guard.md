@@ -24,7 +24,7 @@ Nothing is a constant. On a machine with `T` MB of RAM:
 | Machine budget | `T − reserve` | 6144 MB | 24576 MB |
 | Max per run | `min(2048, budget ÷ 2)` | 2048 MB | 2048 MB |
 | Availability floor | `max(768, T×0.125)` | 1024 MB | 4096 MB |
-| Light run | `floor ÷ 2` | 512 MB | 2048 MB |
+| Light run | `min(floor ÷ 2, cap ÷ 2)` | 512 MB | 1024 MB |
 
 A requested ceiling is **clamped down** to the per-run cap and never up: asking
 for less than the cap always works, asking for more never does. This is what

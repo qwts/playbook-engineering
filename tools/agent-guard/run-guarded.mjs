@@ -28,8 +28,8 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path';
 import process from 'node:process';
 
-import { clampCeiling, decideAdmission, deriveBudgetForMemory, laneReservationMb, recentLanePeakMb } from './lib/budget.mjs';
-import { acquireLease, heartbeatLease, leaseExists, psExecutable, readLeases, releaseLease, retargetLease, withAdmissionLock } from './lib/leases.mjs';
+import { clampCeiling, decideAdmission, deriveBudgetForMemory, laneReservationMb } from './lib/budget.mjs';
+import { acquireLease, heartbeatLease, leaseExists, psExecutable, readLanePeakMb, readLeases, recordLanePeak, releaseLease, retargetLease, withAdmissionLock } from './lib/leases.mjs';
 import { evaluateLanePolicy, harnessName, isAgentSession } from './lib/policy.mjs';
 import { readMemoryStatus, topConsumers } from './lib/system-memory.mjs';
 
@@ -236,16 +236,12 @@ async function main() {
   const worktree = process.cwd();
   const guardDir = path.join(worktree, '.guard');
 
-  // Plan with what the lane actually costs, enforce with the ceiling. A
-  // trustworthy recent peak lowers the reservation so a ~2 GB lane is not
-  // booked at the full cap (#180); the ceiling — and the kill at the ceiling
-  // — is unchanged by history.
-  let lanePeakMb = null;
-  try {
-    lanePeakMb = recentLanePeakMb(readFileSync(path.join(guardDir, 'history.jsonl'), 'utf8'), options.label);
-  } catch {
-    // No history yet: reserve the ceiling.
-  }
+  // Plan with what the lane actually costs, enforce with the ceiling. Peaks
+  // come from the protected state store — recorded only by run-guarded from
+  // RSS it measured, never from worktree files an agent can edit (#203
+  // review) — so a trustworthy recent peak lowers the reservation while the
+  // kill at the ceiling is unchanged by history.
+  const lanePeakMb = readLanePeakMb({ env: process.env, repo: path.basename(worktree), label: options.label });
   request.reserveMb = laneReservationMb(request.ceilingMb, lanePeakMb);
   if (request.reserveMb < request.ceilingMb) {
     note(`reserving ${request.reserveMb} MB from the lane's recent measured peak (${lanePeakMb} MB); the enforced ceiling stays ${request.ceilingMb} MB.`);
@@ -387,6 +383,9 @@ async function main() {
       note(`run failed: ${state.reason} (diagnostics in .guard/last-run.json).`);
       process.exit(1);
     }
+    // Only a completed run's peak informs future reservations: a run killed
+    // at the ceiling or timed out proves nothing about steady-state cost.
+    if (code === 0) recordLanePeak({ env: process.env, repo: path.basename(worktree), label: options.label, peakRssMb: state.peakRssMb });
     process.exit(code ?? (signal ? 1 : 0));
   });
 

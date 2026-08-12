@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { LANE_CAP_MB, SWAP_REFUSE_RATIO, clampCeiling, decideAdmission, deriveBudget, deriveBudgetForMemory, laneReservationMb, outstandingMb, recentLanePeakMb, unmaterializedMb } from '../lib/budget.mjs';
+import { LANE_CAP_MB, SWAP_REFUSE_RATIO, clampCeiling, decideAdmission, deriveBudget, deriveBudgetForMemory, laneReservationMb, outstandingMb, unmaterializedMb } from '../lib/budget.mjs';
 import { parseMeminfo, parsePressureLevel, parseSwapusage, parseVmStat, readMemoryStatus } from '../lib/system-memory.mjs';
 
 // Real output from the 8 GB machine during the incident this tool exists to
@@ -390,6 +390,18 @@ describe('pressure-aware admission (#180)', () => {
     const memory = { totalMb: 24576, availableMb: 12163, swapTotalMb: 4096, swapUsedMb: 4000 };
     assert.equal(decideAdmission({ budget, memory, leases: [], requestMb: budget.maxRunMb }).reason, 'swap-pressure');
   });
+
+  test('the light carve-out stays below the lane cap on any machine size', () => {
+    // On 32 GB, floor/2 reaches the lane cap; a carve-out that big would
+    // exempt every run from the pressure and swap gates entirely.
+    for (const totalMb of [8192, 16384, 24576, 32768, 65536]) {
+      const derived = deriveBudget(totalMb);
+      assert.ok(derived.lightRunMb < derived.maxRunMb, `lightRunMb must undercut maxRunMb at ${totalMb} MB`);
+    }
+    const big = deriveBudget(32768);
+    const pressured = { totalMb: 32768, availableMb: 20000, swapTotalMb: 2048, swapUsedMb: 100, pressureLevel: 2 };
+    assert.equal(decideAdmission({ budget: big, memory: pressured, leases: [], requestMb: big.maxRunMb }).reason, 'memory-pressure');
+  });
 });
 
 describe('lane reservation (#180)', () => {
@@ -409,18 +421,6 @@ describe('lane reservation (#180)', () => {
     assert.ok(laneReservationMb(1024, 5000) <= 1024);
   });
 
-  test('recent peak reads only completed runs of the same lane', () => {
-    const history = [
-      JSON.stringify({ label: 'test', terminationReason: 'completed', peakRssMb: 900 }),
-      JSON.stringify({ label: 'test', terminationReason: 'rss-limit', peakRssMb: 2048 }),
-      JSON.stringify({ label: 'other', terminationReason: 'completed', peakRssMb: 1500 }),
-      'not json',
-      JSON.stringify({ label: 'test', terminationReason: 'completed', peakRssMb: 1100 }),
-    ].join('\n');
-    assert.equal(recentLanePeakMb(history, 'test'), 1100);
-    assert.equal(recentLanePeakMb(history, 'missing'), null);
-    assert.equal(recentLanePeakMb('', 'test'), null);
-  });
 });
 
 describe('lease accounting helpers', () => {

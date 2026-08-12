@@ -1678,7 +1678,7 @@ function referencesGuardState(command) {
       }
       const child = tail[0];
       if (child !== undefined && child !== '') {
-        if (['leases', 'admission.lock', 'machine-token'].some((target) => shellPatternCanMatch(child, target))) return true;
+        if (['leases', 'admission.lock', 'machine-token', 'lane-peaks'].some((target) => shellPatternCanMatch(child, target))) return true;
         continue;
       }
       // No sensitive descendant named: this is the whole-store case

@@ -42,20 +42,24 @@ export const PRESSURE_WARNING = 2;
 export function deriveBudget(totalMb) {
   const reserveMb = Math.max(1536, Math.round(totalMb * 0.25));
   const machineBudgetMb = Math.max(512, totalMb - reserveMb);
+  const maxRunMb = Math.max(512, Math.min(LANE_CAP_MB, Math.floor(machineBudgetMb / 2)));
   return {
     totalMb,
     reserveMb,
     machineBudgetMb,
-    maxRunMb: Math.max(512, Math.min(LANE_CAP_MB, Math.floor(machineBudgetMb / 2))),
+    maxRunMb,
     // The hard floor of real, measured availability that must survive the run.
     // Cross this and the machine starts trading pages for progress.
     availabilityFloorMb: Math.max(768, Math.round(totalMb * 0.125)),
-    // A run at or below this is exempt from the swap gate (never from the
-    // headroom floor). A lint or unit lane is not what turns a thrashing
-    // machine into a frozen one — three Electron workers are — and a guard that
-    // refuses every command on a busy machine is a guard people switch off,
-    // which protects nothing at all.
-    lightRunMb: Math.max(256, Math.round(Math.max(768, Math.round(totalMb * 0.125)) / 2)),
+    // A run at or below this is exempt from the pressure and swap gates
+    // (never from the headroom floor). A lint or unit lane is not what turns
+    // a thrashing machine into a frozen one — three Electron workers are —
+    // and a guard that refuses every command on a busy machine is a guard
+    // people switch off, which protects nothing at all. Kept strictly below
+    // maxRunMb: on large machines floor/2 reaches the lane cap, and a
+    // carve-out as big as the cap would exempt every run from both gates
+    // (#203 review).
+    lightRunMb: Math.max(256, Math.min(Math.round(Math.max(768, Math.round(totalMb * 0.125)) / 2), Math.floor(maxRunMb / 2))),
   };
 }
 
@@ -93,32 +97,6 @@ export function laneReservationMb(ceilingMb, peakMb) {
   if (!Number.isFinite(peakMb) || peakMb <= 0) return ceilingMb;
   const margin = Math.max(256, Math.round(peakMb * 0.25));
   return Math.min(ceilingMb, Math.max(512, peakMb + margin));
-}
-
-/**
- * The recent measured peak for a lane, from run-guarded's history records.
- *
- * Only completed runs count: a run killed at the ceiling or timed out proves
- * nothing about the lane's steady-state cost. Text in, number out — the file
- * read stays with the caller.
- */
-export function recentLanePeakMb(historyText, label, limit = 10) {
-  const rows = historyText
-    .split('\n')
-    .filter(Boolean)
-    .slice(-limit)
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
-  const peaks = rows
-    .filter((row) => row.label === label && row.terminationReason === 'completed' && Number.isFinite(row.peakRssMb) && row.peakRssMb > 0)
-    .map((row) => row.peakRssMb);
-  return peaks.length > 0 ? Math.max(...peaks) : null;
 }
 
 /**
