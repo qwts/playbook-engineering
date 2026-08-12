@@ -251,6 +251,10 @@ describe('agent-guard conformance (ENG-0138)', () => {
       'sudo -u me npx c8 npm test',
       'flock /tmp/agent.lock npm run test:e2e:inner',
       'flock /tmp/agent.lock npm run $lane',
+      // The -c string form runs its payload like `script -c`; a quoted
+      // payload is a command, not prose, and is promoted for the same scans.
+      "flock /tmp/agent.lock -c 'npm run ci'",
+      "flock -n /tmp/agent.lock --command 'npx vitest'",
     ]) {
       assert.equal(evaluateCommand(command, { env }).allow, false, `expected the guard to deny: ${command}`);
     }
@@ -260,6 +264,7 @@ describe('agent-guard conformance (ENG-0138)', () => {
       'node tools/agent-guard/run-guarded.mjs --label test:e2e -- npm run test:e2e:inner',
       'brew info npm',
       'git log --oneline -- vitest.config.ts',
+      "flock /tmp/agent.lock -c 'npm run lint'",
     ]) {
       assert.equal(evaluateCommand(command, { env }).allow, true, `expected the guard to allow: ${command}`);
     }
