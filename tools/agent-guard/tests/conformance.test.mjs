@@ -236,6 +236,17 @@ describe('agent-guard conformance (ENG-0138)', () => {
     assert.equal(evaluateCommand('cat > /tmp/doc <<.\nnpm run "$lane"\n.', { env }).allow, true);
     assert.equal(evaluateCommand('cat <<FIRST <<SECOND\nnpm run ci\nFIRST\nnpx vitest\nSECOND', { env }).allow, true);
     assert.equal(evaluateCommand('cat agent-health-guard/leases/live.json', { env }).allow, true);
+    // Protected-variable text inside quotes is a mention, not an assignment
+    // (#192): commit messages, search patterns, and file payloads are data.
+    for (const command of [
+      'rg "NODE_OPTIONS=" docs',
+      'git commit -m "Document PATH=/usr/bin"',
+      "printf 'PATH=/tmp\\n' > note.txt",
+      "echo 'NODE_OPTIONS=--require ./x'",
+      'git log --grep "GIT_SSH_COMMAND=" --oneline',
+    ]) {
+      assert.equal(evaluateCommand(command, { env }).allow, true, `expected the guard to allow: ${command}`);
+    }
   });
 
   test('directly executed text scripts cannot hide protected commands', () => {
