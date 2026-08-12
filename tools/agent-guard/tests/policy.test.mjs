@@ -550,6 +550,11 @@ describe('command hook', () => {
     assert.equal(evaluateCommand(lane, { ...opts(), cwd: env.AGENT_GUARD_STATE_DIR }).allow, false);
     assert.equal(evaluateCommand('BASH_ENV=/tmp/preload.sh bash -c true', opts()).allow, false);
     assert.equal(evaluateCommand('PATH=/tmp:$PATH npm run lint', opts()).allow, false);
+    // Wrapper option operands must not end the scan while a quoted
+    // assignment still follows (sudo run form: … [-u user] [VAR=value] …).
+    assert.equal(evaluateCommand("sudo -u root 'NODE_OPTIONS=--require=/tmp/preload.cjs' npm run lint", opts()).allow, false);
+    assert.equal(evaluateCommand("env -u FOO 'PATH=/tmp' npm run lint", opts()).allow, false);
+    assert.equal(evaluateCommand("timeout -s TERM 5 env 'BASH_ENV=/tmp/preload.sh' bash -c true", opts()).allow, false);
   });
 
   test('authoritative lease state is inaccessible to agent commands', () => {
@@ -567,6 +572,18 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('d=~/.cache/agent-guard; rm -rf "$d/leases"', opts()).allow, false);
     assert.equal(evaluateCommand('cat agent-health-guard/leases/live.json', opts()).allow, true);
     assert.equal(evaluateCommand('mkdir -p /tmp/agent-app-guard/leases', opts()).allow, true);
+    // A bare `agent-guard` token or a repo source path is a mention, not the
+    // machine-wide state store (#190).
+    assert.equal(evaluateCommand('rg agent-guard docs', opts()).allow, true);
+    assert.equal(evaluateCommand('echo agent-guard', opts()).allow, true);
+    assert.equal(evaluateCommand('ls tools/agent-guard', opts()).allow, true);
+    assert.equal(evaluateCommand('git log --oneline -- tools/agent-guard', opts()).allow, true);
+    assert.equal(evaluateCommand('ls $PWD/tools/agent-guard', opts()).allow, true);
+    assert.equal(evaluateCommand('rg leaseFile $PWD/tools/agent-guard', opts()).allow, true);
+    // The whole-store deletions stay behind protection, glob-mangled or not.
+    assert.equal(evaluateCommand('rm -rf ~/.c[a]che/agent-guard', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf $XDG_CACHE_HOME/agent-guard', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf ~/Library/Caches/agent-guard', opts()).allow, false);
   });
 
   test("Codex's argv arrays are normalized before matching", () => {

@@ -1631,20 +1631,43 @@ function referencesGuardState(command) {
   for (const rawWord of command.match(/[^\s<>;&|]+/gu) ?? []) {
     const word = rawWord.slice(rawWord.lastIndexOf('=') + 1).replace(/^['"]|['"]$/gu, '');
     const components = word.split('/');
-    const guardAt = components.findIndex((component) => shellPatternCanMatch(component, 'agent-guard'));
-    if (guardAt < 0) continue;
-    const tail = [];
-    for (const component of components.slice(guardAt + 1)) {
-      if (component === '' || component === '.') continue;
-      if (component === '..') tail.pop();
-      else tail.push(component);
+    // Every component that can match the store name is a candidate anchor: a
+    // variable component matches anything, so stopping at the first match
+    // lets `$XDG_CACHE_HOME/agent-guard` shift the real component into child
+    // position and walk past the checks below.
+    for (let guardAt = 0; guardAt < components.length; guardAt += 1) {
+      if (!shellPatternCanMatch(components[guardAt], 'agent-guard')) continue;
+      const tail = [];
+      for (const component of components.slice(guardAt + 1)) {
+        if (component === '' || component === '.') continue;
+        if (component === '..') tail.pop();
+        else tail.push(component);
+      }
+      const child = tail[0];
+      if (child !== undefined && child !== '') {
+        if (['leases', 'admission.lock', 'machine-token'].some((target) => shellPatternCanMatch(child, target))) return true;
+        continue;
+      }
+      // No sensitive descendant named: this is the whole-store case
+      // (`rm -rf ~/.cache/agent-guard`). It is a state-store reference only
+      // when the leading chain can reach a machine cache root: a cache-named
+      // component anywhere before it (glob-aware, so `.c[a]che` still
+      // counts), or a variable expansion as the immediate parent. A bare
+      // word (`rg agent-guard docs`, `echo agent-guard`) or a repo source
+      // path (`ls tools/agent-guard`, absolute or home-anchored) is a
+      // mention, not the store (#190).
+      const prefixComponents = components.slice(0, guardAt);
+      // A pure variable expansion matches any target under
+      // shellPatternCanMatch, which would turn $PWD/tools/agent-guard into a
+      // cache path. Variables count only as the immediate parent (below);
+      // the cache-name scan needs literal or glob evidence.
+      const cacheNamed = prefixComponents.some(
+        (component) =>
+          !/^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/u.test(component) &&
+          ['.cache', 'Caches', 'caches', 'cache'].some((target) => shellPatternCanMatch(component, target)),
+      );
+      if (cacheNamed || /[$]/u.test(prefixComponents.at(-1) ?? '')) return true;
     }
-    const child = tail[0];
-    if (
-      child === undefined ||
-      child === '' ||
-      ['leases', 'admission.lock', 'machine-token'].some((target) => shellPatternCanMatch(child, target))
-    ) return true;
   }
   return false;
 }
@@ -1890,10 +1913,84 @@ function commandAfterPrefixes(segment) {
   return tokens.slice(index).join(' ');
 }
 
+const PROTECTED_ENV_ASSIGNMENT = /^["']?(?:NODE_OPTIONS|BASH_ENV|ENV|ZDOTDIR|PERL5OPT|RUBYOPT|PYTHONPATH|PYTHONHOME|PHPRC|PHP_INI_SCAN_DIR|LD_PRELOAD|DYLD_INSERT_LIBRARIES|GIT_SSH_COMMAND|GIT_CONFIG_COUNT|PATH)=/u;
+const ASSIGNMENT_TOKEN = /^["']?[A-Za-z_][A-Za-z0-9_]*=/u;
+const ASSIGNMENT_PREFIX_COMMAND = /^(?:command|builtin|env|exec|time|nice|nohup|timeout|setsid|stdbuf|sudo|doas)$/u;
+// Options of the wrappers above whose operand is a separate following word.
+// An operand left in place would read as the command and end the assignment
+// scan early (`sudo -u root 'NODE_OPTIONS=…' npm run lint`).
+const WRAPPER_OPTION_OPERANDS = {
+  sudo: new Set(['-u', '--user', '-g', '--group', '-h', '--host', '-p', '--prompt', '-C', '--close-from', '-D', '--chdir', '-R', '--chroot', '-T', '--command-timeout', '-U', '--other-user']),
+  doas: new Set(['-u']),
+  env: new Set(['-C', '--chdir', '-u', '--unset', '-S', '--split-string']),
+  timeout: new Set(['-k', '--kill-after', '-s', '--signal']),
+  nice: new Set(['-n', '--adjustment']),
+  stdbuf: new Set(['-i', '-o', '-e']),
+};
+const EMPTY_OPERAND_OPTIONS = new Set();
+
+// splitSegments is quote-unaware, so a separator inside a quoted argument
+// would open a phantom segment whose first token looks like an assignment.
+// Blank separators inside quotes (the quoted word survives as one token).
+function maskQuotedSeparators(command) {
+  let scanned = '';
+  let rest = command;
+  for (;;) {
+    const match = QUOTED.exec(rest);
+    if (!match) break;
+    scanned += rest.slice(0, match.index) + match[0].replace(/[;\n|&]/gu, ' ');
+    rest = rest.slice(match.index + match[0].length);
+  }
+  return scanned + rest;
+}
+
+// A protected VAR=… is an override only where a shell or env-style wrapper
+// applies it to a command's environment: the assignment prefix of a segment,
+// or the argument list of env/sudo/timeout/…, where quoting does not defuse
+// it (`env 'NODE_OPTIONS=…' npm run lint` sets the variable all the same).
+export function hasProtectedEnvironmentAssignment(command) {
+  for (const segment of splitSegments(maskQuotedSeparators(command))) {
+    const tokens = segment.split(/\s+/u).filter(Boolean);
+    let index = 0;
+    while (index < tokens.length) {
+      const token = tokens[index];
+      if (ASSIGNMENT_TOKEN.test(token)) {
+        if (PROTECTED_ENV_ASSIGNMENT.test(token)) return true;
+        index += 1;
+        continue;
+      }
+      const name = token.replace(/^["']+|["']+$/gu, '').split('/').at(-1);
+      if (ASSIGNMENT_PREFIX_COMMAND.test(name)) {
+        index += 1;
+        // Skip option words together with their separate operands, so an
+        // operand never masquerades as the command and ends the scan while a
+        // quoted assignment still follows: sudo's run form is
+        // `sudo … [-u user] [VAR=value] … [command]`.
+        const operandOptions = WRAPPER_OPTION_OPERANDS[name] ?? EMPTY_OPERAND_OPTIONS;
+        while (tokens[index]?.startsWith('-')) {
+          const option = tokens[index];
+          index += 1;
+          if (operandOptions.has(option)) index += 1;
+        }
+        if ((name === 'timeout' || name === 'nice') && /^\d/u.test(tokens[index] ?? '')) index += 1;
+        continue;
+      }
+      break;
+    }
+  }
+  return false;
+}
+
 export function evaluateCommand(command, { cwd = process.cwd() } = {}) {
   if (typeof command !== 'string' || command.length === 0) return { allow: true };
   const dynamicCommand = maskNonShellHeredocs(command);
-  if (/\b(?:NODE_OPTIONS|BASH_ENV|ENV|ZDOTDIR|PERL5OPT|RUBYOPT|PYTHONPATH|PYTHONHOME|PHPRC|PHP_INI_SCAN_DIR|LD_PRELOAD|DYLD_INSERT_LIBRARIES|GIT_SSH_COMMAND|GIT_CONFIG_COUNT|PATH)=/u.test(dynamicCommand)) {
+  // Executable-loading environment overrides are denied only in positions
+  // that reach a command's environment: leading VAR=… prefixes and the
+  // argument list of env-style wrappers — where a quoted assignment is still
+  // an assignment. Elsewhere, quoted protected-variable text is a mention (a
+  // commit message, a grep pattern, a printf payload), not an override; the
+  // TAMPERING rule still scans the stripped text as the unquoted backstop.
+  if (hasProtectedEnvironmentAssignment(dynamicCommand)) {
     return {
       allow: false,
       reason:
