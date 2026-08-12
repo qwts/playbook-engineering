@@ -50,11 +50,30 @@ export function isAgentSession(_env = process.env) {
   return true;
 }
 
+// A regex for the `<NAME>_AGENT` marker shape that every agent runtime sets in
+// the process it drives (Devin's DEVIN_AGENT, Windsurf's WINDSURF_AGENT). Keyed
+// ONLY on the `_AGENT` suffix — never on ambient editor variables like VSCODE_*,
+// CURSOR_TRACE_ID, or WINDSURF_IDE_TYPE, which mean an editor is open, not that
+// an agent is driving (agent-bot-identity#12). This is what keeps a human's
+// terminal from being misread as an agent while still catching harnesses the
+// registry does not know yet.
+const AGENT_MARKER = /^[A-Z][A-Z0-9_]*_AGENT$/u;
+
 export function harnessName(env = process.env) {
   if (env.CLAUDECODE === '1' || (typeof env.CLAUDE_CODE_ENTRYPOINT === 'string' && env.CLAUDE_CODE_ENTRYPOINT !== '')) return 'claude';
   if (Object.keys(env).some((key) => key.startsWith('CODEX_'))) return 'codex';
   if (Object.keys(env).some((key) => key.startsWith('CURSOR_'))) return 'cursor';
   if (typeof env.AI_AGENT === 'string' && env.AI_AGENT !== '') return env.AI_AGENT.toLowerCase().split(/[^a-z]/u)[0] || 'agent';
+  // Any other `<NAME>_AGENT` marker names an unregistered harness (#142). A
+  // Devin/Windsurf session used to fall through to 'human' here, and that
+  // matters more than a label: the owner-grant path and `arbiter grant` both
+  // key on harnessName === 'human', so an unrecognised agent resolving to
+  // 'human' could mint and use its own heavy-lane grant. Deterministic pick
+  // (sorted) when several are present.
+  const marker = Object.keys(env)
+    .filter((key) => AGENT_MARKER.test(key) && typeof env[key] === 'string' && env[key] !== '')
+    .sort()[0];
+  if (marker) return marker.slice(0, -'_AGENT'.length).toLowerCase().replace(/_/gu, '-') || 'agent';
   return 'human';
 }
 
