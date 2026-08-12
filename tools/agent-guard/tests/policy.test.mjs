@@ -352,6 +352,13 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('AI_AGENT= node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
     assert.equal(evaluateCommand('CLAUDECODE=0 CLAUDE_CODE_ENTRYPOINT= node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
     assert.equal(evaluateCommand('CODEX_THREAD_ID= node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
+    // A generic <NAME>_AGENT marker is an identity now (#142), so scrubbing it
+    // must be blocked too — otherwise `env -u DEVIN_AGENT …` makes the wrapper
+    // see harnessName === 'human' and reopens the owner-grant bypass.
+    assert.equal(evaluateCommand('env -u DEVIN_AGENT node tools/agent-guard/run-guarded.mjs -- npm run test:e2e', opts()).allow, false);
+    assert.equal(evaluateCommand('DEVIN_AGENT= node tools/agent-guard/run-guarded.mjs -- npm run test:e2e', opts()).allow, false);
+    assert.equal(evaluateCommand('unset WINDSURF_AGENT; node tools/agent-guard/run-guarded.mjs -- npm run test:e2e', opts()).allow, false);
+    assert.equal(evaluateCommand('export -n DEVIN_AGENT; node tools/agent-guard/run-guarded.mjs -- npm run test:e2e', opts()).allow, false);
   });
 
   test('an agent cannot grant itself the opt-in', () => {
