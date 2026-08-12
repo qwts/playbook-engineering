@@ -278,7 +278,9 @@ describe('agent-guard conformance (ENG-0138)', () => {
     assert.deepEqual(parseGrantMinutes(['grant', 'e2e', '7']), { ok: true, minutes: 7 });
     assert.deepEqual(parseGrantMinutes(['grant', 'e2e']), { ok: true, minutes: 30 });
     assert.deepEqual(parseGrantMinutes(['grant', 'e2e', '--minutes', '9999']), { ok: true, minutes: 240 });
-    for (const argv of [['grant', 'e2e', '--minutes', 'soon'], ['grant', 'e2e', '--minutes'], ['grant', 'e2e', '--minutes', '-5'], ['grant', 'e2e', '--minutes', '0']]) {
+    // 0.1 is positive but rounds to zero minutes — a grant already expired at
+    // write time must be a refusal, not a reported success.
+    for (const argv of [['grant', 'e2e', '--minutes', 'soon'], ['grant', 'e2e', '--minutes'], ['grant', 'e2e', '--minutes', '-5'], ['grant', 'e2e', '--minutes', '0'], ['grant', 'e2e', '--minutes', '0.1'], ['grant', 'e2e', '0.4']]) {
       assert.equal(parseGrantMinutes(argv).ok, false, `expected a refusal for: ${argv.join(' ')}`);
     }
   });
