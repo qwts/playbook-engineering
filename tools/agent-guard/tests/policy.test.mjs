@@ -3,7 +3,7 @@
 // enforces all of it across three harnesses.
 
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -109,7 +109,7 @@ describe('lane policy', () => {
     const verdict = evaluateLanePolicy({ label: 'test:e2e', env: { ...env, CLAUDECODE: '1' } });
     assert.equal(verdict.allowed, false);
     assert.match(verdict.message, /Push the branch and let GitHub CI verify/u);
-    assert.match(verdict.message, /owner can run it directly/u);
+    assert.match(verdict.message, /owner can open a window from their own \(non-agent\) terminal/u);
   });
 
   test('an unmarked local caller cannot claim human authentication', () => {
@@ -126,6 +126,46 @@ describe('lane policy', () => {
     const agent = { ...env, CLAUDECODE: '1' };
     assert.equal(evaluateLanePolicy({ label: 'test:e2e', env: agent }).allowed, false);
     assert.equal(evaluateLanePolicy({ label: 'test:stories:ci', env: agent }).allowed, false);
+  });
+
+  test('a live grant in an unmarked session is the owner path (#180)', () => {
+    // Grants cannot be minted from agent sessions (the hook denies arbiter
+    // grant) and markers cannot be scrubbed (the hook denies identity
+    // removal), so unmarked + grant is owner evidence. Enforcement — lease,
+    // ceiling, timeout, admission — still applies to the granted run.
+    writeGrant({ laneId: 'e2e', minutes: 30, env });
+    const verdict = evaluateLanePolicy({ label: 'test:e2e', env });
+    assert.equal(verdict.allowed, true);
+    assert.equal(verdict.actor, 'owner-grant');
+    // Lane-scoped: the e2e grant says nothing about ci.
+    assert.equal(evaluateLanePolicy({ label: 'ci', env }).allowed, false);
+  });
+
+  test('an expired grant is not an owner path', () => {
+    const now = Date.parse('2026-08-02T12:00:00Z');
+    writeGrant({ laneId: 'e2e', minutes: 5, env, now });
+    assert.equal(evaluateLanePolicy({ label: 'test:e2e', env, now: now + 4 * 60_000 }).allowed, true);
+    assert.equal(evaluateLanePolicy({ label: 'test:e2e', env, now: now + 10 * 60_000 }).allowed, false);
+  });
+
+  test('arbiter grant refuses marked sessions and unknown lanes before writing anything', () => {
+    // The mint path writes to the REAL machine store by design — stateDir
+    // deliberately ignores ambient AGENT_GUARD_STATE_DIR so production state
+    // cannot be redirected — so the hermetic spawn test covers only the
+    // refusal paths; the mint→honor flow is covered at the policy layer by
+    // the writeGrant tests above.
+    const arbiter = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'arbiter.mjs');
+    const base = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' };
+    const marked = spawnSync(process.execPath, [arbiter, 'grant', 'e2e', '10'], { env: { ...base, CLAUDECODE: '1' }, encoding: 'utf8' });
+    assert.equal(marked.status, 1);
+    assert.match(marked.stderr, /cannot be minted from an agent session/u);
+    const unknown = spawnSync(process.execPath, [arbiter, 'grant', 'nonsense'], { env: { ...base, CLAUDECODE: '1' }, encoding: 'utf8' });
+    assert.equal(unknown.status, 1);
+  });
+
+  test('the refusal tells the owner how to open a granted window', () => {
+    const verdict = evaluateLanePolicy({ label: 'test:e2e', env: { ...env, CLAUDECODE: '1' } });
+    assert.match(verdict.message, /arbiter\.mjs grant e2e/u);
   });
 });
 
