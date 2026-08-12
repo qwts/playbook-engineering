@@ -242,6 +242,36 @@ describe('agent-guard conformance (ENG-0138)', () => {
     }
   });
 
+  test('wrappers and dispatchers do not launder guarded lanes', () => {
+    for (const command of [
+      // Wrappers the stripper models must expose the real invocation.
+      'sudo npx vitest',
+      'sudo npm run test:e2e',
+      'doas npm run ci',
+      'flock /tmp/agent.lock npm run ci',
+      'flock -w 5 /tmp/agent.lock npx playwright test',
+      "flock /tmp/agent.lock -c 'npm run ci'",
+      // A wrapper the stripper does NOT model fails closed via the
+      // delegated-invocation backstop rather than laundering the lane.
+      'chronic npm run test:e2e',
+      // Provenance vouches for a dispatcher's bytes, never for the heavy
+      // argv it forwards.
+      'node scripts/measure-runner-capacity.mjs -- npx vitest',
+      'node scripts/measure-runner-capacity.mjs -- npm run test:e2e',
+    ]) {
+      assert.equal(evaluateCommand(command, { env }).allow, false, `expected the guard to deny: ${command}`);
+    }
+    // Position-independent scanning must not reclassify paths or quoted prose.
+    for (const command of [
+      'rm -rf node_modules/vitest',
+      'git log --grep "npm run test:e2e" --oneline',
+      'sudo npm run lint',
+      'flock /tmp/agent.lock npm run typecheck',
+    ]) {
+      assert.equal(evaluateCommand(command, { env }).allow, true, `expected the guard to allow: ${command}`);
+    }
+  });
+
   test('grant honors the documented --minutes flag instead of silently defaulting', () => {
     // In-process on purpose: spawning the real arbiter would mint a real
     // machine-wide grant — stateDir ignores env overrides for real processes.

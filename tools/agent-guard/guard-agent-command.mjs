@@ -822,6 +822,9 @@ function endsWithExecutableString(scanned) {
   const command = tokens[0]?.split('/').at(-1);
   if (command === 'node' && /^(?:-[A-Za-z]*[ep][A-Za-z]*|--eval|--print)$/u.test(tokens.at(-1) ?? '')) return true;
   if (command === 'script' && /^(?:-c|--command)=?$/u.test(tokens.at(-1) ?? '')) return true;
+  // flock is stripped as a wrapper above, so its -c form is detected on the
+  // raw tokens: `flock /tmp/l -c '<command>'` runs the string like script -c.
+  if (rawTokens.some((token) => token.split('/').at(-1) === 'flock') && /^(?:-c|--command)=?$/u.test(rawTokens.at(-1) ?? '')) return true;
   if (tokens[0]?.split('/').at(-1) === 'eval' && (tokens.length === 1 || (tokens.length === 2 && tokens[1] === '--'))) return true;
   const npmAt = tokens.findIndex((token) => token.split('/').at(-1) === 'npm');
   if (npmAt < 0) return false;
@@ -891,6 +894,21 @@ function commandStringPayloads(command) {
           break;
         }
         if (/^(?:-S|--split-string)=/u.test(rawTokens[i])) {
+          payloads.push(restore(rawTokens[i].slice(rawTokens[i].indexOf('=') + 1)));
+          break;
+        }
+      }
+    }
+    // flock is stripped as a wrapper by commandAfterPrefixes, so its -c
+    // command string is collected from the raw tokens, like env -S above.
+    const flockAt = rawTokens.findIndex((token) => token.split('/').at(-1) === 'flock');
+    if (flockAt >= 0) {
+      for (let i = flockAt + 1; i < rawTokens.length; i += 1) {
+        if (rawTokens[i] === '-c' || rawTokens[i] === '--command') {
+          if (rawTokens[i + 1] !== undefined) payloads.push(restore(rawTokens.slice(i + 1).join(' ')));
+          break;
+        }
+        if (/^(?:-c|--command)=/u.test(rawTokens[i])) {
           payloads.push(restore(rawTokens[i].slice(rawTokens[i].indexOf('=') + 1)));
           break;
         }
@@ -1804,6 +1822,36 @@ export function heavyLaneFor(command) {
   return null;
 }
 
+// Fail-closed backstop for the wrapper and dispatcher classes the head
+// checks cannot enumerate: a heavy or test invocation is the same invocation
+// behind a wrapper this scanner does not model (`chronic npm run ci`) or in
+// the forwarded argv of a checked-in dispatcher
+// (`node scripts/helper.mjs -- npx vitest`, where provenance vouches for the
+// helper's bytes but not for what it spawns). Quoted mentions are already
+// blanked by stripInertText before this runs, so a match here occupies an
+// executable position, not prose. Bare test-binary names are deliberately NOT
+// matched at arbitrary positions — `rm -rf node_modules/vitest` names a path,
+// not a dispatch — only the unambiguous multi-token shapes count.
+export function delegatedHeavyInvocation(executableSegment) {
+  const tokens = executableSegment.split(/\s+/u).filter(Boolean);
+  for (let index = 1; index < tokens.length; index += 1) {
+    const name = tokens[index].split('/').at(-1);
+    if (name === 'npm' || OTHER_PACKAGE_MANAGERS.has(name)) {
+      for (const script of packageScriptNames(tokens.slice(index).join(' '))) {
+        const lane = HEAVY_LANES.find((entry) => entry.pattern.test(script));
+        if (lane) return `the "${lane.id}" lane delegated through a wrapper or dispatcher`;
+      }
+    }
+    if (name === 'npx' || name === 'bunx') {
+      const binaryAt = skipCliOptions(tokens, index + 1, EXEC_OPTIONS_WITH_OPERANDS);
+      const binary = tokens[binaryAt]?.split('/').at(-1) ?? '';
+      if (binary === 'playwright' && tokens[binaryAt + 1] === 'test') return 'a Playwright run delegated through a wrapper or dispatcher';
+      if (binary !== 'playwright' && TEST_BINARIES.has(binary)) return `a ${binary} invocation delegated through a wrapper or dispatcher`;
+    }
+  }
+  return null;
+}
+
 function commandAfterPrefixes(segment) {
   const tokens = normalizeUnquotedEscapes(segment).split(/\s+/u).filter(Boolean);
   let index = 0;
@@ -1965,6 +2013,38 @@ function commandAfterPrefixes(segment) {
         const option = tokens[index++];
         if (option === '-a' && index < tokens.length) index += 1;
       }
+      continue;
+    }
+    // sudo/doas were already stripped by the assignment walk
+    // (ASSIGNMENT_PREFIX_COMMAND) but not here, so `sudo npx vitest` kept the
+    // wrapper as the command and every head-anchored check missed the real
+    // invocation. Same operand tables as the assignment walk.
+    if (command === 'sudo' || command === 'doas') {
+      index += 1;
+      while (tokens[index]?.startsWith('-')) {
+        const option = tokens[index++];
+        if (option === '--') break;
+        if (WRAPPER_OPTION_OPERANDS[command].has(option) && index < tokens.length) index += 1;
+      }
+      continue;
+    }
+    if (command === 'flock') {
+      // `flock [options] <lockfile> command…`. The `-c <string>` form carries
+      // its command as a payload; endsWithExecutableString/commandStringPayloads
+      // promote it the way they do for `script -c`, so leave it in place here.
+      index += 1;
+      let commandString = false;
+      while (tokens[index]?.startsWith('-')) {
+        const option = tokens[index++];
+        if (option === '--') break;
+        if (/^(?:-w|--wait|--timeout|-E|--conflict-exit-code)$/u.test(option) && index < tokens.length) index += 1;
+        if (option === '-c' || option === '--command' || /^(?:-c|--command)=/u.test(option)) commandString = true;
+      }
+      if (commandString) break;
+      if (index < tokens.length) index += 1; // lock file or directory
+      // A -c form after the lock path (`flock /tmp/l -c 'npm run ci'`) also
+      // carries a payload; stop so the raw-token scans can see it.
+      if (tokens[index] === '-c' || tokens[index] === '--command' || /^(?:-c|--command)=/u.test(tokens[index] ?? '')) break;
       continue;
     }
     if (command === 'env') {
@@ -2217,6 +2297,13 @@ export function evaluateCommand(command, { cwd = process.cwd() } = {}) {
       return {
         allow: false,
         reason: `Blocked unguarded inner package script: it bypasses the machine-scoped memory guard. ${USE_ENTRYPOINT}`,
+      };
+    }
+    const delegated = delegatedHeavyInvocation(executableSegment);
+    if (delegated) {
+      return {
+        allow: false,
+        reason: `Blocked ${delegated}: a wrapper or dispatcher does not exempt a guarded lane or test binary. ${USE_ENTRYPOINT}`,
       };
     }
     for (const { pattern, what, reason } of BLOCKED) {
