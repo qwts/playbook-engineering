@@ -22,22 +22,31 @@ Nothing is a constant. On a machine with `T` MB of RAM:
 | --- | --- | --- | --- |
 | Desktop reserve | `max(1536, T×0.25)` | 2048 MB | 8192 MB |
 | Machine budget | `T − reserve` | 6144 MB | 24576 MB |
-| Max per run | `budget ÷ 2` | 3072 MB | 12288 MB |
+| Max per run | `min(2048, budget ÷ 2)` | 2048 MB | 2048 MB |
 | Availability floor | `max(768, T×0.125)` | 1024 MB | 4096 MB |
-| Light run | `floor ÷ 2` | 512 MB | 2048 MB |
+| Light run | `min(floor ÷ 2, cap ÷ 2)` | 512 MB | 1024 MB |
 
 A requested ceiling is **clamped down** to the per-run cap and never up: asking
 for less than the cap always works, asking for more never does. This is what
 turns an inherited `--rss-mb 8192` from an unreachable ceiling into an
-enforceable one.
+enforceable one. The 2048 MB lane cap is absolute: the incident this guard
+exists for was one test lane ballooning to ~100 GB of committed memory, and no
+sanctioned local lane needs more. The cap is enforced on the running process
+tree, and what admission *reserves* is smaller still when the lane has a
+recent measured peak: peak plus a conservative margin, so a lane that
+measures well under the cap no longer books the full cap against admission.
 
 ## Admission
 
 A run is granted only if all three hold:
 
-1. **Swap.** Refused when swap is at least 50% committed, unless the run
-   reserves no more than the light-run size. A machine already trading pages for
-   progress is one more Electron worker away from a freeze.
+1. **Pressure and swap.** On macOS the kernel's live pressure level outranks
+   static swap arithmetic in both directions: warning/critical refuses a heavy
+   run outright, and normal (green) pressure retires committed-but-idle swap as
+   evidence — macOS keeps swap allocated after pressure subsides. Without
+   pressure evidence, refused when swap is at least 50% committed. Either gate
+   spares runs no larger than the light-run size. A machine already trading
+   pages for progress is one more Electron worker away from a freeze.
 2. **Headroom.** `available − (what running leases have not yet materialized) −
    this request` must stay above the availability floor. Availability comes from
    `vm_stat` and `sysctl vm.swapusage` on macOS, `/proc/meminfo` on Linux.
