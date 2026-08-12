@@ -3,7 +3,7 @@
 // enforces all of it across three harnesses.
 
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -146,6 +146,21 @@ describe('lane policy', () => {
     writeGrant({ laneId: 'e2e', minutes: 5, env, now });
     assert.equal(evaluateLanePolicy({ label: 'test:e2e', env, now: now + 4 * 60_000 }).allowed, true);
     assert.equal(evaluateLanePolicy({ label: 'test:e2e', env, now: now + 10 * 60_000 }).allowed, false);
+  });
+
+  test('arbiter grant refuses marked sessions and unknown lanes before writing anything', () => {
+    // The mint path writes to the REAL machine store by design — stateDir
+    // deliberately ignores ambient AGENT_GUARD_STATE_DIR so production state
+    // cannot be redirected — so the hermetic spawn test covers only the
+    // refusal paths; the mint→honor flow is covered at the policy layer by
+    // the writeGrant tests above.
+    const arbiter = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'arbiter.mjs');
+    const base = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' };
+    const marked = spawnSync(process.execPath, [arbiter, 'grant', 'e2e', '10'], { env: { ...base, CLAUDECODE: '1' }, encoding: 'utf8' });
+    assert.equal(marked.status, 1);
+    assert.match(marked.stderr, /cannot be minted from an agent session/u);
+    const unknown = spawnSync(process.execPath, [arbiter, 'grant', 'nonsense'], { env: { ...base, CLAUDECODE: '1' }, encoding: 'utf8' });
+    assert.equal(unknown.status, 1);
   });
 
   test('the refusal tells the owner how to open a granted window', () => {
