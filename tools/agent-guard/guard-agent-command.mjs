@@ -1145,6 +1145,30 @@ function followsEnvCommand(scanned) {
 
 const DESTRUCTIVE_TARGET_COMMANDS = new Set(['rm', 'rmdir', 'unlink', 'shred', 'srm', 'mv', 'cp', 'install', 'dd', 'truncate', 'tee', 'ln', 'chmod', 'chown', 'chflags']);
 
+// The executable a segment dispatches once wrapper commands (sudo, env,
+// timeout, …) and their option operands are skipped — the same walk that
+// hasProtectedEnvironmentAssignment does for assignments. `sudo rm` deletes
+// what `rm` deletes.
+function unwrappedCommandName(tokens) {
+  let wrapper = null;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const name = token.split('/').at(-1);
+    if (ASSIGNMENT_TOKEN.test(token)) continue;
+    if (ASSIGNMENT_PREFIX_COMMAND.test(name)) {
+      wrapper = name;
+      continue;
+    }
+    if (token.startsWith('-')) {
+      if (WRAPPER_OPTION_OPERANDS[wrapper]?.has(token)) index += 1;
+      continue;
+    }
+    if (wrapper === 'timeout' && /^\d+(?:\.\d+)?[smhd]?$/u.test(token)) continue;
+    return name;
+  }
+  return null;
+}
+
 // A quoted word naming the filesystem target of a destructive or redirecting
 // command is not inert prose: `rm -rf "$HOME/.cache/agent-guard"` deletes
 // exactly what its unquoted spelling deletes (#198). Preserve such words so
@@ -1157,7 +1181,7 @@ function isDestructiveTargetQuotedWord(scanned, word) {
   const tokens = commandAfterPrefixes(segment).split(/\s+/u).filter(Boolean);
   if (tokens.length === 0) return false;
   if (/(?:^|\d)>>?$/u.test(tokens.at(-1))) return true;
-  return DESTRUCTIVE_TARGET_COMMANDS.has(tokens[0]?.split('/').at(-1));
+  return DESTRUCTIVE_TARGET_COMMANDS.has(unwrappedCommandName(tokens));
 }
 
 // Quoting an argv word does not make it inert: `npm run "ci"` and

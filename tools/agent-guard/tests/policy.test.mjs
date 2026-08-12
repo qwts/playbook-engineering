@@ -633,6 +633,11 @@ describe('command hook', () => {
     assert.equal(evaluateCommand(': > "$HOME/.cache/agent-guard/leases/live.json"', opts()).allow, false);
     assert.equal(evaluateCommand('mv "$HOME/.cache/agent-guard" /tmp/x', opts()).allow, false);
     assert.equal(evaluateCommand('tee "$XDG_CACHE_HOME/agent-guard/machine-token" < /dev/null', opts()).allow, false);
+    // Wrappers do not launder the target: sudo rm deletes what rm deletes.
+    assert.equal(evaluateCommand('sudo rm -rf "$HOME/.cache/agent-guard"', opts()).allow, false);
+    assert.equal(evaluateCommand('sudo -u root rm -rf "$XDG_CACHE_HOME/agent-guard"', opts()).allow, false);
+    assert.equal(evaluateCommand('timeout 5 rm -rf "$HOME/.cache/agent-guard"', opts()).allow, false);
+    assert.equal(evaluateCommand('sudo git commit -m "rm -rf $HOME/.cache/agent-guard"', opts()).allow, true);
     // Prose and ordinary paths stay allowed: quotedWord rejects words with
     // whitespace, so multi-word payloads can never be promoted.
     assert.equal(evaluateCommand('git commit -m "rm -rf $HOME/.cache/agent-guard"', opts()).allow, true);
