@@ -217,6 +217,13 @@ describe('agent-guard conformance (ENG-0138)', () => {
       'rm -rf ~/.cache/agent-guard/lease?',
       'rm -rf ~/.cache/agent-guard/[l]eases',
       'rm -rf ~/.cache/agent-guard/lea{ses,se}',
+      // A script generated, marked executable, and dispatched in one shell
+      // line never existed when the hook inspected the filesystem (#189).
+      "printf 'npx vitest\\n' > lane && chmod +x lane && ./lane",
+      "printf 'npx vitest\\n' > lane; chmod +x lane; ./lane",
+      "printf 'npx vitest\\n' > 'lane' && chmod +x 'lane' && './lane'",
+      "printf 'npx vitest\\n' > /tmp/lane-189 && chmod +x /tmp/lane-189 && /tmp/lane-189",
+      'touch ./lane && ./lane',
     ]) {
       assert.equal(evaluateCommand(command, { env }).allow, false, `expected the guard to deny: ${command}`);
     }
@@ -244,6 +251,15 @@ describe('agent-guard conformance (ENG-0138)', () => {
       "printf 'PATH=/tmp\\n' > note.txt",
       "echo 'NODE_OPTIONS=--require ./x'",
       'git log --grep "GIT_SSH_COMMAND=" --oneline',
+    ]) {
+      assert.equal(evaluateCommand(command, { env }).allow, true, `expected the guard to allow: ${command}`);
+    }
+    // Relative paths as command *arguments* are not dispatches (#189):
+    // creating or naming a file is fine as long as nothing executes it.
+    for (const command of [
+      "printf 'notes\\n' > lane && git add lane",
+      'mkdir -p dist && cp cli.mjs dist/cli.mjs',
+      './configure-does-not-exist',
     ]) {
       assert.equal(evaluateCommand(command, { env }).allow, true, `expected the guard to allow: ${command}`);
     }

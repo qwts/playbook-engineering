@@ -1070,13 +1070,16 @@ function hasRuntimeScriptFile(command, cwd = process.cwd()) {
     // Checked-in Node helpers whose content matches the reviewed base ref
     // are the repository's own documented tooling (#191). Provenance only
     // vouches for bytes nothing can touch between hashing and execution:
-    // an earlier segment may cd away from the hook's cwd or rewrite the
-    // file, and a substitution in this segment runs before the runtime
-    // does — so only a substitution-free first segment qualifies. Other
-    // runtimes, modified scripts, and dynamic paths stay denied.
+    // another segment may cd away from the hook's cwd or rewrite the
+    // file, and a substitution runs before the runtime does. Segment
+    // order cannot prove safety — stripInertText promotes quoted
+    // substitutions to *trailing* segments even though they execute
+    // first — so only a single-segment, substitution-free command
+    // qualifies. Other runtimes, modified scripts, and dynamic paths
+    // stay denied.
     if (
       program.family === 'node' &&
-      index === 0 &&
+      segments.length === 1 &&
       !/\$\(|`|[<>]\(/u.test(segments[index]) &&
       isReviewedCheckedInScript(normalized, cwd)
     )
@@ -1087,14 +1090,33 @@ function hasRuntimeScriptFile(command, cwd = process.cwd()) {
 }
 
 function hasDirectScriptDispatch(command, cwd = process.cwd()) {
-  for (const segment of splitSegments(command)) {
-    const tokens = commandAfterPrefixes(segment).split(/\s+/u).filter(Boolean);
+  const segments = splitSegments(command);
+  for (let index = 0; index < segments.length; index += 1) {
+    const tokens = commandAfterPrefixes(segments[index]).split(/\s+/u).filter(Boolean);
     if (tokens.length === 0) continue;
     const command = tokens[0];
     if (command === '.' || command === 'source') return tokens.length > 1;
+    // A fully-quoted command word containing whitespace blanks to a bare
+    // quote pair before this scan, so `'./la ne'` arrives as `''`. That is
+    // a dispatch this hook cannot resolve or inspect — in a compound line
+    // (where an earlier write can have created the file) it fails closed.
+    if ((command === "''" || command === '""') && (segments.length > 1 || /\$\(|`|[<>]\(/u.test(segments[index]))) return true;
     const candidate = command.replaceAll('\u0004', ' ');
     const file = resolve(cwd, candidate);
-    if (!existsSync(file)) continue;
+    if (!existsSync(file)) {
+      // A path-shaped dispatch target absent at hook time can still exist
+      // when the shell reaches it: another segment — or a substitution in
+      // this one — can create it and mark it executable in the same line
+      // (`printf … > lane && chmod +x lane && ./lane`, #189). Segment
+      // order cannot prove safety, because stripInertText promotes quoted
+      // substitutions to *trailing* segments even though they execute
+      // first. So any multi-segment line, and any remaining substitution
+      // marker, fails closed. A lone dispatch of a missing path stays
+      // allowed: nothing can have created it, and the shell fails on its
+      // own. Bare words are PATH lookups, not dispatches.
+      if (candidate.includes('/') && (segments.length > 1 || /\$\(|`|[<>]\(/u.test(segments[index]))) return true;
+      continue;
+    }
     try {
       const prefix = readFileSync(file).subarray(0, 4096);
       if (!prefix.includes(0)) return true;
