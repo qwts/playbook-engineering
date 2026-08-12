@@ -3,7 +3,8 @@
 // enforces all of it across three harnesses.
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
@@ -507,6 +508,55 @@ describe('command hook', () => {
     assert.equal(evaluateCommand("printf 'child_process.execSync(\"npm run ci\")' > /tmp/lane.js && node /tmp/lane.js", opts()).allow, false);
     assert.equal(evaluateCommand('python tools/task.py', opts()).allow, false);
     assert.equal(evaluateCommand("tar -cf /tmp/a.tar --checkpoint=1 --checkpoint-action=exec='npm run ci' README.md", opts()).allow, false);
+  });
+
+  test('checked-in Node helpers pass by reviewed provenance; edits and additions do not (#191)', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'agent-guard-provenance-'));
+    roots.push(repo);
+    const git = (...args) =>
+      execFileSync('git', ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { stdio: 'ignore' });
+    git('init', '--quiet');
+    mkdirSync(path.join(repo, 'scripts'), { recursive: true });
+    writeFileSync(path.join(repo, 'scripts', 'check-traceability.mjs'), 'process.exit(0);\n');
+    git('add', '-A');
+    git('commit', '--quiet', '-m', 'helper');
+    const local = { ...opts(), cwd: repo };
+    // Without fetched origin refs there is no reviewed base: HEAD moves
+    // with any local commit, so provenance fails closed.
+    assert.equal(evaluateCommand('node scripts/check-traceability.mjs', local).allow, false);
+    // A fetched remote default branch is the trust anchor.
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    // The cartograph/quorum shapes: documented checked-in helpers run.
+    assert.equal(evaluateCommand('node scripts/check-traceability.mjs', local).allow, true);
+    assert.equal(evaluateCommand('node scripts/check-traceability.mjs --json', local).allow, true);
+    // Provenance vouches only for a substitution-free first segment: an
+    // earlier segment can cd away from the hook's cwd or rewrite the file,
+    // and a substitution executes before the runtime does.
+    assert.equal(evaluateCommand('cd tmp && node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(
+      evaluateCommand("printf 'x' > scripts/check-traceability.mjs && node scripts/check-traceability.mjs", local).allow,
+      false
+    );
+    assert.equal(evaluateCommand('node scripts/check-traceability.mjs $(date)', local).allow, false);
+    // An edited helper no longer matches the reviewed blob: denied.
+    writeFileSync(path.join(repo, 'scripts', 'check-traceability.mjs'), "require('child_process').execSync('npx vitest');\n");
+    assert.equal(evaluateCommand('node scripts/check-traceability.mjs', local).allow, false);
+    // A new script is not reviewed, staged or not — git add is agent-editable.
+    writeFileSync(path.join(repo, 'scripts', 'fresh.mjs'), 'process.exit(0);\n');
+    assert.equal(evaluateCommand('node scripts/fresh.mjs', local).allow, false);
+    git('add', '-A');
+    assert.equal(evaluateCommand('node scripts/fresh.mjs', local).allow, false);
+    // Outside any checkout there is no provenance: denied as before.
+    assert.equal(evaluateCommand('node /tmp/lane.js', local).allow, false);
+    // Non-node runtimes keep the existing policy even when checked in.
+    writeFileSync(path.join(repo, 'scripts', 'task.py'), 'raise SystemExit\n');
+    git('add', '-A');
+    git('commit', '--quiet', '-m', 'python helper');
+    assert.equal(evaluateCommand('python scripts/task.py', local).allow, false);
+    // Local commits move HEAD, not the reviewed base: the freshly committed
+    // script and the committed edit both stay denied.
+    assert.equal(evaluateCommand('node scripts/fresh.mjs', local).allow, false);
+    assert.equal(evaluateCommand('node scripts/check-traceability.mjs', local).allow, false);
   });
 
   test('Node environment preloads and direct shell scripts stay behind approval', () => {

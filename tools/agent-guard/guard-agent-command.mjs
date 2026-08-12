@@ -30,8 +30,9 @@
 //
 // Protocols: --protocol=claude | cursor | codex
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
@@ -1007,12 +1008,79 @@ function hasRuntimeStdinProgram(command) {
   return false;
 }
 
-function hasRuntimeScriptFile(command) {
-  for (const segment of splitSegments(command)) {
-    const program = runtimeProgram(segment);
+function git(cwd, ...args) {
+  return execFileSync('git', ['-C', cwd, ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim();
+}
+
+// The trust anchor for checked-in helpers: the remote default branch, which
+// agents cannot move locally (pushes are review-gated). No local fallback —
+// HEAD moves with any `git commit`, so a checkout without fetched origin
+// refs has no reviewed base and the allowance fails closed.
+function reviewedBaseRef(cwd) {
+  for (const ref of ['origin/HEAD', 'origin/main', 'origin/master']) {
+    try {
+      git(cwd, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`);
+      return ref;
+    } catch {
+      /* try the next anchor */
+    }
+  }
+  return null;
+}
+
+// A Node script is a reviewed checked-in helper when its on-disk content is
+// byte-identical to the blob at the reviewed base ref. Content provenance —
+// not a filename allowlist an agent could extend (#141's fake-wrapper
+// defect), and not mere trackedness an agent could satisfy with `git add`
+// or a local commit. Any git failure, path escape, or mismatch fails closed.
+function isReviewedCheckedInScript(token, cwd) {
+  let file = resolve(cwd, token);
+  if (!existsSync(file)) return false;
+  // git prints physical paths; resolve symlinked segments (macOS /var → /private/var)
+  // so the toplevel-relative computation compares like with like.
+  try {
+    file = realpathSync(file);
+  } catch {
+    return false;
+  }
+  try {
+    const toplevel = git(cwd, 'rev-parse', '--show-toplevel');
+    const relPath = relative(toplevel, file);
+    if (relPath.startsWith('..') || isAbsolute(relPath)) return false;
+    const base = reviewedBaseRef(cwd);
+    if (base === null) return false;
+    const reviewedBlob = git(cwd, 'rev-parse', '--verify', '--quiet', `${base}:${relPath.split(sep).join('/')}`);
+    const onDiskBlob = git(cwd, 'hash-object', '--', file);
+    return reviewedBlob === onDiskBlob;
+  } catch {
+    return false;
+  }
+}
+
+function hasRuntimeScriptFile(command, cwd = process.cwd()) {
+  const segments = splitSegments(command);
+  for (let index = 0; index < segments.length; index += 1) {
+    const program = runtimeProgram(segments[index]);
     if (program?.kind !== 'file') continue;
     const normalized = program.token.replaceAll('\u0004', ' ');
     if (program.family === 'node' && /(?:^|\/)tools\/agent-guard\/(?:run-guarded|arbiter)\.mjs$/u.test(normalized)) continue;
+    // Checked-in Node helpers whose content matches the reviewed base ref
+    // are the repository's own documented tooling (#191). Provenance only
+    // vouches for bytes nothing can touch between hashing and execution:
+    // an earlier segment may cd away from the hook's cwd or rewrite the
+    // file, and a substitution in this segment runs before the runtime
+    // does — so only a substitution-free first segment qualifies. Other
+    // runtimes, modified scripts, and dynamic paths stay denied.
+    if (
+      program.family === 'node' &&
+      index === 0 &&
+      !/\$\(|`|[<>]\(/u.test(segments[index]) &&
+      isReviewedCheckedInScript(normalized, cwd)
+    )
+      continue;
     return true;
   }
   return false;
@@ -1976,7 +2044,7 @@ export function evaluateCommand(command, { cwd = process.cwd() } = {}) {
     };
   }
 
-  if (hasRuntimeScriptFile(effective)) {
+  if (hasRuntimeScriptFile(effective, cwd)) {
     return {
       allow: false,
       reason: `Blocked direct runtime script-file dispatch: a script can launch a protected lane after static shell checks. Run it through the repository's guarded entrypoint. ${USE_ENTRYPOINT}`,
