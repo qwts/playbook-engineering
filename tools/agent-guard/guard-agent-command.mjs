@@ -1833,10 +1833,84 @@ function commandAfterPrefixes(segment) {
   return tokens.slice(index).join(' ');
 }
 
+const PROTECTED_ENV_ASSIGNMENT = /^["']?(?:NODE_OPTIONS|BASH_ENV|ENV|ZDOTDIR|PERL5OPT|RUBYOPT|PYTHONPATH|PYTHONHOME|PHPRC|PHP_INI_SCAN_DIR|LD_PRELOAD|DYLD_INSERT_LIBRARIES|GIT_SSH_COMMAND|GIT_CONFIG_COUNT|PATH)=/u;
+const ASSIGNMENT_TOKEN = /^["']?[A-Za-z_][A-Za-z0-9_]*=/u;
+const ASSIGNMENT_PREFIX_COMMAND = /^(?:command|builtin|env|exec|time|nice|nohup|timeout|setsid|stdbuf|sudo|doas)$/u;
+// Options of the wrappers above whose operand is a separate following word.
+// An operand left in place would read as the command and end the assignment
+// scan early (`sudo -u root 'NODE_OPTIONS=…' npm run lint`).
+const WRAPPER_OPTION_OPERANDS = {
+  sudo: new Set(['-u', '--user', '-g', '--group', '-h', '--host', '-p', '--prompt', '-C', '--close-from', '-D', '--chdir', '-R', '--chroot', '-T', '--command-timeout', '-U', '--other-user']),
+  doas: new Set(['-u']),
+  env: new Set(['-C', '--chdir', '-u', '--unset', '-S', '--split-string']),
+  timeout: new Set(['-k', '--kill-after', '-s', '--signal']),
+  nice: new Set(['-n', '--adjustment']),
+  stdbuf: new Set(['-i', '-o', '-e']),
+};
+const EMPTY_OPERAND_OPTIONS = new Set();
+
+// splitSegments is quote-unaware, so a separator inside a quoted argument
+// would open a phantom segment whose first token looks like an assignment.
+// Blank separators inside quotes (the quoted word survives as one token).
+function maskQuotedSeparators(command) {
+  let scanned = '';
+  let rest = command;
+  for (;;) {
+    const match = QUOTED.exec(rest);
+    if (!match) break;
+    scanned += rest.slice(0, match.index) + match[0].replace(/[;\n|&]/gu, ' ');
+    rest = rest.slice(match.index + match[0].length);
+  }
+  return scanned + rest;
+}
+
+// A protected VAR=… is an override only where a shell or env-style wrapper
+// applies it to a command's environment: the assignment prefix of a segment,
+// or the argument list of env/sudo/timeout/…, where quoting does not defuse
+// it (`env 'NODE_OPTIONS=…' npm run lint` sets the variable all the same).
+export function hasProtectedEnvironmentAssignment(command) {
+  for (const segment of splitSegments(maskQuotedSeparators(command))) {
+    const tokens = segment.split(/\s+/u).filter(Boolean);
+    let index = 0;
+    while (index < tokens.length) {
+      const token = tokens[index];
+      if (ASSIGNMENT_TOKEN.test(token)) {
+        if (PROTECTED_ENV_ASSIGNMENT.test(token)) return true;
+        index += 1;
+        continue;
+      }
+      const name = token.replace(/^["']+|["']+$/gu, '').split('/').at(-1);
+      if (ASSIGNMENT_PREFIX_COMMAND.test(name)) {
+        index += 1;
+        // Skip option words together with their separate operands, so an
+        // operand never masquerades as the command and ends the scan while a
+        // quoted assignment still follows: sudo's run form is
+        // `sudo … [-u user] [VAR=value] … [command]`.
+        const operandOptions = WRAPPER_OPTION_OPERANDS[name] ?? EMPTY_OPERAND_OPTIONS;
+        while (tokens[index]?.startsWith('-')) {
+          const option = tokens[index];
+          index += 1;
+          if (operandOptions.has(option)) index += 1;
+        }
+        if ((name === 'timeout' || name === 'nice') && /^\d/u.test(tokens[index] ?? '')) index += 1;
+        continue;
+      }
+      break;
+    }
+  }
+  return false;
+}
+
 export function evaluateCommand(command, { cwd = process.cwd() } = {}) {
   if (typeof command !== 'string' || command.length === 0) return { allow: true };
   const dynamicCommand = maskNonShellHeredocs(command);
-  if (/\b(?:NODE_OPTIONS|BASH_ENV|ENV|ZDOTDIR|PERL5OPT|RUBYOPT|PYTHONPATH|PYTHONHOME|PHPRC|PHP_INI_SCAN_DIR|LD_PRELOAD|DYLD_INSERT_LIBRARIES|GIT_SSH_COMMAND|GIT_CONFIG_COUNT|PATH)=/u.test(dynamicCommand)) {
+  // Executable-loading environment overrides are denied only in positions
+  // that reach a command's environment: leading VAR=… prefixes and the
+  // argument list of env-style wrappers — where a quoted assignment is still
+  // an assignment. Elsewhere, quoted protected-variable text is a mention (a
+  // commit message, a grep pattern, a printf payload), not an override; the
+  // TAMPERING rule still scans the stripped text as the unquoted backstop.
+  if (hasProtectedEnvironmentAssignment(dynamicCommand)) {
     return {
       allow: false,
       reason:
