@@ -109,7 +109,7 @@ describe('lane policy', () => {
     const verdict = evaluateLanePolicy({ label: 'test:e2e', env: { ...env, CLAUDECODE: '1' } });
     assert.equal(verdict.allowed, false);
     assert.match(verdict.message, /Push the branch and let GitHub CI verify/u);
-    assert.match(verdict.message, /owner can run it directly/u);
+    assert.match(verdict.message, /owner can open a window from their own \(non-agent\) terminal/u);
   });
 
   test('an unmarked local caller cannot claim human authentication', () => {
@@ -126,6 +126,31 @@ describe('lane policy', () => {
     const agent = { ...env, CLAUDECODE: '1' };
     assert.equal(evaluateLanePolicy({ label: 'test:e2e', env: agent }).allowed, false);
     assert.equal(evaluateLanePolicy({ label: 'test:stories:ci', env: agent }).allowed, false);
+  });
+
+  test('a live grant in an unmarked session is the owner path (#180)', () => {
+    // Grants cannot be minted from agent sessions (the hook denies arbiter
+    // grant) and markers cannot be scrubbed (the hook denies identity
+    // removal), so unmarked + grant is owner evidence. Enforcement — lease,
+    // ceiling, timeout, admission — still applies to the granted run.
+    writeGrant({ laneId: 'e2e', minutes: 30, env });
+    const verdict = evaluateLanePolicy({ label: 'test:e2e', env });
+    assert.equal(verdict.allowed, true);
+    assert.equal(verdict.actor, 'owner-grant');
+    // Lane-scoped: the e2e grant says nothing about ci.
+    assert.equal(evaluateLanePolicy({ label: 'ci', env }).allowed, false);
+  });
+
+  test('an expired grant is not an owner path', () => {
+    const now = Date.parse('2026-08-02T12:00:00Z');
+    writeGrant({ laneId: 'e2e', minutes: 5, env, now });
+    assert.equal(evaluateLanePolicy({ label: 'test:e2e', env, now: now + 4 * 60_000 }).allowed, true);
+    assert.equal(evaluateLanePolicy({ label: 'test:e2e', env, now: now + 10 * 60_000 }).allowed, false);
+  });
+
+  test('the refusal tells the owner how to open a granted window', () => {
+    const verdict = evaluateLanePolicy({ label: 'test:e2e', env: { ...env, CLAUDECODE: '1' } });
+    assert.match(verdict.message, /arbiter\.mjs grant e2e/u);
   });
 });
 
