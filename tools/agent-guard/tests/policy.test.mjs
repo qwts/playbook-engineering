@@ -521,9 +521,23 @@ describe('command hook', () => {
     git('add', '-A');
     git('commit', '--quiet', '-m', 'helper');
     const local = { ...opts(), cwd: repo };
+    // Without fetched origin refs there is no reviewed base: HEAD moves
+    // with any local commit, so provenance fails closed.
+    assert.equal(evaluateCommand('node scripts/check-traceability.mjs', local).allow, false);
+    // A fetched remote default branch is the trust anchor.
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
     // The cartograph/quorum shapes: documented checked-in helpers run.
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs', local).allow, true);
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs --json', local).allow, true);
+    // Provenance vouches only for a substitution-free first segment: an
+    // earlier segment can cd away from the hook's cwd or rewrite the file,
+    // and a substitution executes before the runtime does.
+    assert.equal(evaluateCommand('cd tmp && node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(
+      evaluateCommand("printf 'x' > scripts/check-traceability.mjs && node scripts/check-traceability.mjs", local).allow,
+      false
+    );
+    assert.equal(evaluateCommand('node scripts/check-traceability.mjs $(date)', local).allow, false);
     // An edited helper no longer matches the reviewed blob: denied.
     writeFileSync(path.join(repo, 'scripts', 'check-traceability.mjs'), "require('child_process').execSync('npx vitest');\n");
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs', local).allow, false);
@@ -539,6 +553,10 @@ describe('command hook', () => {
     git('add', '-A');
     git('commit', '--quiet', '-m', 'python helper');
     assert.equal(evaluateCommand('python scripts/task.py', local).allow, false);
+    // Local commits move HEAD, not the reviewed base: the freshly committed
+    // script and the committed edit both stay denied.
+    assert.equal(evaluateCommand('node scripts/fresh.mjs', local).allow, false);
+    assert.equal(evaluateCommand('node scripts/check-traceability.mjs', local).allow, false);
   });
 
   test('Node environment preloads and direct shell scripts stay behind approval', () => {

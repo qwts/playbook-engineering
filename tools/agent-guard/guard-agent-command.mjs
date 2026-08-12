@@ -1016,11 +1016,11 @@ function git(cwd, ...args) {
 }
 
 // The trust anchor for checked-in helpers: the remote default branch, which
-// agents cannot move locally (pushes are review-gated). Falls back to HEAD
-// only when no remote ref is fetched at all (e.g. a shallow single-ref CI
-// checkout, where no agent is editing files between fetch and run).
+// agents cannot move locally (pushes are review-gated). No local fallback —
+// HEAD moves with any `git commit`, so a checkout without fetched origin
+// refs has no reviewed base and the allowance fails closed.
 function reviewedBaseRef(cwd) {
-  for (const ref of ['origin/HEAD', 'origin/main', 'origin/master', 'HEAD']) {
+  for (const ref of ['origin/HEAD', 'origin/main', 'origin/master']) {
     try {
       git(cwd, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`);
       return ref;
@@ -1061,15 +1061,26 @@ function isReviewedCheckedInScript(token, cwd) {
 }
 
 function hasRuntimeScriptFile(command, cwd = process.cwd()) {
-  for (const segment of splitSegments(command)) {
-    const program = runtimeProgram(segment);
+  const segments = splitSegments(command);
+  for (let index = 0; index < segments.length; index += 1) {
+    const program = runtimeProgram(segments[index]);
     if (program?.kind !== 'file') continue;
     const normalized = program.token.replaceAll('\u0004', ' ');
     if (program.family === 'node' && /(?:^|\/)tools\/agent-guard\/(?:run-guarded|arbiter)\.mjs$/u.test(normalized)) continue;
     // Checked-in Node helpers whose content matches the reviewed base ref
-    // are the repository's own documented tooling (#191). Other runtimes,
-    // generated or modified scripts, and dynamic paths stay denied.
-    if (program.family === 'node' && isReviewedCheckedInScript(normalized, cwd)) continue;
+    // are the repository's own documented tooling (#191). Provenance only
+    // vouches for bytes nothing can touch between hashing and execution:
+    // an earlier segment may cd away from the hook's cwd or rewrite the
+    // file, and a substitution in this segment runs before the runtime
+    // does — so only a substitution-free first segment qualifies. Other
+    // runtimes, modified scripts, and dynamic paths stay denied.
+    if (
+      program.family === 'node' &&
+      index === 0 &&
+      !/\$\(|`|[<>]\(/u.test(segments[index]) &&
+      isReviewedCheckedInScript(normalized, cwd)
+    )
+      continue;
     return true;
   }
   return false;
