@@ -612,6 +612,15 @@ describe('command hook', () => {
     // The cartograph/quorum shapes: documented checked-in helpers run.
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs', local).allow, true);
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs --json', local).allow, true);
+    assert.equal(evaluateCommand('node scripts/check-traceability.mjs --report out/report.json', local).allow, true);
+    // Provenance vouches for the script's bytes, not its argv: a checked-in
+    // argv-forwarding dispatcher relays whatever follows `--` (the
+    // measure-runner-capacity shape), and a command-shaped or unreadable
+    // quoted argument is a dispatch this hook cannot see. All fail closed.
+    assert.equal(evaluateCommand('node scripts/check-traceability.mjs -- npx vitest', local).allow, false);
+    assert.equal(evaluateCommand('node scripts/check-traceability.mjs -- npm run ci', local).allow, false);
+    assert.equal(evaluateCommand("node scripts/check-traceability.mjs 'npx vitest'", local).allow, false);
+    assert.equal(evaluateCommand('node scripts/check-traceability.mjs --shell bash', local).allow, false);
     // Provenance vouches only for a substitution-free first segment: an
     // earlier segment can cd away from the hook's cwd or rewrite the file,
     // and a substitution executes before the runtime does.
