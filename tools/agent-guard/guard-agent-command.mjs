@@ -1096,6 +1096,11 @@ function hasDirectScriptDispatch(command, cwd = process.cwd()) {
     if (tokens.length === 0) continue;
     const command = tokens[0];
     if (command === '.' || command === 'source') return tokens.length > 1;
+    // A fully-quoted command word containing whitespace blanks to a bare
+    // quote pair before this scan, so `'./la ne'` arrives as `''`. That is
+    // a dispatch this hook cannot resolve or inspect — in a compound line
+    // (where an earlier write can have created the file) it fails closed.
+    if ((command === "''" || command === '""') && (segments.length > 1 || /\$\(|`|[<>]\(/u.test(segments[index]))) return true;
     const candidate = command.replaceAll('\u0004', ' ');
     const file = resolve(cwd, candidate);
     if (!existsSync(file)) {

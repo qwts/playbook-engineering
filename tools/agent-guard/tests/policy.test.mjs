@@ -514,6 +514,10 @@ describe('command hook', () => {
     assert.equal(evaluateCommand("printf 'npx vitest\\n' > lane && chmod +x lane && ./lane", opts()).allow, false);
     assert.equal(evaluateCommand("printf 'npx vitest\\n' > lane\nchmod +x lane\n./lane", opts()).allow, false);
     assert.equal(evaluateCommand('./lane "$(printf x > lane)"', opts()).allow, false);
+    // A quoted whitespace pathname blanks to a bare quote pair before the
+    // scan; in a compound line that is still a dispatch nothing inspected.
+    assert.equal(evaluateCommand("printf 'npx vitest\\n' > 'la ne' && chmod +x 'la ne' && './la ne'", opts()).allow, false);
+    assert.equal(evaluateCommand("'./la ne'", opts()).allow, true);
     // A first-segment dispatch of a nonexistent path has no creator, and a
     // relative path in argument position is data: both stay allowed.
     assert.equal(evaluateCommand('./does-not-exist-here', opts()).allow, true);
