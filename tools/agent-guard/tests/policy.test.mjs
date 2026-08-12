@@ -623,6 +623,26 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('rm -rf ~/.c[a]che/agent-guard', opts()).allow, false);
     assert.equal(evaluateCommand('rm -rf $XDG_CACHE_HOME/agent-guard', opts()).allow, false);
     assert.equal(evaluateCommand('rm -rf ~/Library/Caches/agent-guard', opts()).allow, false);
+    // Quoting the target does not change what gets deleted (#198): words in
+    // a destructive command's argument slot — or after a redirection — are
+    // filesystem targets, not prose, and survive quote-blanking.
+    assert.equal(evaluateCommand('rm -rf "$XDG_CACHE_HOME/agent-guard"', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf "$HOME/.cache/agent-guard/leases"', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf ~/".cache/agent-guard"', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf "$HOME"/.cache/agent-guard', opts()).allow, false);
+    assert.equal(evaluateCommand(': > "$HOME/.cache/agent-guard/leases/live.json"', opts()).allow, false);
+    assert.equal(evaluateCommand('mv "$HOME/.cache/agent-guard" /tmp/x', opts()).allow, false);
+    assert.equal(evaluateCommand('tee "$XDG_CACHE_HOME/agent-guard/machine-token" < /dev/null', opts()).allow, false);
+    // Wrappers do not launder the target: sudo rm deletes what rm deletes.
+    assert.equal(evaluateCommand('sudo rm -rf "$HOME/.cache/agent-guard"', opts()).allow, false);
+    assert.equal(evaluateCommand('sudo -u root rm -rf "$XDG_CACHE_HOME/agent-guard"', opts()).allow, false);
+    assert.equal(evaluateCommand('timeout 5 rm -rf "$HOME/.cache/agent-guard"', opts()).allow, false);
+    assert.equal(evaluateCommand('sudo git commit -m "rm -rf $HOME/.cache/agent-guard"', opts()).allow, true);
+    // Prose and ordinary paths stay allowed: quotedWord rejects words with
+    // whitespace, so multi-word payloads can never be promoted.
+    assert.equal(evaluateCommand('git commit -m "rm -rf $HOME/.cache/agent-guard"', opts()).allow, true);
+    assert.equal(evaluateCommand('rm -rf "node_modules/.cache"', opts()).allow, true);
+    assert.equal(evaluateCommand('rm -rf "build docs cache"', opts()).allow, true);
   });
 
   test("Codex's argv arrays are normalized before matching", () => {
