@@ -73,6 +73,19 @@ describe('agent-vs-human detection', () => {
     assert.equal(harnessName({ CURSOR_TRACE_ID: 'abc' }), 'cursor');
   });
 
+  test('a <NAME>_AGENT marker names an unregistered harness, never human (#142)', () => {
+    // Devin and Windsurf set none of the known markers but do set DEVIN_AGENT /
+    // WINDSURF_AGENT in the driven process. Resolving those to 'human' let them
+    // mint and use owner grants; they must resolve to their own harness.
+    assert.equal(harnessName({ DEVIN_AGENT: '1', WINDSURF_IDE_TYPE: 'x', ACP_BACKEND: 'y' }), 'devin');
+    assert.equal(harnessName({ WINDSURF_AGENT: '1' }), 'windsurf');
+    // Ambient editor variables alone are NOT an agent (agent-bot-identity#12):
+    // an open editor in a human's terminal must still read as human.
+    assert.equal(harnessName({ VSCODE_PID: '123', WINDSURF_IDE_TYPE: 'stable', TERM: 'xterm' }), 'human');
+    // Copilot is still caught by the AI_AGENT branch, unchanged.
+    assert.equal(harnessName({ AI_AGENT: 'github_copilot_vscode_agent' }), 'github');
+  });
+
   test('an unmarked local caller fails closed', () => {
     assert.equal(isAgentSession({ TERM: 'xterm-256color', SHELL: '/bin/zsh' }), true);
     assert.equal(harnessName({}), 'human');
@@ -83,6 +96,15 @@ describe('agent-vs-human detection', () => {
     // Misattributing a human's commit to a bot is the harm there; handing an
     // unrecognised agent a heavy suite is the harm here.
     assert.equal(isAgentSession({ AI_AGENT: 'a-harness-that-did-not-exist-yet' }), true);
+  });
+
+  test('a <NAME>_AGENT session cannot use an owner grant on disk (#142)', () => {
+    // The owner-grant path keys on harnessName === 'human'. A Devin session
+    // resolving to its own harness cannot borrow a grant the owner left live.
+    writeGrant({ laneId: 'e2e', minutes: 30, env });
+    assert.equal(evaluateLanePolicy({ label: 'test:e2e', env: { ...env, DEVIN_AGENT: '1' } }).allowed, false);
+    // The owner (no agent marker) still can.
+    assert.equal(evaluateLanePolicy({ label: 'test:e2e', env }).allowed, true);
   });
 });
 
@@ -330,6 +352,13 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('AI_AGENT= node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
     assert.equal(evaluateCommand('CLAUDECODE=0 CLAUDE_CODE_ENTRYPOINT= node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
     assert.equal(evaluateCommand('CODEX_THREAD_ID= node tools/agent-guard/run-guarded.mjs -- npm test', opts()).allow, false);
+    // A generic <NAME>_AGENT marker is an identity now (#142), so scrubbing it
+    // must be blocked too — otherwise `env -u DEVIN_AGENT …` makes the wrapper
+    // see harnessName === 'human' and reopens the owner-grant bypass.
+    assert.equal(evaluateCommand('env -u DEVIN_AGENT node tools/agent-guard/run-guarded.mjs -- npm run test:e2e', opts()).allow, false);
+    assert.equal(evaluateCommand('DEVIN_AGENT= node tools/agent-guard/run-guarded.mjs -- npm run test:e2e', opts()).allow, false);
+    assert.equal(evaluateCommand('unset WINDSURF_AGENT; node tools/agent-guard/run-guarded.mjs -- npm run test:e2e', opts()).allow, false);
+    assert.equal(evaluateCommand('export -n DEVIN_AGENT; node tools/agent-guard/run-guarded.mjs -- npm run test:e2e', opts()).allow, false);
   });
 
   test('an agent cannot grant itself the opt-in', () => {
