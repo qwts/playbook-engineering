@@ -1600,8 +1600,14 @@ function referencesGuardState(command) {
       // path (`ls tools/agent-guard`, absolute or home-anchored) is a
       // mention, not the store (#190).
       const prefixComponents = components.slice(0, guardAt);
+      // A pure variable expansion matches any target under
+      // shellPatternCanMatch, which would turn $PWD/tools/agent-guard into a
+      // cache path. Variables count only as the immediate parent (below);
+      // the cache-name scan needs literal or glob evidence.
       const cacheNamed = prefixComponents.some(
-        (component) => ['.cache', 'Caches', 'caches', 'cache'].some((target) => shellPatternCanMatch(component, target)),
+        (component) =>
+          !/^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/u.test(component) &&
+          ['.cache', 'Caches', 'caches', 'cache'].some((target) => shellPatternCanMatch(component, target)),
       );
       if (cacheNamed || /[$]/u.test(prefixComponents.at(-1) ?? '')) return true;
     }

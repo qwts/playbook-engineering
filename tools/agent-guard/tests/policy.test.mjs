@@ -541,6 +541,8 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('echo agent-guard', opts()).allow, true);
     assert.equal(evaluateCommand('ls tools/agent-guard', opts()).allow, true);
     assert.equal(evaluateCommand('git log --oneline -- tools/agent-guard', opts()).allow, true);
+    assert.equal(evaluateCommand('ls $PWD/tools/agent-guard', opts()).allow, true);
+    assert.equal(evaluateCommand('rg leaseFile $PWD/tools/agent-guard', opts()).allow, true);
     // The whole-store deletions stay behind protection, glob-mangled or not.
     assert.equal(evaluateCommand('rm -rf ~/.c[a]che/agent-guard', opts()).allow, false);
     assert.equal(evaluateCommand('rm -rf $XDG_CACHE_HOME/agent-guard', opts()).allow, false);
