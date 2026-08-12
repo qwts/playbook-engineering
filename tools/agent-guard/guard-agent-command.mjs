@@ -155,14 +155,14 @@ const TAMPERING = [
   },
   {
     pattern:
-      /(?:\benv\b[^\n;&|]*(?:\s(?:-(?=\s|$)|-i|--ignore-environment)(?=\s|$)|(?:-u(?:=|\s*)|--unset(?:=|\s+))(?:CLAUDECODE|CLAUDE_CODE_ENTRYPOINT|AI_AGENT|CODEX_\w+|CURSOR_\w+))|\b(?:unset\s+(?:(?:--|-v|-f)\s+)*|export\s+-n\s+)(?:CLAUDECODE|CLAUDE_CODE_ENTRYPOINT|AI_AGENT|CODEX_\w+|CURSOR_\w+))/u,
+      /(?:\benv\b[^\n;&|]*(?:\s(?:-(?=\s|$)|-i|--ignore-environment)(?=\s|$)|(?:-u(?:=|\s*)|--unset(?:=|\s+))(?:CLAUDECODE|CLAUDE_CODE_ENTRYPOINT|AI_AGENT|CODEX_\w+|CURSOR_\w+|\w*_AGENT))|\b(?:unset\s+(?:(?:--|-v|-f)\s+)*|export\s+-n\s+)(?:CLAUDECODE|CLAUDE_CODE_ENTRYPOINT|AI_AGENT|CODEX_\w+|CURSOR_\w+|\w*_AGENT))/u,
     reason:
       'Blocked removal of agent identity before run-guarded.mjs: the wrapper must inherit its harness markers so it ' +
       `cannot misclassify an agent as the human owner. ${GUIDANCE}`,
   },
   {
     pattern:
-      /(?:^|[\s;&|])(?:CLAUDECODE|CLAUDE_CODE_ENTRYPOINT|AI_AGENT|CODEX_\w+|CURSOR_\w+)=[^\s;&|]*/u,
+      /(?:^|[\s;&|])(?:CLAUDECODE|CLAUDE_CODE_ENTRYPOINT|AI_AGENT|CODEX_\w+|CURSOR_\w+|\w*_AGENT)=[^\s;&|]*/u,
     reason:
       'Blocked reassignment of agent identity before run-guarded.mjs: clearing or replacing a harness marker can make ' +
       `the wrapper misclassify an agent as the human owner. ${GUIDANCE}`,
@@ -1616,7 +1616,7 @@ function hasDynamicIdentityRemoval(command) {
 }
 
 function isProtectedEnvironmentName(name) {
-  return /^(?:CI|GITHUB_ACTIONS|CONTINUOUS_INTEGRATION|BUILDKITE|GITLAB_CI|JENKINS_URL|NODE_OPTIONS|BASH_ENV|ENV|ZDOTDIR|PERL5OPT|RUBYOPT|PYTHONPATH|PYTHONHOME|PHPRC|PHP_INI_SCAN_DIR|LD_PRELOAD|DYLD_INSERT_LIBRARIES|GIT_SSH_COMMAND|GIT_CONFIG_COUNT|PATH|AGENT_GUARD_FORCE|AGENT_GUARD_ASSUME_HUMAN|AGENT_GUARD_STATE_DIR|AGENT_GUARDED|CLAUDECODE|CLAUDE_CODE_ENTRYPOINT|AI_AGENT|CODEX_\w+|CURSOR_\w+)$/u.test(name);
+  return /^(?:CI|GITHUB_ACTIONS|CONTINUOUS_INTEGRATION|BUILDKITE|GITLAB_CI|JENKINS_URL|NODE_OPTIONS|BASH_ENV|ENV|ZDOTDIR|PERL5OPT|RUBYOPT|PYTHONPATH|PYTHONHOME|PHPRC|PHP_INI_SCAN_DIR|LD_PRELOAD|DYLD_INSERT_LIBRARIES|GIT_SSH_COMMAND|GIT_CONFIG_COUNT|PATH|AGENT_GUARD_FORCE|AGENT_GUARD_ASSUME_HUMAN|AGENT_GUARD_STATE_DIR|AGENT_GUARDED|CLAUDECODE|CLAUDE_CODE_ENTRYPOINT|AI_AGENT|CODEX_\w+|CURSOR_\w+|\w*_AGENT)$/u.test(name);
 }
 
 function hasProtectedEnvironmentMutation(command) {
