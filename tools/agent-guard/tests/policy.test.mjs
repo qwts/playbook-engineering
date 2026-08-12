@@ -535,6 +535,16 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('d=~/.cache/agent-guard; rm -rf "$d/leases"', opts()).allow, false);
     assert.equal(evaluateCommand('cat agent-health-guard/leases/live.json', opts()).allow, true);
     assert.equal(evaluateCommand('mkdir -p /tmp/agent-app-guard/leases', opts()).allow, true);
+    // A bare `agent-guard` token or a repo source path is a mention, not the
+    // machine-wide state store (#190).
+    assert.equal(evaluateCommand('rg agent-guard docs', opts()).allow, true);
+    assert.equal(evaluateCommand('echo agent-guard', opts()).allow, true);
+    assert.equal(evaluateCommand('ls tools/agent-guard', opts()).allow, true);
+    assert.equal(evaluateCommand('git log --oneline -- tools/agent-guard', opts()).allow, true);
+    // The whole-store deletions stay behind protection, glob-mangled or not.
+    assert.equal(evaluateCommand('rm -rf ~/.c[a]che/agent-guard', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf $XDG_CACHE_HOME/agent-guard', opts()).allow, false);
+    assert.equal(evaluateCommand('rm -rf ~/Library/Caches/agent-guard', opts()).allow, false);
   });
 
   test("Codex's argv arrays are normalized before matching", () => {

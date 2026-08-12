@@ -1574,20 +1574,37 @@ function referencesGuardState(command) {
   for (const rawWord of command.match(/[^\s<>;&|]+/gu) ?? []) {
     const word = rawWord.slice(rawWord.lastIndexOf('=') + 1).replace(/^['"]|['"]$/gu, '');
     const components = word.split('/');
-    const guardAt = components.findIndex((component) => shellPatternCanMatch(component, 'agent-guard'));
-    if (guardAt < 0) continue;
-    const tail = [];
-    for (const component of components.slice(guardAt + 1)) {
-      if (component === '' || component === '.') continue;
-      if (component === '..') tail.pop();
-      else tail.push(component);
+    // Every component that can match the store name is a candidate anchor: a
+    // variable component matches anything, so stopping at the first match
+    // lets `$XDG_CACHE_HOME/agent-guard` shift the real component into child
+    // position and walk past the checks below.
+    for (let guardAt = 0; guardAt < components.length; guardAt += 1) {
+      if (!shellPatternCanMatch(components[guardAt], 'agent-guard')) continue;
+      const tail = [];
+      for (const component of components.slice(guardAt + 1)) {
+        if (component === '' || component === '.') continue;
+        if (component === '..') tail.pop();
+        else tail.push(component);
+      }
+      const child = tail[0];
+      if (child !== undefined && child !== '') {
+        if (['leases', 'admission.lock', 'machine-token'].some((target) => shellPatternCanMatch(child, target))) return true;
+        continue;
+      }
+      // No sensitive descendant named: this is the whole-store case
+      // (`rm -rf ~/.cache/agent-guard`). It is a state-store reference only
+      // when the leading chain can reach a machine cache root: a cache-named
+      // component anywhere before it (glob-aware, so `.c[a]che` still
+      // counts), or a variable expansion as the immediate parent. A bare
+      // word (`rg agent-guard docs`, `echo agent-guard`) or a repo source
+      // path (`ls tools/agent-guard`, absolute or home-anchored) is a
+      // mention, not the store (#190).
+      const prefixComponents = components.slice(0, guardAt);
+      const cacheNamed = prefixComponents.some(
+        (component) => ['.cache', 'Caches', 'caches', 'cache'].some((target) => shellPatternCanMatch(component, target)),
+      );
+      if (cacheNamed || /[$]/u.test(prefixComponents.at(-1) ?? '')) return true;
     }
-    const child = tail[0];
-    if (
-      child === undefined ||
-      child === '' ||
-      ['leases', 'admission.lock', 'machine-token'].some((target) => shellPatternCanMatch(child, target))
-    ) return true;
   }
   return false;
 }
