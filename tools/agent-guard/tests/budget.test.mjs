@@ -5,8 +5,8 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { SWAP_REFUSE_RATIO, clampCeiling, decideAdmission, deriveBudget, deriveBudgetForMemory, outstandingMb, unmaterializedMb } from '../lib/budget.mjs';
-import { parseMeminfo, parseSwapusage, parseVmStat, readMemoryStatus } from '../lib/system-memory.mjs';
+import { LANE_CAP_MB, SWAP_REFUSE_RATIO, clampCeiling, decideAdmission, deriveBudget, deriveBudgetForMemory, laneReservationMb, outstandingMb, unmaterializedMb } from '../lib/budget.mjs';
+import { parseMeminfo, parsePressureLevel, parseSwapusage, parseVmStat, readMemoryStatus } from '../lib/system-memory.mjs';
 
 // Real output from the 8 GB machine during the incident this tool exists to
 // prevent: 62 MB genuinely free, 6.09 GB of 7.17 GB swap committed.
@@ -72,6 +72,33 @@ describe('platform memory probes', () => {
     assert.equal(status.source, 'vm_stat+sysctl');
   });
 
+  test('pressure level parses only its own sysctl output', () => {
+    assert.equal(parsePressureLevel('kern.memorystatus_vm_pressure_level: 1\n'), 1);
+    assert.equal(parsePressureLevel('kern.memorystatus_vm_pressure_level: 4'), 4);
+    assert.equal(parsePressureLevel(SWAPUSAGE), null);
+    assert.equal(parsePressureLevel(''), null);
+  });
+
+  test('a refused swap probe keeps the vm_stat evidence instead of degrading (#180)', () => {
+    // Agent sandboxes can EPERM `sysctl vm.swapusage` while vm_stat stays
+    // readable; os.freemem() badly overstates pressure on macOS, so falling
+    // all the way back was itself a false-refusal source.
+    const status = readMemoryStatus({
+      platform: 'darwin',
+      totalMb: 24576,
+      exec: (command, args) => {
+        if (command === 'vm_stat') return VM_STAT;
+        if (args[0] === 'kern.memorystatus_vm_pressure_level') return 'kern.memorystatus_vm_pressure_level: 1\n';
+        throw new Error('sysctl: EPERM');
+      },
+    });
+    assert.equal(status.degraded, false);
+    assert.equal(status.source, 'vm_stat');
+    assert.equal(status.swapKnown, false);
+    assert.equal(status.pressureLevel, 1);
+    assert.ok(status.availableMb > 0);
+  });
+
   test('linux status is clamped to a cgroup v2 limit and live usage', () => {
     const files = new Map([
       ['/proc/meminfo', MEMINFO],
@@ -132,13 +159,19 @@ describe('budget derivation', () => {
     const budget = deriveBudget(8192);
     assert.equal(budget.reserveMb, 2048);
     assert.equal(budget.machineBudgetMb, 6144);
-    assert.equal(budget.maxRunMb, 3072);
+    assert.equal(budget.maxRunMb, 2048);
     assert.equal(budget.availabilityFloorMb, 1024);
   });
 
-  test('the formula scales rather than switching on machine size', () => {
-    assert.equal(deriveBudget(16384).maxRunMb, 6144);
-    assert.equal(deriveBudget(65536).maxRunMb, 24576);
+  test('the per-lane cap binds on machines the budget alone would not restrain', () => {
+    // The incident lane ballooned to ~100 GB; no sanctioned local lane needs
+    // more than LANE_CAP_MB, and a 24 GB machine reserving 9.2 GB for a
+    // measured ~2 GB lane is how healthy machines got refused (#180).
+    assert.equal(deriveBudget(16384).maxRunMb, LANE_CAP_MB);
+    assert.equal(deriveBudget(24576).maxRunMb, LANE_CAP_MB);
+    assert.equal(deriveBudget(65536).maxRunMb, LANE_CAP_MB);
+    // Below the cap the machine-derived half-budget still scales down.
+    assert.equal(deriveBudget(4096).maxRunMb, 1280);
   });
 
   test('a tiny machine still gets a usable, non-negative budget', () => {
@@ -157,7 +190,7 @@ describe('ceiling clamping', () => {
 
   test("the incident's own `--rss-mb 8192` is clamped to something that can trip", () => {
     const { ceilingMb, clamped } = clampCeiling(8192, budget);
-    assert.equal(ceilingMb, 3072);
+    assert.equal(ceilingMb, 2048);
     assert.equal(clamped, true);
     assert.ok(ceilingMb < 8192, 'a ceiling at or above total RAM is a no-op guard');
   });
@@ -168,8 +201,12 @@ describe('ceiling clamping', () => {
     assert.equal(clamped, false);
   });
 
-  test('the same request is not clamped on a machine that can afford it', () => {
-    assert.equal(clampCeiling(8192, deriveBudget(32768)).clamped, false);
+  test('the lane cap binds even on a machine that could afford more', () => {
+    // Affording it is not the question: the cap is the enforced contract that
+    // no single lane plans past what run-guarded will kill it at.
+    const big = clampCeiling(8192, deriveBudget(32768));
+    assert.equal(big.ceilingMb, LANE_CAP_MB);
+    assert.equal(big.clamped, true);
   });
 
   test('an absent or nonsense request falls back to the machine cap', () => {
@@ -318,6 +355,72 @@ describe('admission', () => {
     assert.equal(decision.unmaterializedMb, 600);
     assert.equal(decision.projectedFreeMb, 5000 - 600 - 512);
   });
+});
+
+describe('pressure-aware admission (#180)', () => {
+  const budget = deriveBudget(24576);
+
+  test('a healthy 24 GB Mac admits a capped lane it used to refuse', () => {
+    // The recorded refusal: 12,163 MB available, green pressure, no leases —
+    // refused only because the lane was booked at the 9,216 MB machine cap.
+    // Reserved at the lane cap instead, the same machine admits it.
+    const memory = { totalMb: 24576, availableMb: 12163, swapTotalMb: 3072, swapUsedMb: 552, pressureLevel: 1 };
+    const decision = decideAdmission({ budget, memory, leases: [], requestMb: budget.maxRunMb });
+    assert.equal(decision.granted, true);
+    assert.equal(budget.maxRunMb, LANE_CAP_MB);
+  });
+
+  test('kernel warning pressure refuses a heavy run whatever the page counts say', () => {
+    const memory = { totalMb: 24576, availableMb: 12163, swapTotalMb: 3072, swapUsedMb: 552, pressureLevel: 2 };
+    const heavy = decideAdmission({ budget, memory, leases: [], requestMb: budget.maxRunMb });
+    assert.equal(heavy.granted, false);
+    assert.equal(heavy.reason, 'memory-pressure');
+    // The light carve-out survives, as with the swap gate.
+    assert.equal(decideAdmission({ budget, memory, leases: [], requestMb: budget.lightRunMb }).granted, true);
+  });
+
+  test('normal pressure retires static swap history as refusal evidence', () => {
+    // macOS keeps swap allocated after pressure subsides; committed-but-idle
+    // swap on a green machine is history, not scarcity.
+    const memory = { totalMb: 24576, availableMb: 12163, swapTotalMb: 4096, swapUsedMb: 4000, pressureLevel: 1 };
+    assert.equal(decideAdmission({ budget, memory, leases: [], requestMb: budget.maxRunMb }).granted, true);
+  });
+
+  test('without pressure evidence the static swap gate still fails closed', () => {
+    const memory = { totalMb: 24576, availableMb: 12163, swapTotalMb: 4096, swapUsedMb: 4000 };
+    assert.equal(decideAdmission({ budget, memory, leases: [], requestMb: budget.maxRunMb }).reason, 'swap-pressure');
+  });
+
+  test('the light carve-out stays below the lane cap on any machine size', () => {
+    // On 32 GB, floor/2 reaches the lane cap; a carve-out that big would
+    // exempt every run from the pressure and swap gates entirely.
+    for (const totalMb of [8192, 16384, 24576, 32768, 65536]) {
+      const derived = deriveBudget(totalMb);
+      assert.ok(derived.lightRunMb < derived.maxRunMb, `lightRunMb must undercut maxRunMb at ${totalMb} MB`);
+    }
+    const big = deriveBudget(32768);
+    const pressured = { totalMb: 32768, availableMb: 20000, swapTotalMb: 2048, swapUsedMb: 100, pressureLevel: 2 };
+    assert.equal(decideAdmission({ budget: big, memory: pressured, leases: [], requestMb: big.maxRunMb }).reason, 'memory-pressure');
+  });
+});
+
+describe('lane reservation (#180)', () => {
+  test('a trustworthy peak reserves peak plus margin, capped at the ceiling', () => {
+    assert.equal(laneReservationMb(2048, 800), 1056);
+    assert.equal(laneReservationMb(2048, 1984), 2048);
+    assert.equal(laneReservationMb(2048, 100), 512);
+  });
+
+  test('no history reserves the ceiling', () => {
+    assert.equal(laneReservationMb(2048, null), 2048);
+    assert.equal(laneReservationMb(2048, Number.NaN), 2048);
+    assert.equal(laneReservationMb(2048, -5), 2048);
+  });
+
+  test('history can lower the reservation but never raise the ceiling', () => {
+    assert.ok(laneReservationMb(1024, 5000) <= 1024);
+  });
+
 });
 
 describe('lease accounting helpers', () => {

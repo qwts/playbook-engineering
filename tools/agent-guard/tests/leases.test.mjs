@@ -22,6 +22,8 @@ import {
   readLeases,
   releaseLease,
   retargetLease,
+  readLanePeakMb,
+  recordLanePeak,
   withAdmissionLock,
 } from '../lib/leases.mjs';
 import { ensureStateDirs, leasesDir, machineToken } from '../lib/protocol.mjs';
@@ -313,5 +315,24 @@ describe('liveness probe', () => {
 
   test('process inspection uses a portable absolute system binary', () => {
     assert.match(psExecutable(), /^\/(?:usr\/)?bin\/ps$/u);
+  });
+});
+
+describe('lane peak store (#180)', () => {
+  test('peaks round-trip through the protected store and keep the max of a rolling window', () => {
+    const env = { AGENT_GUARD_STATE_DIR: mkdtempSync(path.join(tmpdir(), 'agent-guard-peaks-')) };
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test' }), null);
+    recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 900 });
+    recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 1100 });
+    recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 700 });
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test' }), 1100);
+    // Other lanes and repos do not bleed together.
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'other' }), null);
+    assert.equal(readLanePeakMb({ env, repo: 'cartograph', label: 'test' }), null);
+    // Junk values are never recorded or returned.
+    recordLanePeak({ env, repo: 'overlook', label: 'junk', peakRssMb: Number.NaN });
+    recordLanePeak({ env, repo: 'overlook', label: 'junk', peakRssMb: -5 });
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'junk' }), null);
+    rmSync(env.AGENT_GUARD_STATE_DIR, { recursive: true, force: true });
   });
 });
