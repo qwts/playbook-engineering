@@ -12,6 +12,19 @@
 
 export const SWAP_REFUSE_RATIO = 0.5;
 
+// The per-lane hard cap (#179/#180). The incident this guard exists for was a
+// single test lane ballooning to ~100 GB and taking the machine into swap; no
+// sanctioned local lane needs more than this, and the cap is enforced on the
+// running process tree by run-guarded, not merely assumed. A machine-scaled
+// "half the budget" cap reserved 9.2 GB on a 24 GB machine for a lane whose
+// measured peak was under 2 GB — overstating demand until admission refused a
+// healthy machine.
+export const LANE_CAP_MB = 2048;
+
+// macOS kern.memorystatus_vm_pressure_level values.
+export const PRESSURE_NORMAL = 1;
+export const PRESSURE_WARNING = 2;
+
 /**
  * Machine-derived limits.
  *
@@ -21,9 +34,10 @@ export const SWAP_REFUSE_RATIO = 0.5;
  * the small machine is the one that bricks — on 8 GB the desktop alone was
  * measured holding ~2 GB before any test started.
  *
- * `maxRunMb` — half the remaining budget — is the statable rule that no single
- * run may reserve so much that a second run can never be admitted. It is the
- * cap that `--rss-mb 8192` gets clamped to.
+ * `maxRunMb` — half the remaining budget, never above the per-lane cap — is
+ * the statable rule that no single run may reserve so much that a second run
+ * can never be admitted, and that no lane may plan for more than the cap the
+ * runner enforces. It is the cap that `--rss-mb 8192` gets clamped to.
  */
 export function deriveBudget(totalMb) {
   const reserveMb = Math.max(1536, Math.round(totalMb * 0.25));
@@ -32,7 +46,7 @@ export function deriveBudget(totalMb) {
     totalMb,
     reserveMb,
     machineBudgetMb,
-    maxRunMb: Math.max(512, Math.floor(machineBudgetMb / 2)),
+    maxRunMb: Math.max(512, Math.min(LANE_CAP_MB, Math.floor(machineBudgetMb / 2))),
     // The hard floor of real, measured availability that must survive the run.
     // Cross this and the machine starts trading pages for progress.
     availabilityFloorMb: Math.max(768, Math.round(totalMb * 0.125)),
@@ -62,6 +76,49 @@ export function clampCeiling(requestedMb, budget) {
     clamped: requested > budget.maxRunMb,
     requestedMb: requested,
   };
+}
+
+/**
+ * What a lane should *reserve*, as opposed to what it may never exceed.
+ *
+ * The ceiling is enforcement; the reservation is planning. When a lane has a
+ * trustworthy recent measured peak, reserving that peak plus a conservative
+ * margin stops a ~2 GB lane from booking the full cap and being refused on a
+ * healthy machine (#180). Unknown lanes reserve the ceiling. History can only
+ * lower the reservation, never raise the ceiling — a fabricated low peak
+ * under-reserves the plan but the runner still kills the tree at the ceiling,
+ * and heartbeats correct the arithmetic as real usage materializes.
+ */
+export function laneReservationMb(ceilingMb, peakMb) {
+  if (!Number.isFinite(peakMb) || peakMb <= 0) return ceilingMb;
+  const margin = Math.max(256, Math.round(peakMb * 0.25));
+  return Math.min(ceilingMb, Math.max(512, peakMb + margin));
+}
+
+/**
+ * The recent measured peak for a lane, from run-guarded's history records.
+ *
+ * Only completed runs count: a run killed at the ceiling or timed out proves
+ * nothing about the lane's steady-state cost. Text in, number out — the file
+ * read stays with the caller.
+ */
+export function recentLanePeakMb(historyText, label, limit = 10) {
+  const rows = historyText
+    .split('\n')
+    .filter(Boolean)
+    .slice(-limit)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+  const peaks = rows
+    .filter((row) => row.label === label && row.terminationReason === 'completed' && Number.isFinite(row.peakRssMb) && row.peakRssMb > 0)
+    .map((row) => row.peakRssMb);
+  return peaks.length > 0 ? Math.max(...peaks) : null;
 }
 
 /**
@@ -100,6 +157,7 @@ export function decideAdmission({ budget, memory, leases = [], requestMb }) {
   const unmaterialized = unmaterializedMb(leases);
   const projectedFreeMb = memory.availableMb - unmaterialized - requestMb;
   const swapUsedRatio = memory.swapTotalMb > 0 ? memory.swapUsedMb / memory.swapTotalMb : 0;
+  const pressureLevel = Number.isFinite(memory.pressureLevel) ? memory.pressureLevel : null;
   const arithmetic = {
     requestMb,
     outstandingMb: outstanding,
@@ -107,10 +165,29 @@ export function decideAdmission({ budget, memory, leases = [], requestMb }) {
     availableMb: memory.availableMb,
     projectedFreeMb,
     swapUsedRatio: Number(swapUsedRatio.toFixed(3)),
+    pressureLevel,
     budget,
   };
 
-  if (memory.swapTotalMb > 0 && swapUsedRatio >= SWAP_REFUSE_RATIO && requestMb > budget.lightRunMb) {
+  // The kernel's live pressure verdict outranks static swap arithmetic in
+  // both directions (#180): warning/critical refuses a heavy run even when
+  // page counts look plausible, and normal pressure means swap that was
+  // committed during an earlier squeeze is history, not evidence — macOS
+  // keeps it allocated after pressure subsides.
+  if (pressureLevel !== null && pressureLevel >= PRESSURE_WARNING && requestMb > budget.lightRunMb) {
+    return {
+      granted: false,
+      reason: 'memory-pressure',
+      message:
+        `the kernel reports memory pressure level ${pressureLevel} (2 = warning, 4 = critical). ` +
+        'The machine is actively short of memory right now; starting another memory-heavy run makes that worse. ' +
+        `Runs reserving up to ${budget.lightRunMb} MB are still admitted.`,
+      ...arithmetic,
+    };
+  }
+
+  const staticSwapApplies = pressureLevel === null || pressureLevel > PRESSURE_NORMAL;
+  if (staticSwapApplies && memory.swapTotalMb > 0 && swapUsedRatio >= SWAP_REFUSE_RATIO && requestMb > budget.lightRunMb) {
     return {
       granted: false,
       reason: 'swap-pressure',
