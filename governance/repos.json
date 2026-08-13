@@ -105,10 +105,10 @@
       "name": "agentic-code-analysis",
       "visibility": "public",
       "publish": true,
-      "status": "onboarding",
+      "status": "active",
       "sharedCi": false,
       "delta": "",
-      "note": "Semantic-analysis supplier used by the fleet's governed size ratchets (ENG-0160); onboarding to the repository baseline."
+      "note": "Semantic-analysis supplier used by the fleet's governed size ratchets (ENG-0160)."
     },
     {
       "name": "localnotes",
@@ -117,7 +117,7 @@
       "status": "onboarding",
       "sharedCi": false,
       "delta": "",
-      "note": "Onboarded after a fleet CodeQL audit found it had lost code scanning with no governed replacement; carries no agent harness, CI, AGENTS.md or CONTRIBUTING.md yet."
+      "note": "Onboarded after a fleet CodeQL audit found it had lost code scanning with no governed replacement; baseline files, harness, and own-workflow CodeQL are in place — promotion waits on the reconciled agent-discovery block (localnotes#11)."
     },
     {
       "name": "universal-agentic-workflow",
