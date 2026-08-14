@@ -51,6 +51,11 @@ where each repo differs.
 - At least one approving human review is required. Agent-authored changes are
   never self-merged; a human approves before merge. (Org mandate following the
   2026-07-21 photos incident.)
+- That approval is never delegated. No broker, grant, or automation approves,
+  merges, dismisses an approval, or otherwise satisfies
+  `required_approving_review_count` on the human's behalf. A bounded grant may
+  ask a human to review; it may never supply the review
+  ([ENG-0016](../decisions/ENG-0016-agent-pr-bot-identity.md)).
 - Every review thread is resolved before merge in one explicit state: **fixed**
   (name the commit), **deferred** (link a follow-up issue with the reason), or
   **rejected** (give the technical reason). No thread is silently dismissed;
@@ -84,6 +89,9 @@ where each repo differs.
 
 ## Changelog
 
+- 2026-08-13 — state the deny list in the merge bar: approval, merge, and
+  anything satisfying the required review count are never delegated to a broker
+  or a grant (ENG-0016).
 - 2026-08-01 — add the strict updater and exact-SHA fallback for user-owned
   repositories while retaining native merge queue as the organization path.
 - 2026-07-31 — replace the rebase-only assumption with the required `MERGE`

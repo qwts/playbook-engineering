@@ -26,6 +26,16 @@ The App that authors a pull request cannot approve it. The required approval
 comes from the human `qwts` account; no bot approval or admin bypass substitutes
 for that review.
 
+A bounded human-origin grant lets the identity service spend one named write on
+the `qwts` account — an issue comment, an issue state change, a request that a
+human review something. Approving, merging, dismissing an approval, and
+anything else that would satisfy `required_approving_review_count` are outside
+every grant and cannot be added to one
+([ENG-0016](../decisions/ENG-0016-agent-pr-bot-identity.md)). The service spends
+the grant; the human credential never reaches an agent process. Treat a
+human-account write with no grant receipt behind it the same way as a
+human-authored agent pull request: an identity incident.
+
 ## Routine verification
 
 Before relying on an installed runtime:
