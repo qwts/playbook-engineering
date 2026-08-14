@@ -98,13 +98,20 @@ Decision 4 keeps its force, and most of what follows exists to protect it.
    named write on the human account — an issue comment, an issue state change,
    a review *request* that asks a human to look. Each grant names the soul
    (Agent ID) it is for, the single operation, a digest of the resource it acts
-   on, and an expiry. Nothing wider is implied by any of them.
+   on, and an expiry. A grant authorizes one spend: the expiry bounds how long
+   the daemon may hold it unspent, an unspent grant lapses at expiry, and
+   repeating the act is a new ceremony. Nothing wider is implied by any of
+   them.
 3. **Creation is a human ceremony; spending belongs to the daemon.** Creating
    or widening a grant requires a human-origin ceremony the agent cannot
    complete or simulate. A conversational "yes" is not a ceremony: transcript
    content is untrusted input under
    [ENG-0081](ENG-0081-transcript-bound-agent-execution-identities.md) decision
-   8. Approving one grant authorizes exactly that soul, that operation, and
+   8. The ceremony happens outside any agent-controlled session — an
+   owner-driven terminal, an OS prompt, or an equivalent channel the agent
+   cannot drive; an interface the agent can operate, including a privileged
+   TTY it can write to, does not qualify. Approving one grant authorizes
+   exactly that soul, that operation, and
    that resource — never another soul, a wider operation, a different resource,
    or a later run. The daemon or broker performs the act; the agent never
    receives the human credential, and no PAT or OAuth token is returned to an
