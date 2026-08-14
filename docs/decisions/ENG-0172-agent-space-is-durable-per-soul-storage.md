@@ -88,24 +88,34 @@ decision 4's rule that agents do not select arbitrary per-space roots.
 
 1. **Overrides are unchanged in kind.** `AGENT_BOT_SPACES_HOME` and a
    configured `settings.spacesRoot` are explicit overrides that win over the
-   default. They remain non-empty absolute paths, and the `0.x` relative-value
-   compatibility behavior stated in decision 4 applies to them unchanged.
-   `XDG_DATA_HOME` no longer participates in resolution at all; from this
-   amendment it names only the legacy tree the one-time cutover reads.
-2. **One authorized cutover, fail closed.** When no override is configured, a
-   legacy tree (`$XDG_DATA_HOME/agent-bot/spaces`, otherwise
+   default; when both are set, `AGENT_BOT_SPACES_HOME` wins, so resolution
+   still yields exactly one effective root. They remain non-empty absolute
+   paths, and the `0.x` relative-value compatibility behavior stated in
+   decision 4 applies to them unchanged. `XDG_DATA_HOME` no longer
+   participates in resolution at all; from this amendment it names only the
+   legacy tree the one-time cutover reads.
+2. **One authorized cutover, fail closed.** When no override is configured,
+   the legacy tree (`$XDG_DATA_HOME/agent-bot/spaces`, otherwise
    `~/.local/share/agent-bot/spaces`) holds spaces, and `~/.agent-space` holds
-   none, install or update performs exactly one migrate. It completes or it
-   fails; a partial move is a failure, and a failure leaves the legacy tree
-   intact and authoritative. The live population is never split across two
-   roots, and two populated trees are never merged.
+   none, the next install, update, or bootstrap run performs exactly one
+   migration — those three are the only movers. It completes or it fails; a
+   partial move is a failure, and a failure leaves the legacy tree intact and
+   authoritative. The live population is never split across two roots, and two
+   populated trees are never merged. A root holds spaces exactly when it
+   contains at least one soul directory (`<agent-id>/`); an absent root, an
+   empty directory, and stray non-soul entries all hold none.
 3. **Ambiguity is the operator's call.** If both roots hold spaces and no
-   completed cutover is on record, the runtime fails and tells the operator to
+   completed cutover is recorded, the runtime fails and tells the operator to
    choose a root explicitly. It does not pick, guess, merge, or prefer the
-   newer tree.
-4. **The cutover is idempotent.** After it succeeds, later installs and updates
-   are a no-op: the legacy tree's continued existence neither re-triggers the
-   migrate nor re-raises the item 3 conflict.
+   newer tree. The target of a failed migration is not a populated tree for
+   this test: a retry discards or ignores the partial target and reads the
+   legacy tree as authoritative, so a failure never converts itself into this
+   conflict.
+4. **The cutover is idempotent.** The completed-cutover record is secret-free,
+   workstation-local, and written only after a complete move — never for a
+   partial one. Once it exists, later installs, updates, and bootstraps are a
+   no-op: the legacy tree's continued existence neither re-triggers the
+   migration nor re-raises the item 3 conflict.
 5. **The cutover is operator-visible.** It reports which root it read, which
    root it wrote, and how many spaces moved. That report is secret-free, like
    the spaces themselves.
@@ -126,8 +136,8 @@ Consequences of the amendment:
 
 - Every installation using the default root moves once, at a moment the
   operator can see. Installations pinned to an explicit override never move.
-- The item 3 failure is a hard stop on install or update for anyone who has
-  populated both trees. That is the accepted cost of never merging soul
+- The item 3 failure is a hard stop on install, update, and bootstrap for
+  anyone who has populated both trees. That is the accepted cost of never merging soul
   storage on the runtime's own initiative.
 - Decision 1 keys a space to an Agent ID *under one effective root*, so this
   cutover is the one sanctioned event that changes where an existing Agent ID's
