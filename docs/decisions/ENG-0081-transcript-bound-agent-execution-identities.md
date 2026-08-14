@@ -90,9 +90,8 @@ conversation of that actor*.
 
 ## Amendment — 2026-08-13: two mint principals, and presence at bind
 
-Decision 7 left minting unchanged and the consequences deferred the
-token-minter chokepoint to a separate decision. This amendment is that decision
-for the agent path
+Decision 7 deferred the token-minter chokepoint to a separate decision; this
+amendment is that decision, for the agent path
 ([#218](https://github.com/qwts/playbook-engineering/issues/218)). Decisions 1–6
 and 8 stand, as does decision 7's rule that a record holds no credential and no
 authorization scope.
@@ -101,67 +100,70 @@ authorization scope.
    agent-facing token — git credential helper, `gh` shim, MCP `credential`, and
    anything else an agent process consumes. The *operator* principal is
    `agent-bot mint-token --app <slug> --json`, the governance CLI drift and
-   doctor call. It is not a soul, needs no conversation binding, and must never
-   be reachable as a silent fallback from an agent-path refusal. A refusal does
-   not downgrade, and never reaches the human's GitHub login.
+   doctor call. It is for human and governance processes only, is not a soul,
+   and needs neither a conversation binding nor a running identity service. An
+   agent process invoking it — as a first action, not only as a fallback from
+   a refusal — is out of policy. A refusal does not downgrade, and never
+   reaches the human's GitHub login.
 2. **The agent path mints only for a live binding.** The identity service — the
    loopback daemon — mints on the agent path only when the requesting
    connection is bound to a resolved Agent ID with a transcript locator per
    decision 4. Identity is a property of the connection, never a request
    parameter: a caller cannot name a soul, and an unbound or still-pending
-   record cannot mint. MCP is one stdio client of that service, not a second
-   authority.
+   record cannot mint. An unreachable service is the same refusal: the client
+   fails closed and never mints in-process. MCP is one stdio client of that
+   service, not a second authority.
 3. **App resolution stays territory-first and pin-refined.** The service
    resolves the App from the worktree's territory (ENG-0045 decision 1),
    refined by the worktree pin (ENG-0079 decision 3). One harness may have
    several Apps, so resolution yields exactly one App or fails closed. On the
-   agent path, a harness label, App slug, or Agent ID supplied by the client is
-   untrusted input under decision 8: it may be recorded, and it never selects.
+   agent path, a client-supplied harness label, App slug, or Agent ID is
+   untrusted input under decision 8: recordable, never selecting.
    ENG-0079's explicit `--app` and `GH_AGENT_APP` selectors keep their force on
    the operator path.
 4. **Every identity-service mint and refusal writes a secret-free receipt.**
    A receipt names who (the opaque Agent ID, or the operator principal), which
-   App, which operation, the outcome and its reason, and when. It carries no
-   token, private key, store secret, transcript content, or
-   transcript locator. Receipts are workstation-local, like the registry in
-   decision 6.
+   App, which operation, the outcome and its reason, and when. A refusal the
+   service issues is receipted; a client that never reached it fails closed
+   without one. A receipt carries no token, key, store secret, or transcript
+   content or locator, and stays workstation-local (decision 6).
 5. **Presence is written at bind, by the runtime.** When bind or
-   `setup-worktree` establishes a live session, the runtime updates presence on
-   that execution-identity record. ENG-0045 decision 2 stands: there is no
-   clock-in step for the agent to remember, and no skill may introduce a
-   required first tool call. Skill text may describe the outcome;
+   `agent-bot setup-worktree` establishes a live session, the runtime updates
+   presence on that execution-identity record. ENG-0045 decision 2 stands:
+   there is no clock-in step for the agent to remember, and no skill may
+   introduce a required first tool call. Skill text may describe the outcome;
    it may not become a convention.
 6. **Presence is a census fact, not soul authority.** Presence is an optional
    field on the private execution-identity record of decision 6 — last-seen,
-   and a present-versus-historical distinction if one is needed. It is not the
-   App roster in `governance/agents.json`, which stays a manifest of Apps under
+   and a present-versus-historical distinction if needed. It is not the App
+   roster in `governance/agents.json`, which stays a manifest of Apps under
    ENG-0079. Presence grants nothing, selects no App, and never feeds a mint
-   decision. `status: active` keeps its stated meaning: the record is not
-   finalized.
+   decision. `status: active` keeps its stated meaning: not finalized.
 
-The mint grant JSON stays as it is: `schema_version` 1 carrying the token,
-`expires_at`, and `installation_id` that `tools/repos/lib/agent-bot-client.mjs`
-parses. Receipts and presence are written beside that contract, not into it; a
-schema bump is a separately reviewed change. The amendment is harness-neutral:
-no principal, receipt, or presence rule differs by harness. Runtime lands
-in [agent-bot-identity#107](https://github.com/qwts/agent-bot-identity/issues/107)
-(mint) and [#109](https://github.com/qwts/agent-bot-identity/issues/109)
-(presence) under [epic #104](https://github.com/qwts/agent-bot-identity/issues/104),
+The `schema_version` 1 mint grant JSON that
+`tools/repos/lib/agent-bot-client.mjs` parses is unchanged; receipts and
+presence sit beside it, and a bump is a separately reviewed change. The
+amendment is harness-neutral. Runtime lands in
+[agent-bot-identity#107](https://github.com/qwts/agent-bot-identity/issues/107)
+(mint) and
+[agent-bot-identity#109](https://github.com/qwts/agent-bot-identity/issues/109)
+(presence) under
+[epic agent-bot-identity#104](https://github.com/qwts/agent-bot-identity/issues/104),
 per [ENG-0128](ENG-0128-agent-bot-runtime-ownership.md).
 
 Consequences:
 
-- The cooperative-hygiene consequence narrows. Attribution hygiene stays
-  bypassable by `--no-verify`, but agent-path minting becomes a mediated
-  chokepoint that fails closed; the two are no longer the same weak claim.
-- An agent whose harness cannot bind a transcript locator gets no agent-path
-  token at all. That is the intended failure: a visibly pending record was
-  already the contract, now enforced instead of documented.
-- Drift and doctor keep working on an unbound workstation, which is why the
-  operator principal exists. Guarding it against an agent process is a runtime
-  obligation, not a convention.
-- Receipts add a second local record beside the registry, secret-free by
-  construction and under the same privacy limit.
+- Attribution hygiene stays bypassable by `--no-verify`; agent-path minting
+  becomes a mediated chokepoint that fails closed. The two are no longer the
+  same weak claim.
+- A harness that cannot bind a transcript locator gets no agent-path token —
+  the visibly pending record was already the contract, now enforced.
+- Drift and doctor keep working on an unbound workstation with the daemon
+  down — the operator principal is a plain CLI, not a service client, and that
+  is why it exists. Guarding it against agent processes is a runtime
+  obligation.
+- Receipts add a second local record beside the registry, under the same
+  privacy limit.
 - The identity and operations references still describe the pre-service mint
   contract; they update once the runtime ships.
   [#183](https://github.com/qwts/playbook-engineering/issues/183) still owns the
