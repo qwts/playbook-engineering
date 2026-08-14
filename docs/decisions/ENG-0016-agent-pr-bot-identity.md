@@ -80,6 +80,84 @@ missing workflow step.
   evidence in the [ENG-0006](ENG-0006-agentic-primitives-governance.md)
   evaluation loop and any future audit via a plain `author:` query.
 
+## Amendment — 2026-08-13: bounded human-origin grants, and `pass-cli` as the durable credential home
+
+Two changes ([#219](https://github.com/qwts/playbook-engineering/issues/219)).
+Decision 4 keeps its force, and most of what follows exists to protect it.
+
+1. **The undelegable set.** No grant, broker, daemon, or automation may, on the
+   human's behalf, approve a pull request, merge one, dismiss or alter an
+   existing approval, or perform any other act that satisfies
+   `required_approving_review_count` or the
+   [SOP](../sop/branch-pr-review.md)'s human-approval requirement. That set is
+   closed to delegation — not "brokered with extra ceremony". It is the
+   2026-07-21 photos-incident line: the required approval is a human reading
+   the change, and a brokered click is not one. Agent Apps still receive no
+   approval authority.
+2. **Bounded human-origin grants.** Outside that set, a grant may authorize one
+   named write on the human account — an issue comment, an issue state change,
+   a review *request* that asks a human to look. Each grant names the soul
+   (Agent ID) it is for, the single operation, a digest of the resource it acts
+   on, and an expiry. A grant authorizes one spend: the expiry bounds how long
+   the daemon may hold it unspent, an unspent grant lapses at expiry, and
+   repeating the act is a new ceremony. Nothing wider is implied by any of
+   them.
+3. **Creation is a human ceremony; spending belongs to the daemon.** Creating
+   or widening a grant requires a human-origin ceremony the agent cannot
+   complete or simulate. A conversational "yes" is not a ceremony: transcript
+   content is untrusted input under
+   [ENG-0081](ENG-0081-transcript-bound-agent-execution-identities.md) decision
+   8. The ceremony happens outside any agent-controlled session — an
+   owner-driven terminal, an OS prompt, or an equivalent channel the agent
+   cannot drive; an interface the agent can operate, including a privileged
+   TTY it can write to, does not qualify. Approving one grant authorizes
+   exactly that soul, that operation, and
+   that resource — never another soul, a wider operation, a different resource,
+   or a later run. The daemon or broker performs the act; the agent never
+   receives the human credential, and no PAT or OAuth token is returned to an
+   agent process.
+4. **Grant spends and refusals are receipted, secret-free.** A receipt names
+   both principals — which soul asked and which human account acted — plus the
+   operation, the resource digest, the outcome with its reason on refusal, and
+   the time. It carries no credential material and no store secret.
+5. **Grants are harness-neutral.** No grant type, ceremony, or deny-list entry
+   is defined for one harness.
+6. **`pass-cli` is the durable credential home.** The consequence describing
+   each App private key as a standing mode-600 file on the workstation is
+   superseded. The durable home for App private keys and for the human
+   credentials this toolkit uses is the reviewed `pass-cli` store. Material may
+   exist outside that store only for the moment of an authorized mint or grant
+   spend, and never persists past it. "Outside every repository" is unchanged,
+   as is the no-secrets rule in the
+   [agent conventions](../reference/agent-conventions.md).
+
+Reserved, and explicitly not this work: a non-author agent reviewer — a second
+roster identity reviewing through App webhooks. It is not part of the grant
+broker, and closed
+[agent-bot-identity#54](https://github.com/qwts/agent-bot-identity/issues/54)
+stays closed, folded rather than revived. Runtime lands in
+[#108](https://github.com/qwts/agent-bot-identity/issues/108) (grants) and
+[#110](https://github.com/qwts/agent-bot-identity/issues/110) (Pass as home)
+under [epic #104](https://github.com/qwts/agent-bot-identity/issues/104), per
+[ENG-0128](ENG-0128-agent-bot-runtime-ownership.md).
+
+Consequences:
+
+- For a narrow class of writes, the human moves from approving each act to
+  approving each grant. That is a genuine widening of what an agent can cause
+  to happen under the human's name, bounded only by the undelegable set, the
+  resource digest, and the expiry — so the bounds are load-bearing.
+- A grant that turns out to be too coarse is a governance defect, not an
+  inconvenience. Widening it is a new ceremony, never an edit to an existing
+  grant.
+- Custody concentrates. One reviewed store now holds App private keys and human
+  credentials together, so losing access to it stops minting and grant spending
+  at the same moment. That is accepted in exchange for a single audited home
+  instead of a spread of standing files.
+- Anyone auditing a human-account write now has two questions, not one: was the
+  act inside the grant, and was the grant created by a ceremony. Receipts are
+  what make the second answerable.
+
 ## References
 
 - [Agent bot identity reference](../reference/agent-bot-identity.md) — setup and per-task usage

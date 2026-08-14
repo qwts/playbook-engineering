@@ -17,14 +17,28 @@ The roster and permission model are in
 3. Add or update its row in
    [`governance/agents.json`](../../governance/agents.json). Retire old
    identities instead of deleting their history.
-4. Store the App ID and private key outside repositories using the standalone
-   runtime's documented credential layout and custody controls.
+4. Store the App ID and private key in the reviewed `pass-cli` store — the
+   durable credential home under
+   [ENG-0016](../decisions/ENG-0016-agent-pr-bot-identity.md) — and outside
+   every repository. Key material leaves the store only for the moment of an
+   authorized mint or grant spend.
 5. Run the roster tests, governance drift, and `agent-bot doctor` before using
    the App for repository writes.
 
 The App that authors a pull request cannot approve it. The required approval
 comes from the human `qwts` account; no bot approval or admin bypass substitutes
 for that review.
+
+A bounded human-origin grant lets the identity service spend one named write on
+the `qwts` account — an issue comment, an issue state change, a request that a
+human review something. Approving, merging, dismissing an approval, and
+anything else that would satisfy `required_approving_review_count` are outside
+every grant and cannot be added to one
+([ENG-0016](../decisions/ENG-0016-agent-pr-bot-identity.md)). The service spends
+the grant; the human credential never reaches an agent process. Treat an
+*agent-caused* human-account write with no grant receipt behind it the same way
+as a human-authored agent pull request: an identity incident. The human's own
+direct writes are the ordinary human path and need no receipt.
 
 ## Routine verification
 
