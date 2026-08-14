@@ -75,6 +75,75 @@ each concern.
   implementation, and content schemas beyond the shipped `space.json` marker
   remain out of scope for this record.
 
+## Amendment — 2026-08-13: the default spaces root is `~/.agent-space`
+
+Decision 4's default of `$XDG_DATA_HOME/agent-bot/spaces` — falling back to
+`~/.local/share` — is superseded
+([#217](https://github.com/qwts/playbook-engineering/issues/217)). With no
+override configured, the effective spaces root is `~/.agent-space`
+(`$HOME/.agent-space`), and one soul's space is `$HOME/.agent-space/<agent-id>`.
+The original text stays as written, per the rule that records are amended
+rather than rewritten. Decisions 1–3, 5, and 6 stand unchanged, as does
+decision 4's rule that agents do not select arbitrary per-space roots.
+
+1. **Overrides are unchanged in kind.** `AGENT_BOT_SPACES_HOME` and a
+   configured `settings.spacesRoot` are explicit overrides that win over the
+   default; when both are set, `AGENT_BOT_SPACES_HOME` wins, so resolution
+   still yields exactly one effective root. They remain non-empty absolute
+   paths, and the `0.x` relative-value compatibility behavior stated in
+   decision 4 applies to them unchanged. `XDG_DATA_HOME` no longer
+   participates in resolution at all; from this amendment it names only the
+   legacy tree the one-time cutover reads.
+2. **One authorized cutover, fail closed.** When no override is configured,
+   the legacy tree (`$XDG_DATA_HOME/agent-bot/spaces`, otherwise
+   `~/.local/share/agent-bot/spaces`) holds spaces, and `~/.agent-space` holds
+   none, the next install, update, or bootstrap run performs exactly one
+   migration — those three are the only movers. It completes or it fails; a
+   partial move is a failure, and a failure leaves the legacy tree intact and
+   authoritative. The live population is never split across two roots, and two
+   populated trees are never merged. A root holds spaces exactly when it
+   contains at least one soul directory (`<agent-id>/`); an absent root, an
+   empty directory, and stray non-soul entries all hold none.
+3. **Ambiguity is the operator's call.** If both roots hold spaces and no
+   completed cutover is recorded, the runtime fails and tells the operator to
+   choose a root explicitly. It does not pick, guess, merge, or prefer the
+   newer tree. The target of a failed migration is not a populated tree for
+   this test: a retry discards or ignores the partial target and reads the
+   legacy tree as authoritative, so a failure never converts itself into this
+   conflict.
+4. **The cutover is idempotent.** The completed-cutover record is secret-free,
+   workstation-local, and written only after a complete move — never for a
+   partial one. Once it exists, later installs, updates, and bootstraps are a
+   no-op: the legacy tree's continued existence neither re-triggers the
+   migration nor re-raises the item 3 conflict.
+5. **The cutover is operator-visible.** It reports which root it read, which
+   root it wrote, and how many spaces moved. That report is secret-free, like
+   the spaces themselves.
+6. **Changing an override still does not migrate.** Decision 4's rule holds for
+   every configured root. What is authorized here is the single default move
+   from the ENG-0172 XDG home to `~/.agent-space`, and nothing else.
+
+An Agent Space remains local, secret-free, and outside bot territory. It is not
+a cloud slice, and backup — git, or the existing secret-free pack — stays an
+operator concern. The amendment is harness-neutral: no root, cutover step, or
+failure mode differs by harness. Runtime implementation is
+[agent-bot-identity#105](https://github.com/qwts/agent-bot-identity/issues/105)
+under [epic #104](https://github.com/qwts/agent-bot-identity/issues/104); per
+[ENG-0128](ENG-0128-agent-bot-runtime-ownership.md) this repository ships no
+spaces-root code.
+
+Consequences of the amendment:
+
+- Every installation using the default root moves once, at a moment the
+  operator can see. Installations pinned to an explicit override never move.
+- The item 3 failure is a hard stop on install, update, and bootstrap for
+  anyone who has populated both trees. That is the accepted cost of never merging soul
+  storage on the runtime's own initiative.
+- Decision 1 keys a space to an Agent ID *under one effective root*, so this
+  cutover is the one sanctioned event that changes where an existing Agent ID's
+  space resolves without minting a new Agent ID. Any later default change needs
+  its own record and its own authorized move.
+
 ## References
 
 - [ENG-0045](ENG-0045-agent-environments-are-bot-territory.md) — bot territory remains path-based and unchanged
