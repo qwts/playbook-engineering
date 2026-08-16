@@ -17,8 +17,17 @@ the published projection of [`governance/agents.json`](../../governance/agents.j
 https://raw.githubusercontent.com/qwts/playbook-engineering/main/governance/organization-profile.json
 ```
 
-From an `agent-bot-identity` source checkout, stay outside that tree if its
-hooks would run before the runtime exists:
+[ENG-0128](../decisions/ENG-0128-agent-bot-runtime-ownership.md) names two
+cold-start classes. A **durable host** is a machine the owner will keep and
+finish installing. An **uninstalled or ephemeral** session — cloud offload, a
+host with no install, or the identity checkout opened before bootstrap — must
+not commit, push, or open a pull request as the human. Safety in that class does not require
+`pass-cli` or a daemon; publishing as a bot still requires the durable-host
+journey. Runtime hook behavior is
+[agent-bot-identity#122](https://github.com/qwts/agent-bot-identity/issues/122).
+
+On a durable host, from an `agent-bot-identity` source checkout (primary
+checkout stays human territory):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/qwts/playbook-engineering/main/governance/organization-profile.json \
@@ -94,6 +103,10 @@ report.
 - A human-authored agent pull request is an identity incident. Stop writes,
   verify the worktree author, credential helper, hook path, `gh whoami`, and
   Agent ID, then recreate or clearly quarantine the incorrectly authored work.
+- An uninstalled or ephemeral session that commits, pushes, or opens a pull
+  request as the human is the same incident. A local human-authored commit
+  counts even if it is never pushed. Reads and uncommitted working-tree edits
+  do not.
 - A leaked installation token is short-lived but still sensitive: stop sharing
   it and wait for expiry. A leaked private key is rotated immediately, then the
   exposure is investigated and scrubbed.
