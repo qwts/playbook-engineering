@@ -111,7 +111,7 @@ test('managed JSON overlays preserve repository-owned agent harness configuratio
     permissions: { defaultMode: 'acceptEdits' },
     hooks: {
       PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'stale-local-guard' }] }],
-      SessionStart: [{ hooks: [{ type: 'command', command: 'repo-session' }] }],
+      Notification: [{ hooks: [{ type: 'command', command: 'repo-session' }] }],
       WorktreeCreate: [{ hooks: [{ type: 'command', command: 'stale' }] }],
     },
   }));
@@ -134,11 +134,19 @@ test('managed JSON overlays preserve repository-owned agent harness configuratio
   // A repo cannot keep a local edit of a governed hook: the guard wiring is
   // the one thing a drifting downstream copy would silently disable.
   assert.equal(merged.hooks.PreToolUse[0].hooks[0].command, 'managed-guard');
-  assert.deepEqual(merged.hooks.SessionStart, [{
+  assert.deepEqual(merged.hooks.Notification, [{
     hooks: [{ type: 'command', command: 'repo-session' }],
   }]);
+  assert.equal(Object.hasOwn(merged.hooks, 'SessionStart'), false);
   assert.equal(merged.hooks.WorktreeCreate[0].hooks[0].command, 'managed');
   assert.equal(files.get(path).mode, source.mode);
+});
+
+test('canonical Claude settings declare ownership for every hook event they ship', () => {
+  const path = '.claude/settings.json';
+  const content = readFileSync(new URL('../../../.claude/settings.json', import.meta.url));
+  const source = { path, content, sha: gitBlobSha(content), mode: '100644' };
+  assert.doesNotThrow(() => mergeManagedFile(source, null));
 });
 
 test('managed JSON overlays fail closed for malformed downstream configuration', () => {
@@ -155,7 +163,8 @@ test('managed JSON ownership propagates deletions without removing repository ho
   }));
   const target = Buffer.from(JSON.stringify({
     hooks: {
-      SessionStart: [{ hooks: [{ type: 'command', command: 'repo-session' }] }],
+      Notification: [{ hooks: [{ type: 'command', command: 'repo-session' }] }],
+      SessionStart: [{ hooks: [{ type: 'command', command: 'stale-session' }] }],
       PreToolUse: [{ matcher: 'Bash' }],
       WorktreeCreate: [{ hooks: [{ type: 'command', command: 'obsolete' }] }],
     },
@@ -164,7 +173,8 @@ test('managed JSON ownership propagates deletions without removing repository ho
 
   // Repo-owned hooks survive; governed ones the canonical file no longer
   // declares are removed rather than left behind as orphans.
-  assert.deepEqual(merged.hooks.SessionStart, [{ hooks: [{ type: 'command', command: 'repo-session' }] }]);
+  assert.deepEqual(merged.hooks.Notification, [{ hooks: [{ type: 'command', command: 'repo-session' }] }]);
+  assert.equal(Object.hasOwn(merged.hooks, 'SessionStart'), false);
   assert.equal(Object.hasOwn(merged.hooks, 'PreToolUse'), false);
   assert.equal(Object.hasOwn(merged.hooks, 'WorktreeCreate'), false);
 });
@@ -440,7 +450,8 @@ test('an open sync pull repairs a JSON overlay from the target default branch', 
       PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'stale-local-guard' }] }],
       // Repository-generated projection owned by the target manifest entry.
       GeneratedHook: [{ hooks: [{ type: 'command', command: 'agent-bot agent-hook' }] }],
-      SessionStart: [{ hooks: [{ type: 'command', command: 'repo-session' }] }],
+      Notification: [{ hooks: [{ type: 'command', command: 'repo-session' }] }],
+      SessionStart: [{ hooks: [{ type: 'command', command: 'stale-session' }] }],
       WorktreeCreate: [{ hooks: [{ type: 'command', command: 'managed' }] }],
     },
   }, null, 2)}\n`);
@@ -533,9 +544,10 @@ test('an open sync pull repairs a JSON overlay from the target default branch', 
   assert.equal(result.status, 'pull-updated');
   assert.deepEqual(merged.permissions, { defaultMode: 'acceptEdits' });
   assert.equal(merged.hooks.PreToolUse[0].hooks[0].command, 'managed-guard');
-  assert.deepEqual(merged.hooks.SessionStart, [{
+  assert.deepEqual(merged.hooks.Notification, [{
     hooks: [{ type: 'command', command: 'repo-session' }],
   }]);
+  assert.equal(Object.hasOwn(merged.hooks, 'SessionStart'), false);
   assert.deepEqual(merged.hooks.GeneratedHook, [{
     hooks: [{ type: 'command', command: 'agent-bot agent-hook' }],
   }]);
