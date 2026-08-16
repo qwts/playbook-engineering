@@ -80,17 +80,21 @@ original text stays as written. Decisions 1, 2, 4, and 5 stand unchanged.
    license to run without identity policy. Identity hooks have an explicit
    uninstalled mode. The mode is harness-neutral. Governance consumers still
    fail closed on a missing `agent-bot` (decision 3).
-3. **No human-attributed GitHub writes.** An uninstalled or ephemeral session
-   must not commit, push, open a pull request, or otherwise write to GitHub as
-   the human account. Those writes remain identity incidents under
-   [ENG-0016](ENG-0016-agent-pr-bot-identity.md). Local reads and unpublished
-   local edits are not GitHub writes.
+3. **No human-attributed commits or GitHub writes.** An uninstalled or
+   ephemeral session must not commit, push, open a pull request, or otherwise
+   write to GitHub as the human account. A local human-authored commit is
+   already an incident, even if it is never pushed: that is the history a
+   later publish would send. Those writes remain identity incidents under
+   [ENG-0016](ENG-0016-agent-pr-bot-identity.md). Reads and uncommitted
+   working-tree edits are not.
 4. **Safety does not require a durable install.** Being safe in this class
    does not require `pass-cli`, a supervised daemon, or a completed durable
    bootstrap. Completing identity — minting a bot token and publishing as that
    bot — still requires the durable-host journey.
-5. **This repository ships no hook or bootstrap code.** Runtime
-   implementation is
+5. **Identity runtime hook dispatch and bootstrap stay in
+   `agent-bot-identity`.** This repository may keep governed harness adapters
+   (for example `.codex/hooks.json`). It does not implement the identity
+   runtime those adapters call. Runtime implementation is
    [agent-bot-identity#122](https://github.com/qwts/agent-bot-identity/issues/122)
    under [epic #187](https://github.com/qwts/playbook-engineering/issues/187).
 
