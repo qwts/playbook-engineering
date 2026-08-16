@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "organization": "qwts-engineering",
+  "account_owner": "qwts",
+  "minimum_runtime_interface_version": 1,
+  "defaults": {
+    "claude": "qwts-claude-agent",
+    "codex": "qwts-codex-agent",
+    "copilot": "qwts-copilot-agent",
+    "cursor": "qwts-cursor-agent",
+    "devin": "qwts-devin-agent",
+    "vscode": "qwts-vscode-agent"
+  },
+  "identities": [
+    {
+      "slug": "qwts-claude-agent",
+      "harness": "claude",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-claude-fable-agent",
+      "harness": "claude",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-claude-haiku-agent",
+      "harness": "claude",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-claude-opus-agent",
+      "harness": "claude",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-claude-sonnet-agent",
+      "harness": "claude",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-codex-agent",
+      "harness": "codex",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-codex-luna-agent",
+      "harness": "codex",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-codex-sol-agent",
+      "harness": "codex",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-codex-terra-agent",
+      "harness": "codex",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-copilot-agent",
+      "harness": "copilot",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-cursor-agent",
+      "harness": "cursor",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-devin-agent",
+      "harness": "devin",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-vscode-agent",
+      "harness": "vscode",
+      "status": "active"
+    }
+  ]
+}

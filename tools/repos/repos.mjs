@@ -24,6 +24,12 @@ import path from 'node:path';
 import process from 'node:process';
 import { loadManifest, validateManifest, renderBlock, extractBlock, spliceBlock } from './lib/manifest.mjs';
 import { loadAgents, validateAgents } from './lib/agents.mjs';
+import {
+  loadOrganizationProfile,
+  profileFromAgentsPath,
+  profilesMatch,
+  writeOrganizationProfile,
+} from './lib/organization-profile.mjs';
 
 function parseArgs(argv) {
   const args = { root: process.cwd(), manifest: null, doc: null, write: false };
@@ -53,6 +59,7 @@ function parseArgs(argv) {
   args.manifest = path.resolve(args.root, args.manifest ?? path.join('governance', 'repos.json'));
   args.doc = path.resolve(args.root, args.doc ?? path.join('docs', 'reference', 'governed-repos.md'));
   args.agents = path.resolve(args.root, path.join('governance', 'agents.json'));
+  args.profile = path.resolve(args.root, path.join('governance', 'organization-profile.json'));
   return args;
 }
 
@@ -95,6 +102,17 @@ function main() {
     process.exit(1);
   }
 
+  let expectedProfile = null;
+  try {
+    const roster = loadAgents(args.agents);
+    if (roster.agents.length > 0) {
+      expectedProfile = profileFromAgentsPath(args.agents);
+    }
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+
   const docRel = path.relative(args.root, args.doc);
   let docSource;
   try {
@@ -118,6 +136,10 @@ function main() {
     } else {
       console.log(`${docRel} already up to date.`);
     }
+    if (expectedProfile) {
+      writeOrganizationProfile(args.profile, expectedProfile);
+      console.log(`Wrote ${path.relative(args.root, args.profile)} from ${path.relative(args.root, args.agents)}.`);
+    }
     return;
   }
 
@@ -131,6 +153,21 @@ function main() {
   if (current !== expected) {
     console.error(`${docRel} is out of date with governance/repos.json. Run: node tools/repos/repos.mjs --write`);
     process.exit(1);
+  }
+  if (expectedProfile) {
+    const profileRel = path.relative(args.root, args.profile);
+    let actualProfile;
+    try {
+      actualProfile = loadOrganizationProfile(args.profile);
+    } catch (error) {
+      console.error(error.message);
+      console.error(`Run: node tools/repos/repos.mjs --write`);
+      process.exit(1);
+    }
+    if (!profilesMatch(actualProfile, expectedProfile)) {
+      console.error(`${profileRel} is out of date with the agent roster. Run: node tools/repos/repos.mjs --write`);
+      process.exit(1);
+    }
   }
   console.log(`Manifest valid and ${docRel} is in sync (${manifest.repos.length} repos).`);
 }

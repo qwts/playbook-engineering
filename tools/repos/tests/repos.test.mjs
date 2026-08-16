@@ -286,6 +286,19 @@ test('check fails when the agent roster is missing or malformed', () => {
   assert.match(missing.output, /agent roster not found/);
 });
 
+test('check fails when a non-empty roster has no matching organization profile', () => {
+  const root = scaffold(validManifest(), {
+    account: 'qwts',
+    agents: [{ slug: 'qwts-claude-agent', harness: 'claude-code', status: 'active' }],
+  });
+  const missing = runCli(root, ['--write']);
+  assert.equal(missing.exitCode, 0);
+  rmSync(path.join(root, 'governance', 'organization-profile.json'));
+  const check = runCli(root, ['check']);
+  assert.equal(check.exitCode, 1);
+  assert.match(check.output, /organization profile not found/);
+});
+
 test('check fails with exit 1 on an invalid manifest', () => {
   const m = validManifest();
   m.repos[0].visibility = 'internal';

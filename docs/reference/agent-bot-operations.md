@@ -7,6 +7,29 @@ troubleshooting are owned by
 The roster and permission model are in
 [agent bot identity governance](agent-bot-identity.md).
 
+## Cold-start organization profile
+
+Machine bootstrap needs this repository's secret-free profile, not a local
+Playbook checkout and not a roster inferred from the current harness. Fetch
+the published projection of [`governance/agents.json`](../../governance/agents.json):
+
+```text
+https://raw.githubusercontent.com/qwts/playbook-engineering/main/governance/organization-profile.json
+```
+
+From an `agent-bot-identity` source checkout, stay outside that tree if its
+hooks would run before the runtime exists:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/qwts/playbook-engineering/main/governance/organization-profile.json \
+  | ./agent-bot bootstrap --profile - --with-gh-shim --machine-only
+```
+
+A missing, incompatible, or incomplete profile is a blocking dependency. After
+changing the roster, regenerate the checked-in file with
+`node tools/repos/organization-profile.mjs --write` so the HTTPS document and
+the roster cannot drift.
+
 ## Registering or changing an App
 
 1. Create the App under `qwts` with the exact roster slug, no webhook, no
@@ -15,7 +38,9 @@ The roster and permission model are in
 2. Install it on every active and onboarding repository in
    [`governance/repos.json`](../../governance/repos.json).
 3. Add or update its row in
-   [`governance/agents.json`](../../governance/agents.json). Retire old
+   [`governance/agents.json`](../../governance/agents.json) and regenerate
+   [`governance/organization-profile.json`](../../governance/organization-profile.json)
+   with `node tools/repos/organization-profile.mjs --write`. Retire old
    identities instead of deleting their history.
 4. Store the App ID and private key in the reviewed `pass-cli` store — the
    durable credential home under
