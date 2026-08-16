@@ -108,6 +108,36 @@ Consequences of the amendment:
 - Decision 3 is not a back door for governance to vendor runtime modules on
   an uninstalled machine.
 
+## Amendment — 2026-08-16: unmanaged publish principal
+
+The two-class amendment still holds. This names one owning-org
+augmentation ([#229](https://github.com/qwts/playbook-engineering/issues/229)).
+It is not a second identity standard and does not reopen
+[ENG-0016](ENG-0016-agent-pr-bot-identity.md). Decisions 1–5 of this record
+and decision 3 of the original text stay as written.
+
+1. **Apps still win.** A durable host that can mint publishes as the GitHub
+   App. `ai9d` must not leak onto that path.
+2. **Unmanaged publish is optional and named.** An uninstalled or ephemeral
+   session may publish only as `ai9d`, and only when attribution matches:
+   git author for commits, `gh` login for pushes and GitHub writes. Fail
+   closed when the actor cannot be determined. `qwts` never authors in this
+   class.
+3. **`ai9d` never reviews or approves.** Required review stays the human
+   `qwts` account.
+4. **Governed adapters carry the mode.** This repository's harness files
+   include the uninstalled identity adapters (default allowlist `ai9d` when
+   unset). Runtime implementation stays in `agent-bot-identity`
+   ([#124](https://github.com/qwts/agent-bot-identity/issues/124)).
+
+Consequences of this amendment:
+
+- A cloud session signed in as `ai9d` can finish a pull request.
+- A session signed in as `qwts`, or with no determinable actor, still
+  cannot publish.
+- Hosted mint can later retire most `ai9d` writes without changing this
+  class.
+
 ## References
 
 - [Agent bot identity governance](../reference/agent-bot-identity.md)

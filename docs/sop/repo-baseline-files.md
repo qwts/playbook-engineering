@@ -14,7 +14,7 @@ inherit by default, vary by explicit delta.
 | `.github/CODEOWNERS` | Minimum: `* @qwts` plus explicit `/.github/` ownership. |
 | Feature issue template | The shared [feature-lifecycle](feature-lifecycle.md) form ([ENG-0007](../decisions/ENG-0007-feature-lifecycle-convention.md)); repos may add fields, not drop sections. |
 | `.codex/` | Shared project environment, command rules, and setup/cleanup scripts from this repository; existing repo-specific files are preserved as explicit deltas. |
-| `.claude/settings.json` | Shared Claude Code harness config from this repository — currently the `WorktreeCreate` hook that invokes the installed agent identity runtime ([ENG-0128](../decisions/ENG-0128-agent-bot-runtime-ownership.md)). Machine-local overrides belong in the gitignored `.claude/settings.local.json`, never here. |
+| `.claude/settings.json` | Shared Claude Code harness config from this repository — the `WorktreeCreate` hook, the machine-memory guard, and the uninstalled identity adapters ([ENG-0128](../decisions/ENG-0128-agent-bot-runtime-ownership.md)). Machine-local overrides belong in the gitignored `.claude/settings.local.json`, never here. |
 
 ## Required when applicable
 
@@ -49,6 +49,8 @@ the repository's enabled merge methods.
 
 ## Changelog
 
+- 2026-08-16 — ship uninstalled identity adapters (default unmanaged
+  principal `ai9d`) next to the memory guard and WorktreeCreate hook.
 - 2026-08-05 — make the shared agent-context discovery block status-aware,
   reconciled, and required before an onboarding repository can graduate.
 - 2026-08-05 — require the baseline agent context to point agents to the

@@ -19,12 +19,15 @@ https://raw.githubusercontent.com/qwts/playbook-engineering/main/governance/orga
 
 [ENG-0128](../decisions/ENG-0128-agent-bot-runtime-ownership.md) names two
 cold-start classes. A **durable host** is a machine the owner will keep and
-finish installing. An **uninstalled or ephemeral** session — cloud offload, a
-host with no install, or the identity checkout opened before bootstrap — must
-not commit, push, or open a pull request as the human. Safety in that class does not require
+finish installing; when mint works, publish as the GitHub App. An
+**uninstalled or ephemeral** session — cloud offload, a host with no
+install, or the identity checkout opened before bootstrap — must not
+publish as `qwts`. It may publish as `ai9d` only when git author (commits)
+and `gh` login (pushes and `gh` writes) match that account. Fail closed
+when the actor cannot be determined. Safety in that class does not require
 `pass-cli` or a daemon; publishing as a bot still requires the durable-host
 journey. Runtime hook behavior is
-[agent-bot-identity#122](https://github.com/qwts/agent-bot-identity/issues/122).
+[agent-bot-identity#124](https://github.com/qwts/agent-bot-identity/issues/124).
 
 On a durable host, from an `agent-bot-identity` source checkout (primary
 checkout stays human territory):
@@ -104,9 +107,10 @@ report.
   verify the worktree author, credential helper, hook path, `gh whoami`, and
   Agent ID, then recreate or clearly quarantine the incorrectly authored work.
 - An uninstalled or ephemeral session that commits, pushes, or opens a pull
-  request as the human is the same incident. A local human-authored commit
-  counts even if it is never pushed. Reads and uncommitted working-tree edits
-  do not.
+  request as `qwts` — or as any actor that is not `ai9d` — is the same
+  incident. A local human-authored commit counts even if it is never
+  pushed. Reads and uncommitted working-tree edits do not. `ai9d` never
+  reviews or approves.
 - A leaked installation token is short-lived but still sensitive: stop sharing
   it and wait for expiry. A leaked private key is rotated immediately, then the
   exposure is investigated and scrubbed.

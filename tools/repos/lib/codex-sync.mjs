@@ -20,12 +20,19 @@ export const CODEX_SYNC_COMMIT_PREFIX = `governance: sync agent harness from ${C
 // file belongs to the repo and survives a sync untouched. `hooks.PreToolUse`
 // joined the list with ENG-0138: the memory guard is only a fleet control if
 // every repo's hook wiring is governed, and a repo that quietly edited it back
-// out would be the one machine-scoped budgeting cannot see.
+// out would be the one machine-scoped budgeting cannot see. The remaining
+// Claude hook events joined with ENG-0128 so uninstalled identity adapters
+// propagate; a missing ownership row fails closed rather than dropping them.
 export const MANAGED_JSON_OVERLAYS = new Map([
   ['.claude/settings.json', [
     ['$schema'],
     ['hooks', 'PreToolUse'],
     ['hooks', 'WorktreeCreate'],
+    ['hooks', 'SessionStart'],
+    ['hooks', 'SessionEnd'],
+    ['hooks', 'UserPromptSubmit'],
+    ['hooks', 'PostToolUse'],
+    ['hooks', 'Stop'],
   ]],
 ]);
 
