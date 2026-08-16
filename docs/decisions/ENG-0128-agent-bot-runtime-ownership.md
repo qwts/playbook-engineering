@@ -61,6 +61,49 @@ submodule would preserve two release surfaces and defeat the ownership change.
 - Coordinated changes across both repositories require separately reviewable
   releases, with the stable CLI contract as their compatibility seam.
 
+## Amendment — 2026-08-16: two cold-start classes
+
+Decision 3 still governs governance consumers and every durable host. It does
+not describe a session whose committed hooks are already on disk and whose
+runtime is not. That class is named here
+([#227](https://github.com/qwts/playbook-engineering/issues/227)). The
+original text stays as written. Decisions 1, 2, 4, and 5 stand unchanged.
+
+1. **Two classes.** A **durable host** is a machine the owner will keep and
+   finish installing: source bootstrap, organization profile, credentials,
+   optional supervisor, then the stable CLI. An **uninstalled or ephemeral**
+   session is one where committed harness hooks are present and the installed
+   runtime is absent or unusable — a cloud offload, a host that has not been
+   bootstrapped, or the `agent-bot-identity` checkout opened as a workspace
+   before install.
+2. **Absence is not no policy.** A missing installed hook binary is not a
+   license to run without identity policy. Identity hooks have an explicit
+   uninstalled mode. The mode is harness-neutral. Governance consumers still
+   fail closed on a missing `agent-bot` (decision 3).
+3. **No human-attributed GitHub writes.** An uninstalled or ephemeral session
+   must not commit, push, open a pull request, or otherwise write to GitHub as
+   the human account. Those writes remain identity incidents under
+   [ENG-0016](ENG-0016-agent-pr-bot-identity.md). Local reads and unpublished
+   local edits are not GitHub writes.
+4. **Safety does not require a durable install.** Being safe in this class
+   does not require `pass-cli`, a supervised daemon, or a completed durable
+   bootstrap. Completing identity — minting a bot token and publishing as that
+   bot — still requires the durable-host journey.
+5. **This repository ships no hook or bootstrap code.** Runtime
+   implementation is
+   [agent-bot-identity#122](https://github.com/qwts/agent-bot-identity/issues/122)
+   under [epic #187](https://github.com/qwts/playbook-engineering/issues/187).
+
+Consequences of the amendment:
+
+- Cloud offload and opening the identity checkout before install are no
+  longer undefined. They are the uninstalled class and must not publish as
+  the human.
+- An ephemeral session that cannot mint a bot token cannot finish a pull
+  request. That is the accepted cost of never writing as the human.
+- Decision 3 is not a back door for governance to vendor runtime modules on
+  an uninstalled machine.
+
 ## References
 
 - [Agent bot identity governance](../reference/agent-bot-identity.md)
