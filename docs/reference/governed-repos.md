@@ -83,6 +83,6 @@ Cloning, drift detection, reconciliation, and harness synchronization are in
 | `codex-rules-editor` | public | active | no | managed | — |
 | `playbook-dashboard` | public | active | no | managed | — |
 | `agentic-code-analysis` | public | active | no | managed | — |
-| `localnotes` | public | onboarding | no | managed | — |
+| `localnotes` | public | active | no | managed | — |
 | `universal-agentic-workflow` | private | onboarding | no | managed | — |
 <!-- END GENERATED governed-repos -->

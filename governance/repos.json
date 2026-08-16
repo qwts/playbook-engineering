@@ -114,10 +114,10 @@
       "name": "localnotes",
       "visibility": "public",
       "publish": true,
-      "status": "onboarding",
+      "status": "active",
       "sharedCi": false,
       "delta": "",
-      "note": "Onboarded after a fleet CodeQL audit found it had lost code scanning with no governed replacement; baseline files, harness, and own-workflow CodeQL are in place — promotion waits on the reconciled agent-discovery block (localnotes#11)."
+      "note": "Single-user browser-only notes app. Joined the fleet after a CodeQL audit found it had lost scanning; own-workflow CodeQL and the shared discovery block are in place."
     },
     {
       "name": "universal-agentic-workflow",
