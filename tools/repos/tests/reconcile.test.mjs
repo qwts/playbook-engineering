@@ -14,7 +14,7 @@ import {
   mergeQueueRule,
   SEEDS,
 } from '../lib/reconcile-plan.mjs';
-import { parseReconcileArgs, reconciliationPullAction } from '../reconcile.mjs';
+import { baselineSeedContent, parseReconcileArgs, reconciliationPullAction } from '../reconcile.mjs';
 import { BASELINE_FILES, GOVERNED_CODEX_FILES, GOVERNED_HARNESS_FILES } from '../lib/baseline-files.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -183,6 +183,27 @@ test('every governed harness file is both drift-checked and seeded from the root
     assert.ok(BASELINE_FILES.includes(path), `${path} missing from drift baseline`);
     assert.deepEqual(SEEDS[path], { source: path, target: path });
   }
+});
+
+test('a missing managed ignore is seeded from the effective manifest projection', () => {
+  const excluded = 'tools/agent-guard/run-guarded.mjs';
+  const content = baselineSeedContent(
+    ROOT,
+    { source: '.prettierignore', target: '.prettierignore' },
+    { name: 'fixture', codexSync: { exclude: [excluded] } },
+  );
+  assert.match(content, /^# governed:agent-harness-format:start$/mu);
+  assert.match(content, /^tools\/agent-guard\/lib\/leases\.mjs$/mu);
+  assert.doesNotMatch(content, new RegExp(`^${excluded.replaceAll('.', '\\.')}$`, 'mu'));
+  assert.match(content, /^# governed:agent-harness-format:end$/mu);
+});
+
+test('ordinary missing seeds retain their canonical bytes', () => {
+  const seed = { source: '.codex/config.toml', target: '.codex/config.toml' };
+  assert.equal(
+    baselineSeedContent(ROOT, seed, { name: 'fixture', codexSync: { exclude: ['.codex/config.toml'] } }),
+    readFileSync(join(ROOT, seed.source), 'utf8'),
+  );
 });
 
 test('the protected Git wrapper keeps destructive pushes behind normal approval', {
