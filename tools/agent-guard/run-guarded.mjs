@@ -28,8 +28,8 @@ import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import path from 'node:path';
 import process from 'node:process';
 
-import { clampCeiling, decideAdmission, deriveBudgetForMemory, laneReservationMb } from './lib/budget.mjs';
-import { acquireLease, commandBehaviorIdentity, heartbeatLease, leaseExists, psExecutable, readLanePeakMb, readLeases, recordLanePeak, releaseLease, repositoryIdentity, repositoryWorktreeRoot, retargetLease, withAdmissionLock } from './lib/leases.mjs';
+import { clampCeiling, decideAdmission, deriveBudgetForMemory } from './lib/budget.mjs';
+import { acquireLease, heartbeatLease, leaseExists, psExecutable, readLeases, releaseLease, repositoryWorktreeRoot, retargetLease, withAdmissionLock } from './lib/leases.mjs';
 import { evaluateLanePolicy, harnessName, isAgentSession } from './lib/policy.mjs';
 import { readMemoryStatus, topConsumers } from './lib/system-memory.mjs';
 
@@ -111,6 +111,17 @@ export function resolveInvocation({ options, command, env = process.env, process
   return { action: 'admit', commandLine, policy };
 }
 
+// Automatic peak reuse is deliberately dormant. Polling cannot prove a true
+// process-tree high-water mark, and arbitrary commands may consume inherited
+// stdin or mutable transitive inputs that are not bound by behavior evidence.
+// Keep the admission seam explicit for a future OS-backed/provenance-backed
+// design, but never let an existing store entry reduce today's reservation.
+export function applyAutomaticLaneHistoryPolicy(request) {
+  request.lanePeakMb = null;
+  request.reserveMb = request.ceilingMb;
+  return request;
+}
+
 export function guardDiagnosticPaths(worktree, { env = process.env } = {}) {
   let cwd;
   try {
@@ -160,9 +171,7 @@ export function collectTreeRssKb(psOutput, rootPid) {
   return { totalKb, processCount };
 }
 
-// Spawn the exact requested argv. A shell launcher is not target evidence: a
-// command that exits before `ps` observes its real process tree must remain a
-// cold lane rather than borrowing the launcher's small RSS peak.
+// Spawn the exact requested argv without a shell interpolation layer.
 export function guardedInvocation(command) {
   return {
     executable: command[0],
@@ -178,7 +187,6 @@ export function recordProcessTreeSample(state, psOutput, rootPid) {
   if (state.done) return { rssMb, processCount };
   state.peakRssMb = Math.max(state.peakRssMb, rssMb);
   state.peakProcessCount = Math.max(state.peakProcessCount, processCount);
-  if (rssMb > 0 && processCount > 0) state.targetObserved = true;
   return { rssMb, processCount };
 }
 
@@ -291,46 +299,20 @@ async function main() {
   const initialMemory = readMemoryStatus();
   const totalMb = initialMemory.totalMb;
   const budget = deriveBudgetForMemory(initialMemory);
-  const request = resolveRequest(options, process.env, budget);
+  const request = applyAutomaticLaneHistoryPolicy(resolveRequest(options, process.env, budget));
   if (request.clamped) {
     note(`ceiling clamped: requested ${request.requestedMb} MB, machine cap is ${request.ceilingMb} MB (${totalMb} MB total RAM, ${budget.machineBudgetMb} MB machine budget). Tightening is allowed; loosening is not.`);
   }
 
   const worktree = process.cwd();
-  const repoIdentity = repositoryIdentity(worktree);
   // One diagnostic location per Git worktree: a run from a nested cwd must
-  // not leave untracked files that make runs from every other cwd cold. A
-  // non-Git or unresolvable cwd already has no reusable behavior identity, so
-  // it safely falls back to its own local diagnostics.
+  // not scatter untracked files through nested directories. A non-Git or
+  // unresolvable cwd safely falls back to its own local diagnostics.
   const { guardDir, lastRunPath, lastRunDisplayPath } = guardDiagnosticPaths(worktree, { env: process.env });
   const nodeOptions = [process.env.NODE_OPTIONS, `--max-old-space-size=${request.heapMb}`].filter(Boolean).join(' ');
-  // Model the exact environment the child receives. The lease id itself is
-  // intentionally represented by a stable sentinel: every guarded child gets
-  // one, while its random value says nothing about command behavior.
-  const childEnvironment = { ...process.env, AGENT_GUARDED: '<guard-lease>', NODE_OPTIONS: nodeOptions };
-
-  // Plan with what the lane actually costs, enforce with the ceiling. Peaks
-  // come from the protected state store — recorded only by run-guarded from
-  // RSS it measured, never from worktree files an agent can edit (#203
-  // review). Re-prove the behavior after admission as a queued run may have
-  // changed revision while it waited; stale light history must never survive
-  // that transition.
-  const behaviorIdentity = commandBehaviorIdentity(worktree, command, {
-    env: process.env,
-    behaviorEnv: childEnvironment,
-  });
-  const lanePeakMb = readLanePeakMb({
-    env: process.env,
-    repo: repoIdentity,
-    label: options.label,
-    command,
-    behaviorIdentity,
-  });
-  request.lanePeakMb = lanePeakMb;
-  request.reserveMb = laneReservationMb(request.ceilingMb, lanePeakMb);
-  if (request.reserveMb < request.ceilingMb) {
-    note(`reserving ${request.reserveMb} MB from the lane's recent measured peak (${lanePeakMb} MB); the enforced ceiling stays ${request.ceilingMb} MB.`);
-  }
+  // The live lease id is added after admission so nested guarded commands can
+  // prove they belong to this process group.
+  const childEnvironment = { ...process.env, NODE_OPTIONS: nodeOptions };
 
   const { decision, memory, lease, refused } = await admit({
     env: process.env,
@@ -345,14 +327,6 @@ async function main() {
     },
   });
   if (refused) fail(describeRefusal(decision, process.env));
-  const admittedIdentity = commandBehaviorIdentity(worktree, command, {
-    env: process.env,
-    behaviorEnv: childEnvironment,
-  });
-  if (behaviorIdentity !== null && admittedIdentity !== behaviorIdentity) {
-    releaseLease(lease);
-    fail('command behavior changed during admission; rerun so it can be evaluated without stale history');
-  }
 
   mkdirSync(guardDir, { recursive: true });
 
@@ -379,7 +353,17 @@ async function main() {
     fail('failed to bind the admission lease to the guarded process group');
   }
 
-  const state = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, reason: null, termAt: null, done: false, polling: false, lastBeat: 0, monitorFailures: 0, killTimer: null };
+  const state = {
+    peakRssMb: 0,
+    peakProcessCount: 0,
+    reason: null,
+    termAt: null,
+    done: false,
+    polling: false,
+    lastBeat: 0,
+    monitorFailures: 0,
+    killTimer: null,
+  };
 
   const killGroup = (signal) => {
     try {
@@ -446,7 +430,7 @@ async function main() {
     });
   }
 
-  child.on('exit', async (code, signal) => {
+  child.on('exit', (code, signal) => {
     state.done = true;
     clearInterval(poll);
     if (timeoutTimer !== null) clearTimeout(timeoutTimer);
@@ -480,30 +464,6 @@ async function main() {
     if (state.reason !== null) {
       note(`run failed: ${state.reason} (diagnostics in ${lastRunDisplayPath}).`);
       process.exit(1);
-    }
-    // Only a completed run's peak informs future reservations: a run killed
-    // at the ceiling or timed out proves nothing about steady-state cost. A
-    // command that changed its own revision or executable is likewise not
-    // evidence for either the starting or ending behavior.
-    const completedIdentity = commandBehaviorIdentity(worktree, command, {
-      env: process.env,
-      behaviorEnv: childEnvironment,
-    });
-    if (
-      code === 0 &&
-      state.targetObserved &&
-      state.peakRssMb > 0 &&
-      behaviorIdentity !== null &&
-      completedIdentity === behaviorIdentity
-    ) {
-      await recordLanePeak({
-        env: process.env,
-        repo: repoIdentity,
-        label: options.label,
-        command,
-        behaviorIdentity,
-        peakRssMb: state.peakRssMb,
-      });
     }
     process.exit(code ?? (signal ? 1 : 0));
   });

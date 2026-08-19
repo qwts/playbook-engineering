@@ -32,24 +32,15 @@ turns an inherited `--rss-mb 8192` from an unreachable ceiling into an
 enforceable one. The 2048 MB lane cap is absolute: the incident this guard
 exists for was one test lane ballooning to ~100 GB of committed memory, and no
 sanctioned local lane needs more. The cap is enforced on the running process
-tree, and what admission *reserves* is smaller still when the lane has a
-recent measured peak: peak plus a conservative margin, so a lane that
-measures well under the cap no longer books the full cap against admission.
-Peak history is keyed by the checkout's canonical Git common directory, lane
-label, exact argv, and a versioned behavior HMAC. Reuse requires a clean exact
-revision and binds the resolved executable, canonical absolute cwd, full child
-environment, and raw plus structural `PWD`, `INIT_CWD`, and `PATH` evidence.
-Linked worktrees share the protected namespace, but child-visible path
-differences keep peaks separate. Direct Node and supported sh-family files, and
-Python `-S` file forms, bind canonical entry-file metadata and SHA-256; stdin,
-inline, module, startup-path, unsupported-shell, and listed indirect-wrapper
-forms stay cold. Runtime recognition uses canonical names; a copied or renamed
-runtime stays cold for no-arg, stdin, option, or filesystem-target argv. Other
-unrecognized executables use exact native argv evidence. Package-manager and
-entry-file evidence does not claim a hermetic network or transitive-input
-closure. Dirty, staged, untracked, non-Git, assume-unchanged, skip-worktree, or
-otherwise unprovable states stay cold. Only the two root-owned `.guard`
-diagnostics are ignored.
+tree. Admission currently reserves that full ceiling for every automatic run.
+`run-guarded` neither reads nor records lane peak history: 250 ms polling cannot
+prove a process-tree high-water mark, and arbitrary commands can consume
+inherited stdin or mutable transitive inputs. Existing protected-store entries
+are ignored. Lower-level peak and behavior-identity APIs remain dormant for a
+future design backed by OS high-water evidence and immutable, path-invariant
+input provenance. Thus #223 Finding 2 is fixed — a declared ceiling cannot buy
+the light-run exemption — while automatic measured-light reuse from Finding 1
+remains open.
 
 ## Admission
 
@@ -60,10 +51,11 @@ A run is granted only if all three hold:
    run outright, and normal (green) pressure retires committed-but-idle swap as
    evidence — macOS keeps swap allocated after pressure subsides. Without
    pressure evidence, refused when swap is at least 50% committed. Either gate
-   spares only lanes whose recent measured peak is no larger than the light-run
-   size. An unmeasured lane is not light, and lowering a caller-declared ceiling
-   cannot claim the exemption. A machine already trading pages for progress is
-   one more Electron worker away from a freeze.
+   can spare only a lane with separately proven evidence no larger than the
+   light-run size. The production wrapper supplies no such evidence, so every
+   automatic run is cold; lowering a caller-declared ceiling cannot claim the
+   exemption. A machine already trading pages for progress is one more Electron
+   worker away from a freeze.
 2. **Headroom.** `available − (what running leases have not yet materialized) −
    this request` must stay above the availability floor. Availability comes from
    `vm_stat` and `sysctl vm.swapusage` on macOS, `/proc/meminfo` on Linux.
@@ -131,10 +123,10 @@ node tools/agent-guard/run-guarded.mjs --label test:dom -- npm run test:dom:inne
 ```
 
 The wrapper directly spawns exact argv in its own process group and starts an
-asynchronous RSS sample before the 250 ms polling interval. Only a positive
-sample of the live target tree becomes peak history; a missed fast target stays
-cold. Breaches get `SIGTERM`, then `SIGKILL` after 2 s or immediately past
-1.25× the ceiling. Diagnostics use `.guard/last-run.json` and
+asynchronous RSS sample before the 250 ms polling interval. Samples enforce the
+ceiling, heartbeat leases, and populate per-run diagnostics only; they never
+seed admission history. Breaches get `SIGTERM`, then `SIGKILL` after 2 s or
+immediately past 1.25× the ceiling. Diagnostics use `.guard/last-run.json` and
 `.guard/history.jsonl` at the worktree root (or cwd outside Git); `rss-limit`
 and `timeout` exit non-zero.
 

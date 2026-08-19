@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
@@ -29,6 +29,19 @@ const managedAdapters = [
   { dialect: 'cursor', path: '.cursor/hooks.json' },
 ];
 
+const fakeGhDirectory = mkdtempSync(join(tmpdir(), 'uninstalled-fake-gh-'));
+writeFileSync(join(fakeGhDirectory, 'gh'), `#!/bin/sh
+case "\${GH_TOKEN-}" in
+  token-ai9d) printf '%s\\n' ai9d ;;
+  token-human) printf '%s\\n' qwts ;;
+  token-cwd)
+    if [ -f .fake-gh-ai9d ]; then printf '%s\\n' ai9d; else printf '%s\\n' qwts; fi
+    ;;
+  *) exit 1 ;;
+esac
+`, { mode: 0o755 });
+after(() => rmSync(fakeGhDirectory, { recursive: true, force: true }));
+
 function strings(value) {
   if (typeof value === 'string') return [value];
   if (Array.isArray(value)) return value.flatMap(strings);
@@ -53,11 +66,12 @@ function runUninstalledAdapter(adapter, command, identity = 'human', options = {
     ...process.env,
     AGENT_BOT_HOOK_BIN: join(ROOT, '.missing-agent-hook'),
     AGENT_BOT_UNMANAGED_AUTHORS: 'ai9d',
-    GH_USER: login,
+    GH_TOKEN: identity === 'unmanaged' ? 'token-ai9d' : 'token-human',
     GIT_AUTHOR_EMAIL: `${login}@example.test`,
     GIT_AUTHOR_NAME: author,
     GIT_COMMITTER_EMAIL: `${login}@example.test`,
     GIT_COMMITTER_NAME: author,
+    PATH: `${fakeGhDirectory}:${process.env.PATH}`,
     ...(options.env || {}),
   };
   for (const [name, value] of Object.entries(options.env || {})) {
@@ -317,10 +331,24 @@ test('every managed adapter denies shell spelling and wrapper bypasses', () => {
     'printf x >',
     "print -r -- *(e:'git commit -m x':)",
     'printf "git commit -m x\\n" | sh',
+    'printf ok | cat',
     'if ! git commit -m x; then :; fi',
     'nohup git commit -m x',
     'nice git commit -m x',
+    'timeout 5 git commit -m x',
+    'stdbuf -oL git commit -m x',
+    'setsid git commit -m x',
+    'time -p git commit -m x',
+    'env FOO=x time -p git commit -m x',
+    'command time -p git commit -m x',
+    'exec time -p git commit -m x',
+    '/usr/bin/time -p git commit -m x',
+    'coproc WORK git commit -m x',
+    'git bisect run git commit --allow-empty -m x',
+    'git submodule foreach git commit --allow-empty -m x',
+    "git submodule foreach 'git commit --allow-empty -m x'",
     'PATH+=:/tmp git commit -m x',
+    'PATH+=:/tmp printf ok',
     "sh <<'EOF'\ngit commit -m x\nEOF",
     'cat <<EOF\n$(git commit -m x)\nEOF',
     "cat <<'EOF'\nbody without terminator",
@@ -335,6 +363,30 @@ test('every managed adapter denies shell spelling and wrapper bypasses', () => {
   for (const adapter of managedAdapters) {
     for (const command of bypasses) {
       assert.equal(adapterDenied(adapter, command), true, `${adapter.path} must deny ${command}`);
+    }
+  }
+});
+
+test('ambiguous execution syntax stays denied for the unmanaged principal', () => {
+  const ambiguous = [
+    'printf ok | cat',
+    'PATH+=:/tmp printf ok',
+    'timeout 5 printf ok',
+    'stdbuf -oL printf ok',
+    'setsid printf ok',
+    'env FOO=x time -p printf ok',
+    '/usr/bin/time -p printf ok',
+    'git bisect run printf ok',
+    'git submodule foreach printf ok',
+    'coproc A coproc B coproc C coproc D coproc E coproc F coproc G coproc H coproc I printf ok',
+  ];
+  for (const adapter of managedAdapters) {
+    for (const command of ambiguous) {
+      assert.equal(
+        adapterDenied(adapter, command, 'unmanaged'),
+        true,
+        `${adapter.path} must fail closed for ${command}`,
+      );
     }
   }
 });
@@ -478,6 +530,57 @@ test('Git identity lookup follows the operation global context in every adapter'
   }
 });
 
+test('GitHub actor lookup follows the operation environment and cwd in every adapter', () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'uninstalled-gh-context-'));
+  const unmanaged = join(scratch, 'unmanaged');
+  const human = join(scratch, 'human');
+  mkdirSync(unmanaged, { recursive: true });
+  mkdirSync(human, { recursive: true });
+  writeFileSync(join(unmanaged, '.fake-gh-ai9d'), '');
+  const commandPath = `${fakeGhDirectory}:${process.env.PATH}`;
+  try {
+    for (const adapter of managedAdapters) {
+      assert.equal(adapterDenied(
+        adapter,
+        'GH_TOKEN=token-human gh pr create --title x --body y',
+        'unmanaged',
+      ), true, `${adapter.path} must honor a command-local human token`);
+      adapterAllowed(
+        adapter,
+        'GH_TOKEN=token-ai9d gh pr create --title x --body y',
+        'human',
+      );
+      assert.equal(adapterDenied(
+        adapter,
+        'GH_TOKEN=token-human git push origin HEAD',
+        'unmanaged',
+      ), true, `${adapter.path} must honor a command-local human token for Git push`);
+      adapterAllowed(
+        adapter,
+        'GH_TOKEN=token-ai9d git push origin HEAD',
+        'human',
+      );
+      assert.equal(adapterDenied(
+        adapter,
+        `env -i PATH='${commandPath}' GH_TOKEN=token-human gh issue close 1`,
+        'unmanaged',
+      ), true, `${adapter.path} must honor a cleared command environment`);
+      adapterAllowed(
+        adapter,
+        `env -C '${unmanaged}' GH_TOKEN=token-cwd gh issue close 1`,
+        'human',
+      );
+      assert.equal(adapterDenied(
+        adapter,
+        `env -C '${human}' GH_TOKEN=token-cwd gh issue close 1`,
+        'unmanaged',
+      ), true, `${adapter.path} must run the actor probe in the wrapper cwd`);
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 test('env wrapper and Git chdir composition matches the real runtime in every adapter', () => {
   const root = mkdtempSync(join(tmpdir(), 'uninstalled-wrapper-cwd-'));
   const outside = join(root, 'outside');
@@ -560,6 +663,8 @@ test('the named unmanaged principal can still publish through every adapter', ()
     'git merge --no-ff topic',
     'git push origin HEAD',
     'gh pr create --title x --body y',
+    'time -p git commit -m x',
+    'coproc WORK git commit -m x',
   ];
   for (const adapter of managedAdapters) {
     for (const command of publish) adapterAllowed(adapter, command, 'unmanaged');

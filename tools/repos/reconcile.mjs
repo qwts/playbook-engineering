@@ -37,6 +37,7 @@ import { checkRepo, appCoverage, contentSource, userToken, api } from './drift.m
 import { plan, promotionPlan, bumpReviewCount, canUseMergeQueue, defaultRuleset } from './lib/reconcile-plan.mjs';
 import { mintAgentToken } from './lib/agent-bot-client.mjs';
 import { loadCanonicalDiscoveryBlock, projectDiscoveryBlock } from './lib/agent-context-discovery.mjs';
+import { managedCodexPaths, mergeManagedFile } from './lib/codex-sync.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SEED_BRANCH = 'governance/baseline-seed';
@@ -122,7 +123,18 @@ async function putFile(owner, name, target, content, message, branch, token) {
   return true;
 }
 
-async function applyBaseline(owner, name, seeds, projections, botToken) {
+export function baselineSeedContent(root, seed, entry) {
+  const canonical = {
+    path: seed.target,
+    content: readFileSync(join(root, seed.source)),
+  };
+  return mergeManagedFile(canonical, null, {
+    formatExemptFiles: new Set(managedCodexPaths(entry)),
+  }).content.toString('utf8');
+}
+
+async function applyBaseline(owner, entry, seeds, projections, botToken) {
+  const { name } = entry;
   const meta = await call('GET', `/repos/${owner}/${name}`, botToken);
   const base = meta.default_branch;
   const open = await call('GET', `/repos/${owner}/${name}/pulls?head=${owner}:${SEED_BRANCH}&state=open`, botToken);
@@ -140,7 +152,7 @@ async function applyBaseline(owner, name, seeds, projections, botToken) {
 
   const changed = [];
   for (const seed of seeds) {
-    const content = readFileSync(join(ROOT, seed.source), 'utf8');
+    const content = baselineSeedContent(ROOT, seed, entry);
     if (await putFile(owner, name, seed.target, content, `governance: seed ${seed.target} from the repo-baseline-files SOP`, SEED_BRANCH, botToken)) {
       changed.push(`seeded ${seed.target}`);
     }
@@ -239,7 +251,7 @@ async function main() {
         botToken ??= mintAgentToken().token;
         const accessible = await api(`/repos/${manifest.account}/${entry.name}`, botToken);
         if (!accessible) line.human.push('reconciliation PR skipped: the resolved agent App is not installed on this repository');
-        else line.applied.push(await applyBaseline(manifest.account, entry.name, p.seeds, p.projections, botToken));
+        else line.applied.push(await applyBaseline(manifest.account, entry, p.seeds, p.projections, botToken));
       }
     }
     report.push(line);

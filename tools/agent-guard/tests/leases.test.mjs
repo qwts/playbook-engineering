@@ -32,7 +32,14 @@ import {
   withAdmissionLock,
 } from '../lib/leases.mjs';
 import { ensureStateDirs, leasesDir, machineToken } from '../lib/protocol.mjs';
-import { guardedInvocation, guardDiagnosticPaths, POLL_MS, recordProcessTreeSample, startProcessTreeMonitor } from '../run-guarded.mjs';
+import {
+  applyAutomaticLaneHistoryPolicy,
+  guardedInvocation,
+  guardDiagnosticPaths,
+  POLL_MS,
+  recordProcessTreeSample,
+  startProcessTreeMonitor,
+} from '../run-guarded.mjs';
 
 const roots = [];
 let env;
@@ -333,23 +340,21 @@ describe('process-tree peak monitoring', () => {
     });
   });
 
-  test('monitoring records only positive target samples completed while the target is live', () => {
-    const tinyState = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
+  test('monitoring records positive process-tree diagnostics without making admission evidence', () => {
+    const tinyState = { peakRssMb: 0, peakProcessCount: 0, done: false };
     assert.deepEqual(
       recordProcessTreeSample(tinyState, '701 1 701 1\n', 701),
       { rssMb: 1, processCount: 1 },
-      'a live 1 KB process rounds up to positive whole-MB history',
+      'a live 1 KB process rounds up to positive whole-MB diagnostics',
     );
-    assert.equal(tinyState.targetObserved, true);
-    const emptyState = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
+    const emptyState = { peakRssMb: 0, peakProcessCount: 0, done: false };
     recordProcessTreeSample(emptyState, '701 1 701 0\n', 701);
-    assert.equal(emptyState.targetObserved, false, 'zero RSS is not target measurement evidence');
-    const completedState = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: true };
+    assert.equal(emptyState.peakRssMb, 0, 'zero RSS stays an unmeasured diagnostic');
+    const completedState = { peakRssMb: 0, peakProcessCount: 0, done: true };
     recordProcessTreeSample(completedState, '701 1 701 8192\n', 701);
-    assert.equal(completedState.peakRssMb, 0, 'an in-flight ps result cannot measure a target after exit');
-    assert.equal(completedState.targetObserved, false);
+    assert.equal(completedState.peakRssMb, 0, 'an in-flight ps result cannot mutate diagnostics after exit');
 
-    const state = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
+    const state = { peakRssMb: 0, peakProcessCount: 0, done: false };
     const samples = [];
     const sample = () => {
       const observed = recordProcessTreeSample(state, '701 1 701 1\n702 701 701 1536\n', 701);
@@ -366,21 +371,19 @@ describe('process-tree peak monitoring', () => {
     assert.equal(timer, 'timer');
     assert.deepEqual(samples, [{ rssMb: 2, processCount: 2 }], 'the initial target sample runs synchronously before scheduling');
     assert.equal(scheduled.length, 1);
-    assert.ok(scheduled[0].intervalMs > 0);
+    assert.equal(scheduled[0].intervalMs, POLL_MS);
     assert.equal(state.peakRssMb, 2, 'a real non-empty tree always produces a positive whole-MB peak');
     assert.equal(state.peakProcessCount, 2);
-    assert.equal(state.targetObserved, true);
-
     scheduled[0].callback();
     assert.equal(state.peakRssMb, 2, 'later smaller/equal samples cannot erase the maximum');
     recordProcessTreeSample(state, '701 1 701 8192\n', 701);
     assert.equal(state.peakRssMb, 8, 'later larger samples still raise the maximum');
   });
 
-  test('an observed target records its own positive peak before the first interval', async () => {
+  test('a real target sample contributes only to run diagnostics', async () => {
     const command = [process.execPath, '-e', 'require("node:fs").readFileSync(3)'];
     const invocation = guardedInvocation(command);
-    const state = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
+    const state = { peakRssMb: 0, peakProcessCount: 0, done: false };
     const child = spawn(invocation.executable, invocation.args, {
       detached: true,
       env: process.env,
@@ -395,22 +398,7 @@ describe('process-tree peak monitoring', () => {
       const [code, signal] = await once(child, 'exit');
       assert.equal(code, 0);
       assert.equal(signal, null);
-      assert.equal(state.targetObserved, true);
-      assert.ok(state.peakRssMb > 0, 'history comes from the observed target process');
-
-      const recorded = await recordLanePeak({
-        env,
-        repo: 'fast-e2e',
-        label: 'test:fast-history',
-        command,
-        behaviorIdentity: 'fast-e2e-behavior',
-        peakRssMb: state.peakRssMb,
-      });
-      assert.equal(recorded, true);
-      assert.equal(
-        readLanePeakMb({ env, repo: 'fast-e2e', label: 'test:fast-history', command, behaviorIdentity: 'fast-e2e-behavior' }),
-        state.peakRssMb,
-      );
+      assert.ok(state.peakRssMb > 0, 'the observed target contributes a positive diagnostic peak');
     } finally {
       if (child.exitCode === null && child.signalCode === null) {
         try {
@@ -422,55 +410,22 @@ describe('process-tree peak monitoring', () => {
     }
   });
 
-  test('a missed ultra-fast target stays cold instead of borrowing launcher RSS', async () => {
-    const trueExecutable = ['/usr/bin/true', '/bin/true'].find((candidate) => existsSync(candidate));
-    const command = trueExecutable ? [trueExecutable] : [process.execPath, '-e', 'process.exit(0)'];
-    const invocation = guardedInvocation(command);
-    const state = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
-    const child = spawn(invocation.executable, invocation.args, {
-      detached: true,
-      env: process.env,
-      stdio: 'ignore',
-    });
-    try {
-      const ps = psExecutable();
-      assert.ok(ps, 'a system ps binary is required for production-equivalent sampling');
-      const [code, signal] = await once(child, 'exit');
-      assert.equal(code, 0);
-      assert.equal(signal, null);
-      state.done = true;
-      const psOutput = execFileSync(ps, ['-axo', 'pid=,ppid=,pgid=,rss='], { encoding: 'utf8' });
-      recordProcessTreeSample(state, psOutput, child.pid);
-      assert.equal(state.targetObserved, false);
-      assert.equal(state.peakRssMb, 0);
+  test('automatic runner admission ignores pre-existing protected peak entries', async () => {
+    const command = ['/bin/echo', 'future-provenance'];
+    const behaviorIdentity = 'legacy-v6-seed';
+    await recordLanePeak({ env, repo: 'overlook', label: 'test', command, behaviorIdentity, peakRssMb: 64 });
+    const preseededPeak = readLanePeakMb({ env, repo: 'overlook', label: 'test', command, behaviorIdentity });
+    assert.equal(preseededPeak, 64, 'the lower-level future-provenance store retains its existing entry');
 
-      const recorded = await recordLanePeak({
-        env,
-        repo: 'fast-e2e',
-        label: 'test:fast-history',
-        command,
-        behaviorIdentity: 'fast-e2e-behavior',
-        peakRssMb: state.peakRssMb,
-      });
-      assert.equal(recorded, false);
-      assert.equal(
-        readLanePeakMb({ env, repo: 'fast-e2e', label: 'test:fast-history', command, behaviorIdentity: 'fast-e2e-behavior' }),
-        null,
-      );
-    } finally {
-      if (child.exitCode === null && child.signalCode === null) {
-        try {
-          process.kill(-child.pid, 'SIGKILL');
-        } catch {
-          // The fast child may have exited between the check and cleanup.
-        }
-      }
-    }
+    const request = { ceilingMb: 2048, lanePeakMb: preseededPeak, reserveMb: 320 };
+    assert.equal(applyAutomaticLaneHistoryPolicy(request), request);
+    assert.equal(request.lanePeakMb, null, 'the runner cannot present stored history to admission');
+    assert.equal(request.reserveMb, request.ceilingMb, 'the runner always reserves the enforced ceiling');
   });
 });
 
-describe('lane peak store (#180)', () => {
-  test('linked worktrees share only matching command behavior (#223, #236)', async () => {
+describe('dormant lane peak store (future provenance)', () => {
+  test('linked worktrees share storage but retain exact child-visible behavior (#236)', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'agent-guard-repos-'));
     roots.push(root);
     const first = path.join(root, 'first', 'app');
@@ -507,7 +462,9 @@ describe('lane peak store (#180)', () => {
     );
 
     const peakEnv = scratchEnv();
-    const command = ['npm', 'test'];
+    const nativeEcho = ['/bin/echo', '/usr/bin/echo'].find((candidate) => existsSync(candidate));
+    assert.ok(nativeEcho, 'a native literal-argv executable is required for behavior identity tests');
+    const command = [nativeEcho, 'literal-mode'];
     const environmentFor = (cwd, overrides = {}) => ({
       ...peakEnv,
       PWD: cwd,
@@ -695,7 +652,7 @@ describe('lane peak store (#180)', () => {
       null,
     );
 
-    // The argv did not change, but the npm script did. Both unstaged and
+    // The argv did not change, but tracked behavior did. Both unstaged and
     // staged edits are untrusted; after commit, the new revision gets a fresh
     // identity rather than borrowing the old light peak.
     writeFileSync(path.join(sibling, 'package.json'), `${JSON.stringify({ scripts: { test: 'node heavy.mjs' } }, null, 2)}\n`);
@@ -860,7 +817,7 @@ describe('lane peak store (#180)', () => {
 
     const peakEnv = scratchEnv();
     const systemPath = process.env.PATH ?? '/usr/bin:/bin';
-    const command = ['npm', 'test'];
+    const command = ['./helper', 'literal-mode'];
     const environmentFor = (cwd, overrides = {}) => ({
       ...peakEnv,
       PWD: cwd,
@@ -976,7 +933,7 @@ describe('lane peak store (#180)', () => {
     );
   });
 
-  test('interpreter history binds exact payload files and rejects indirect execution', () => {
+  test('interpreter history binds exact payload files and rejects indirect execution', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'agent-guard-payloads-'));
     roots.push(root);
     const checkout = path.join(root, 'checkout');
@@ -988,10 +945,11 @@ describe('lane peak store (#180)', () => {
     assert.ok(git, 'a system Git binary is required to resolve payload evidence');
     execFileSync(git, ['-C', checkout, 'init', '--quiet'], { stdio: 'ignore' });
     writeFileSync(path.join(checkout, 'README.md'), 'fixture\n');
-    writeFileSync(path.join(checkout, '.gitignore'), 'ignored/\n');
+    writeFileSync(path.join(checkout, '.gitignore'), 'ignored/\nnode_modules/\n');
+    writeFileSync(path.join(checkout, 'package.json'), `${JSON.stringify({ scripts: { test: 'node node_modules/job.js' } }, null, 2)}\n`);
     writeFileSync(path.join(checkout, '+O'), 'tracked option-shaped decoy\n');
     writeFileSync(path.join(checkout, '-m'), 'raise SystemExit(0)\n');
-    execFileSync(git, ['-C', checkout, 'add', '--', '.gitignore', 'README.md', '+O', '-m'], { stdio: 'ignore' });
+    execFileSync(git, ['-C', checkout, 'add', '--', '.gitignore', 'README.md', 'package.json', '+O', '-m'], { stdio: 'ignore' });
     execFileSync(git, [
       '-C', checkout,
       '-c', 'user.name=Agent Guard Test',
@@ -1000,6 +958,9 @@ describe('lane peak store (#180)', () => {
     ], { stdio: 'ignore' });
     mkdirSync(path.join(checkout, 'ignored'));
     writeFileSync(path.join(checkout, 'ignored', 'job.mjs'), 'process.exit(0);\n');
+    mkdirSync(path.join(checkout, 'node_modules'));
+    const ignoredDependency = path.join(checkout, 'node_modules', 'job.js');
+    writeFileSync(ignoredDependency, 'process.exit(0);\n');
 
     const peakEnv = scratchEnv();
     const baseBehaviorEnv = {
@@ -1012,6 +973,69 @@ describe('lane peak store (#180)', () => {
       env: peakEnv,
       behaviorEnv: { ...baseBehaviorEnv, ...overrides },
     });
+
+    const dispatcherBin = path.join(external, 'dispatcher-bin');
+    mkdirSync(dispatcherBin);
+    const transitiveDispatchers = [
+      'bun',
+      'bunx',
+      'c8',
+      'corepack',
+      'deno',
+      'electron',
+      'npm',
+      'npx',
+      'pnpm',
+      'pnpx',
+      'playwright',
+      'test-storybook',
+      'vitest',
+      'yarn',
+      'yarnpkg',
+    ];
+    for (const dispatcher of transitiveDispatchers) {
+      const executable = path.join(dispatcherBin, dispatcher);
+      writeFileSync(executable, '#!/bin/sh\nexit 0\n');
+      chmodSync(executable, 0o755);
+      assert.equal(
+        identityFor([dispatcher, 'literal-task'], { PATH: dispatcherBin }),
+        null,
+        `${dispatcher} transitive dispatch stays cold`,
+      );
+    }
+
+    const npmCommand = ['npm', 'test'];
+    const npmBehaviorEnv = { PATH: dispatcherBin };
+    const npmBefore = identityFor(npmCommand, npmBehaviorEnv);
+    assert.equal(npmBefore, null, 'npm cannot seed history from ignored dependency bytes');
+    writeFileSync(ignoredDependency, 'Buffer.alloc(1024 * 1024 * 1024);\n');
+    assert.equal(
+      identityFor(npmCommand, npmBehaviorEnv),
+      null,
+      'mutating the ignored node_modules payload keeps npm safely cold',
+    );
+    assert.equal(
+      await recordLanePeak({
+        env: peakEnv,
+        repo: 'ignored-dependency',
+        label: 'test',
+        command: npmCommand,
+        behaviorIdentity: npmBefore,
+        peakRssMb: 64,
+      }),
+      false,
+      'cold package-manager evidence cannot be written as reusable history',
+    );
+    assert.equal(
+      readLanePeakMb({
+        env: peakEnv,
+        repo: 'ignored-dependency',
+        label: 'test',
+        command: npmCommand,
+        behaviorIdentity: npmBefore,
+      }),
+      null,
+    );
 
     const nodePayload = path.join(external, 'job.mjs');
     writeFileSync(nodePayload, 'process.exit(0);\n');
