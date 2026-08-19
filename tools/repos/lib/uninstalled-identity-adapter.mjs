@@ -106,7 +106,8 @@ const GIT_NON_PUBLISH_SUBCOMMANDS = new Set([
 ]);
 const SHELLS = new Set(['bash', 'dash', 'ksh', 'sh', 'zsh']);
 const INDIRECT_EXECUTORS = new Set([
-  '.', 'eval', 'find', 'nice', 'nohup', 'parallel', 'source', 'sudo', 'watch', 'xargs',
+  '.', 'eval', 'find', 'nice', 'nohup', 'parallel', 'setsid', 'source', 'stdbuf',
+  'sudo', 'time', 'timeout', 'watch', 'xargs',
 ]);
 const GH_READ_SUBCOMMANDS = {
   alias: ['list'],
@@ -687,6 +688,7 @@ function unwrapPrefixes(input, inheritedContext) {
   while (words.length) {
     const assigned = assignment(words[0]);
     if (assigned) {
+      if (assigned.append) return { context, safe: false, words: [] };
       context = withAssignment(context, assigned);
       words.shift();
       continue;
@@ -731,6 +733,7 @@ function unwrapPrefixes(input, inheritedContext) {
       const item = words[0];
       const assigned = assignment(item);
       if (assigned) {
+        if (assigned.append) return { context, safe: false, words: [] };
         context = withAssignment(context, assigned);
         words.shift();
         continue;
@@ -858,6 +861,28 @@ function parseGit(words, context) {
   const subcommand = words[i];
   if (!subcommand || subcommand.dynamic) return unsafeScan();
   const value = subcommand.value;
+  if (value === 'bisect') {
+    const action = words[i + 1];
+    if (action?.dynamic) return unsafeScan();
+    if (action?.value === 'run') return unsafeScan();
+  }
+  if (value === 'submodule') {
+    let action = null;
+    for (let j = i + 1; j < words.length; j += 1) {
+      const item = words[j];
+      if (item.dynamic) return unsafeScan();
+      if (item.value === '--') {
+        action = words[j + 1] || null;
+        break;
+      }
+      if (['-q', '--quiet', '--cached'].includes(item.value)) continue;
+      if (item.value.startsWith('-')) return unsafeScan();
+      action = item;
+      break;
+    }
+    if (action?.dynamic) return unsafeScan();
+    if (action?.value === 'foreach') return unsafeScan();
+  }
   if (value === 'push') {
     return { operations: [{ context, globalArgs, kind: 'git-push', subcommand: value, words }], safe: true };
   }
@@ -1004,18 +1029,37 @@ function parseShell(words, context, depth) {
 }
 
 function inspectSimpleCommand(tokens, depth, inheritedContext) {
+  if (depth > 8) return unsafeScan();
   const stripped = stripRedirections(tokens);
   if (!stripped.safe) return unsafeScan();
   let words = stripped.words;
   if (!words.length) return { operations: [], safe: true };
 
-  while (
-    words.length
-    && !words[0].dynamic
-    && ['!', 'coproc', 'do', 'elif', 'else', 'if', 'then', 'time', 'until', 'while'].includes(words[0].value)
-  ) {
+  const structuralPrefixes = new Set([
+    '!', 'coproc', 'do', 'elif', 'else', 'if', 'then', 'time', 'until', 'while',
+  ]);
+  const prefix = words[0]?.dynamic ? '' : words[0]?.value;
+  if (prefix === 'coproc') {
+    const command = words.slice(1);
+    if (!command.length || command[0].dynamic) return unsafeScan();
+    if (structuralPrefixes.has(command[0].value)) return unsafeScan();
+    const scan = inspectSimpleCommand(command, depth + 1, inheritedContext);
+    if (
+      command.length > 1
+      && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(command[0].value)
+    ) {
+      mergeScan(scan, inspectSimpleCommand(command.slice(1), depth + 1, inheritedContext));
+    }
+    return scan;
+  }
+  if (prefix === 'time') {
+    words = words.slice(1);
+    if (words[0]?.value === '-p' && !words[0].dynamic) words = words.slice(1);
+    else if (words[0]?.dynamic || words[0]?.value?.startsWith('-')) return unsafeScan();
+  } else if (structuralPrefixes.has(prefix)) {
     words = words.slice(1);
   }
+  if (words[0]?.dynamic || structuralPrefixes.has(words[0]?.value)) return unsafeScan();
   const structural = words[0]?.dynamic ? '' : words[0]?.value;
   if (['case', 'for', 'function', 'select'].includes(structural)) return { operations: [], safe: true };
   if (['done', 'esac', 'fi', 'in'].includes(structural)) return { operations: [], safe: true };
@@ -1038,6 +1082,9 @@ function inspectCommand(command, depth = 0, context = {}) {
   if (depth > 8) return unsafeScan();
   const lexed = shellLex(command);
   if (!lexed.safe) return unsafeScan();
+  if (lexed.tokens.some((token) => (
+    token.type === 'operator' && ['|', '|&'].includes(token.value)
+  ))) return unsafeScan();
   const scan = { operations: [], safe: true };
   for (const nested of lexed.substitutions) {
     mergeScan(scan, inspectCommand(nested, depth + 1, context));
@@ -1073,9 +1120,10 @@ function parseAuthorIdent(raw) {
 }
 
 function operationEnvironment(env, context) {
-  const merged = context.clearEnv ? {} : { ...env };
-  for (const name of context.unset) delete merged[name];
-  for (const [name, setting] of Object.entries(context.env)) {
+  const normalized = cloneContext(context);
+  const merged = normalized.clearEnv ? {} : { ...env };
+  for (const name of normalized.unset) delete merged[name];
+  for (const [name, setting] of Object.entries(normalized.env)) {
     if (setting.dynamic) return null;
     merged[name] = setting.append
       ? `${merged[name] || ''}${setting.value}`
@@ -1122,14 +1170,15 @@ function resolveGitAuthor(env = {}, operation = {}) {
   }
 }
 
-function resolveGhLogin(env = {}) {
-  const fromEnv = env.GH_USER || env.GITHUB_USER || env.GITHUB_ACTOR || '';
-  if (fromEnv) return String(fromEnv).trim().toLowerCase();
+function resolveGhLogin(env = {}, context = {}) {
   try {
-    const run = spawnSync('gh', ['api', 'user', '--jq', '.login'], {
+    const options = {
       encoding: 'utf8',
+      env,
       timeout: 4000,
-    });
+    };
+    if (context.cwd) options.cwd = context.cwd;
+    const run = spawnSync('gh', ['api', 'user', '--jq', '.login'], options);
     if (run.status === 0) return (run.stdout || '').trim().toLowerCase();
   } catch {}
   return '';
@@ -1144,8 +1193,10 @@ function isUnmanagedGitAuthor(env, authors, operation) {
   return identMatches(ident.name, authors) || identMatches(ident.email, authors);
 }
 
-function isUnmanagedGhActor(env, authors) {
-  return authors.includes(resolveGhLogin(env));
+function isUnmanagedGhActor(env, authors, operation = {}) {
+  const context = operation.context || cloneContext();
+  const effectiveEnv = operationEnvironment(env, context);
+  return Boolean(effectiveEnv && authors.includes(resolveGhLogin(effectiveEnv, context)));
 }
 
 function isHumanAttributedPublish(command) {
@@ -1159,8 +1210,8 @@ function unmanagedPublishAllowed(command, env, authors) {
   if (!scan.safe || !scan.operations.length) return false;
   for (const operation of scan.operations) {
     if (operation.kind === 'git-commit' && !isUnmanagedGitAuthor(env, authors, operation)) return false;
-    if (operation.kind === 'git-push' && !isUnmanagedGhActor(env, authors)) return false;
-    if (operation.kind === 'gh-write' && !isUnmanagedGhActor(env, authors)) return false;
+    if (operation.kind === 'git-push' && !isUnmanagedGhActor(env, authors, operation)) return false;
+    if (operation.kind === 'gh-write' && !isUnmanagedGhActor(env, authors, operation)) return false;
   }
   return true;
 }
