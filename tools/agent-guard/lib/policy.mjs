@@ -46,7 +46,7 @@ export function isCi(env = process.env) {
  * entrypoints directly instead of asking this local wrapper to infer where it
  * is executing; a human owner can run the underlying lane directly too.
  */
-export function isAgentSession(_env = process.env) {
+export function isAgentSession() {
   return true;
 }
 
