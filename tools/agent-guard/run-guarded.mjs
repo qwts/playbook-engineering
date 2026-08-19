@@ -292,9 +292,9 @@ async function main() {
   // skips only duplicate admission; it cannot authorize a heavy inner lane.
   // Lease ids are visible to same-user processes, so id knowledge alone also
   // cannot prove nesting: an unrecognised marker falls through to admission.
-  const invocation = resolveInvocation({ options, command, env: process.env });
-  if (invocation.action === 'refuse') fail(invocation.policy.message);
-  if (invocation.action === 'passthrough') return passthrough(command);
+  const resolved = resolveInvocation({ options, command, env: process.env });
+  if (resolved.action === 'refuse') fail(resolved.policy.message);
+  if (resolved.action === 'passthrough') return passthrough(command);
   if (process.platform === 'win32') {
     note('WARNING: guard unsupported on win32; running unguarded.');
     return passthrough(command);
@@ -302,7 +302,7 @@ async function main() {
   const ps = psExecutable();
   if (ps === null) fail('guard requires ps at /bin/ps or /usr/bin/ps to enforce process-group memory limits');
 
-  const { commandLine } = invocation;
+  const { commandLine } = resolved;
 
   const initialMemory = readMemoryStatus();
   const totalMb = initialMemory.totalMb;
