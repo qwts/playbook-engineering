@@ -11,7 +11,6 @@ import { once } from 'node:events';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { performance } from 'node:perf_hooks';
 import { after, beforeEach, describe, test } from 'node:test';
 import { Worker } from 'node:worker_threads';
 
@@ -34,7 +33,7 @@ import {
 } from '../lib/leases.mjs';
 import { ensureStateDirs, leasesDir, machineToken } from '../lib/protocol.mjs';
 import {
-  eligibleLanePeakMb,
+  applyAutomaticLaneHistoryPolicy,
   guardedInvocation,
   guardDiagnosticPaths,
   POLL_MS,
@@ -341,27 +340,24 @@ describe('process-tree peak monitoring', () => {
     });
   });
 
-  test('monitoring requires positive target samples separated by a full polling interval', () => {
-    const tinyState = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
+  test('monitoring records positive process-tree diagnostics without making admission evidence', () => {
+    const tinyState = { peakRssMb: 0, peakProcessCount: 0, done: false };
     assert.deepEqual(
       recordProcessTreeSample(tinyState, '701 1 701 1\n', 701),
       { rssMb: 1, processCount: 1 },
-      'a live 1 KB process rounds up to positive whole-MB history',
+      'a live 1 KB process rounds up to positive whole-MB diagnostics',
     );
-    assert.equal(tinyState.targetObserved, true);
-    const emptyState = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
+    const emptyState = { peakRssMb: 0, peakProcessCount: 0, done: false };
     recordProcessTreeSample(emptyState, '701 1 701 0\n', 701);
-    assert.equal(emptyState.targetObserved, false, 'zero RSS is not target measurement evidence');
-    const completedState = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: true };
+    assert.equal(emptyState.peakRssMb, 0, 'zero RSS stays an unmeasured diagnostic');
+    const completedState = { peakRssMb: 0, peakProcessCount: 0, done: true };
     recordProcessTreeSample(completedState, '701 1 701 8192\n', 701);
-    assert.equal(completedState.peakRssMb, 0, 'an in-flight ps result cannot measure a target after exit');
-    assert.equal(completedState.targetObserved, false);
+    assert.equal(completedState.peakRssMb, 0, 'an in-flight ps result cannot mutate diagnostics after exit');
 
-    const state = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
+    const state = { peakRssMb: 0, peakProcessCount: 0, done: false };
     const samples = [];
-    let sampledAt = 1_000;
     const sample = () => {
-      const observed = recordProcessTreeSample(state, '701 1 701 1\n702 701 701 1536\n', 701, sampledAt);
+      const observed = recordProcessTreeSample(state, '701 1 701 1\n702 701 701 1536\n', 701);
       samples.push(observed);
     };
     const scheduled = [];
@@ -378,25 +374,16 @@ describe('process-tree peak monitoring', () => {
     assert.equal(scheduled[0].intervalMs, POLL_MS);
     assert.equal(state.peakRssMb, 2, 'a real non-empty tree always produces a positive whole-MB peak');
     assert.equal(state.peakProcessCount, 2);
-    assert.equal(state.targetObserved, true);
-    assert.equal(eligibleLanePeakMb(state), null, 'one startup sample cannot seed peak history');
-
-    sampledAt += POLL_MS - 1;
     scheduled[0].callback();
-    assert.equal(eligibleLanePeakMb(state), null, 'two samples inside one polling window remain cold');
-    sampledAt += 1;
-    scheduled[0].callback();
-    assert.equal(eligibleLanePeakMb(state), 2, 'a second positive sample after a full interval makes the peak eligible');
     assert.equal(state.peakRssMb, 2, 'later smaller/equal samples cannot erase the maximum');
-    recordProcessTreeSample(state, '701 1 701 8192\n', 701, sampledAt + POLL_MS);
+    recordProcessTreeSample(state, '701 1 701 8192\n', 701);
     assert.equal(state.peakRssMb, 8, 'later larger samples still raise the maximum');
-    assert.equal(eligibleLanePeakMb(state), 8, 'eligible history retains the maximum observed peak');
   });
 
-  test('a real target observed across the polling window records its positive peak', async () => {
+  test('a real target sample contributes only to run diagnostics', async () => {
     const command = [process.execPath, '-e', 'require("node:fs").readFileSync(3)'];
     const invocation = guardedInvocation(command);
-    const state = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
+    const state = { peakRssMb: 0, peakProcessCount: 0, done: false };
     const child = spawn(invocation.executable, invocation.args, {
       detached: true,
       env: process.env,
@@ -405,36 +392,13 @@ describe('process-tree peak monitoring', () => {
     const ps = psExecutable();
     assert.ok(ps, 'a system ps binary is required for production-equivalent sampling');
     try {
-      const firstSampleAt = performance.now();
-      const firstPsOutput = execFileSync(ps, ['-axo', 'pid=,ppid=,pgid=,rss='], { encoding: 'utf8' });
-      recordProcessTreeSample(state, firstPsOutput, child.pid, firstSampleAt);
-      assert.equal(eligibleLanePeakMb(state), null, 'the real startup sample is not sufficient history');
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS + 25));
-      const secondSampleAt = performance.now();
-      const secondPsOutput = execFileSync(ps, ['-axo', 'pid=,ppid=,pgid=,rss='], { encoding: 'utf8' });
-      recordProcessTreeSample(state, secondPsOutput, child.pid, secondSampleAt);
+      const psOutput = execFileSync(ps, ['-axo', 'pid=,ppid=,pgid=,rss='], { encoding: 'utf8' });
+      recordProcessTreeSample(state, psOutput, child.pid);
       child.stdio[3].end();
       const [code, signal] = await once(child, 'exit');
       assert.equal(code, 0);
       assert.equal(signal, null);
-      assert.equal(state.targetObserved, true);
-      assert.ok(state.peakRssMb > 0, 'history comes from the observed target process');
-      const eligiblePeakMb = eligibleLanePeakMb(state);
-      assert.ok(eligiblePeakMb > 0, 'the live target remained observable for at least one polling interval');
-
-      const recorded = await recordLanePeak({
-        env,
-        repo: 'fast-e2e',
-        label: 'test:fast-history',
-        command,
-        behaviorIdentity: 'fast-e2e-behavior',
-        peakRssMb: eligiblePeakMb,
-      });
-      assert.equal(recorded, true);
-      assert.equal(
-        readLanePeakMb({ env, repo: 'fast-e2e', label: 'test:fast-history', command, behaviorIdentity: 'fast-e2e-behavior' }),
-        eligiblePeakMb,
-      );
+      assert.ok(state.peakRssMb > 0, 'the observed target contributes a positive diagnostic peak');
     } finally {
       if (child.exitCode === null && child.signalCode === null) {
         try {
@@ -446,55 +410,21 @@ describe('process-tree peak monitoring', () => {
     }
   });
 
-  test('a missed ultra-fast target stays cold instead of borrowing launcher RSS', async () => {
-    const trueExecutable = ['/usr/bin/true', '/bin/true'].find((candidate) => existsSync(candidate));
-    const command = trueExecutable ? [trueExecutable] : [process.execPath, '-e', 'process.exit(0)'];
-    const invocation = guardedInvocation(command);
-    const state = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
-    const child = spawn(invocation.executable, invocation.args, {
-      detached: true,
-      env: process.env,
-      stdio: 'ignore',
-    });
-    try {
-      const ps = psExecutable();
-      assert.ok(ps, 'a system ps binary is required for production-equivalent sampling');
-      const [code, signal] = await once(child, 'exit');
-      assert.equal(code, 0);
-      assert.equal(signal, null);
-      state.done = true;
-      const psOutput = execFileSync(ps, ['-axo', 'pid=,ppid=,pgid=,rss='], { encoding: 'utf8' });
-      recordProcessTreeSample(state, psOutput, child.pid);
-      assert.equal(state.targetObserved, false);
-      assert.equal(state.peakRssMb, 0);
-      assert.equal(eligibleLanePeakMb(state), null);
+  test('automatic runner admission ignores pre-existing protected peak entries', async () => {
+    const command = ['/bin/echo', 'future-provenance'];
+    const behaviorIdentity = 'legacy-v6-seed';
+    await recordLanePeak({ env, repo: 'overlook', label: 'test', command, behaviorIdentity, peakRssMb: 64 });
+    const preseededPeak = readLanePeakMb({ env, repo: 'overlook', label: 'test', command, behaviorIdentity });
+    assert.equal(preseededPeak, 64, 'the lower-level future-provenance store retains its existing entry');
 
-      const recorded = await recordLanePeak({
-        env,
-        repo: 'fast-e2e',
-        label: 'test:fast-history',
-        command,
-        behaviorIdentity: 'fast-e2e-behavior',
-        peakRssMb: state.peakRssMb,
-      });
-      assert.equal(recorded, false);
-      assert.equal(
-        readLanePeakMb({ env, repo: 'fast-e2e', label: 'test:fast-history', command, behaviorIdentity: 'fast-e2e-behavior' }),
-        null,
-      );
-    } finally {
-      if (child.exitCode === null && child.signalCode === null) {
-        try {
-          process.kill(-child.pid, 'SIGKILL');
-        } catch {
-          // The fast child may have exited between the check and cleanup.
-        }
-      }
-    }
+    const request = { ceilingMb: 2048, lanePeakMb: preseededPeak, reserveMb: 320 };
+    assert.equal(applyAutomaticLaneHistoryPolicy(request), request);
+    assert.equal(request.lanePeakMb, null, 'the runner cannot present stored history to admission');
+    assert.equal(request.reserveMb, request.ceilingMb, 'the runner always reserves the enforced ceiling');
   });
 });
 
-describe('lane peak store (#180)', () => {
+describe('dormant lane peak store (future provenance)', () => {
   test('linked worktrees share storage but retain exact child-visible behavior (#236)', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'agent-guard-repos-'));
     roots.push(root);
