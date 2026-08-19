@@ -26,7 +26,24 @@ import path from 'node:path';
 import { CORE_LEASE_FIELDS, PROTOCOL_VERSION, ensureStateDirs, lanePeaksDir, leasesDir, machineToken, stateDir } from './protocol.mjs';
 
 const GIT_EXECUTABLES = ['/usr/bin/git', '/bin/git'];
-const BEHAVIOR_IDENTITY_VERSION = 5;
+const BEHAVIOR_IDENTITY_VERSION = 6;
+const MAX_INTERPRETER_PAYLOAD_BYTES = 16 * 1024 * 1024;
+const INDIRECT_EXECUTABLES = new Set([
+  'chrt',
+  'doas',
+  'env',
+  'flock',
+  'ionice',
+  'nice',
+  'nohup',
+  'setsid',
+  'strace',
+  'stdbuf',
+  'sudo',
+  'time',
+  'timeout',
+  'xargs',
+]);
 const UNTRACKED_GUARD_DIAGNOSTICS = new Set([
   '? .guard/history.jsonl',
   '? .guard/last-run.json',
@@ -82,7 +99,7 @@ export function repositoryIdentity(worktree, { env = process.env } = {}) {
   }
 }
 
-function executableEvidence(worktree, command, env) {
+function resolveExecutable(worktree, command, env) {
   const requested = command[0];
   const candidates = requested.includes(path.sep)
     ? [path.isAbsolute(requested) ? requested : path.resolve(worktree, requested)]
@@ -98,8 +115,10 @@ function executableEvidence(worktree, command, env) {
       // execvp-style search: keep looking for a runnable candidate.
     }
   }
-  if (executable === undefined) return null;
+  return executable ?? null;
+}
 
+function executableEvidence(worktree, executable) {
   try {
     const stats = statSync(executable, { bigint: true });
     if (!stats.isFile()) return null;
@@ -127,6 +146,115 @@ function executableEvidence(worktree, command, env) {
   }
 }
 
+function executableNames(requested, canonical) {
+  return [requested, canonical].map((value) => path.basename(value).toLowerCase());
+}
+
+function interpreterNameFamily(name) {
+  if (/^(?:node|nodejs)(?:[.-]?\d+(?:\.\d+)*)?$/u.test(name)) return 'node';
+  if (/^(?:python|pypy)(?:[.-]?\d+(?:\.\d+)*)?$/u.test(name)) return 'python';
+  if (/^(?:bash|dash|ksh|sh)(?:[.-]?\d+(?:\.\d+)*)?$/u.test(name)) return 'shell';
+  if (/^(?:ash|csh|fish|mksh|powershell|pwsh|tcsh|zsh)(?:[.-]?\d+(?:\.\d+)*)?$/u.test(name)) return 'unsupported-shell';
+  return null;
+}
+
+function interpreterFamily(requested, canonical) {
+  const [requestedFamily, canonicalFamily] = executableNames(requested, canonical).map(interpreterNameFamily);
+  if (canonicalFamily === null) return requestedFamily === null ? null : 'conflict';
+  if (requestedFamily !== null && requestedFamily !== canonicalFamily) return 'conflict';
+  return canonicalFamily;
+}
+
+function sameStableFile(before, after) {
+  return ['dev', 'ino', 'mode', 'size', 'mtimeNs', 'ctimeNs'].every((name) => before[name] === after[name]);
+}
+
+function payloadFileEvidence(raw, canonicalCwd, repositoryRoot) {
+  if (raw === '' || raw === '-') return null;
+  const resolved = path.resolve(canonicalCwd, raw);
+  try {
+    const canonical = realpathSync(resolved);
+    const before = statSync(canonical, { bigint: true });
+    if (!before.isFile() || before.size < 0n || before.size > BigInt(MAX_INTERPRETER_PAYLOAD_BYTES)) return null;
+    const contents = readFileSync(canonical);
+    const after = statSync(canonical, { bigint: true });
+    if (BigInt(contents.length) !== before.size || !sameStableFile(before, after)) return null;
+    return {
+      scope: repositoryRelativePath(repositoryRoot, canonical) === null ? 'external' : 'worktree',
+      raw,
+      resolved,
+      canonical,
+      repositoryPath: repositoryRelativePath(repositoryRoot, canonical),
+      device: String(before.dev),
+      inode: String(before.ino),
+      mode: String(before.mode),
+      size: String(before.size),
+      modifiedNs: String(before.mtimeNs),
+      changedNs: String(before.ctimeNs),
+      sha256: createHash('sha256').update(contents).digest('hex'),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function hasIndirectEnvironment(family, env) {
+  const nonEmpty = (name) => typeof env[name] === 'string' && env[name] !== '';
+  if (Object.keys(env).some((name) => (name.startsWith('LD_') || name.startsWith('DYLD_')) && nonEmpty(name))) return true;
+  if (family === 'node') {
+    if (nonEmpty('NODE_PATH')) return true;
+    if (nonEmpty('NODE_OPTIONS') && !/^--max-old-space-size=\d+$/u.test(env.NODE_OPTIONS.trim())) return true;
+  }
+  if (family === 'python' && ['PYTHONHOME', 'PYTHONINSPECT', 'PYTHONPATH', 'PYTHONSTARTUP', 'PYTHONUSERBASE'].some(nonEmpty)) return true;
+  if (family === 'shell' && ['BASH_ENV', 'ENV', 'ZDOTDIR'].some(nonEmpty)) return true;
+  return false;
+}
+
+function unrecognizedExecutableStaysCold(worktree, command) {
+  const args = command.slice(1);
+  if (args.length === 0 || args.some((raw) => raw.startsWith('-') || raw.startsWith('+'))) return true;
+  for (const raw of args) {
+    const equalsAt = raw.indexOf('=');
+    const candidates = equalsAt >= 0 && equalsAt < raw.length - 1 ? [raw, raw.slice(equalsAt + 1)] : [raw];
+    for (const candidate of candidates) {
+      try {
+        realpathSync(path.resolve(worktree, candidate));
+        return true;
+      } catch {
+        // Literal and missing operands do not identify mutable filesystem
+        // input. Exact argv still binds their behavior identity.
+      }
+    }
+  }
+  return false;
+}
+
+function commandPayloadEvidence(worktree, command, env, repositoryRoot, executable) {
+  if (executableNames(command[0], executable).some((name) => INDIRECT_EXECUTABLES.has(name))) return null;
+  const family = interpreterFamily(command[0], executable);
+  if (family === null) {
+    // A copied or renamed runtime has no trustworthy family. Filesystem and
+    // stdin-shaped operands stay cold rather than becoming inert native argv.
+    return unrecognizedExecutableStaysCold(worktree, command) ? null : { kind: 'native' };
+  }
+  if (family === 'conflict' || family === 'unsupported-shell') return null;
+  if (hasIndirectEnvironment(family, env)) return null;
+  const args = command.slice(1);
+  const explicitSeparator = family === 'python' ? args[1] === '--' : args[0] === '--';
+  const payloadAt = family === 'python'
+    ? (args[0] === '-S' ? (explicitSeparator ? 2 : 1) : -1)
+    : (explicitSeparator ? 1 : 0);
+  if (
+    payloadAt < 0 ||
+    payloadAt >= args.length ||
+    args[payloadAt] === '-' ||
+    (!explicitSeparator && (args[payloadAt].startsWith('-') || args[payloadAt].startsWith('+')))
+  ) return null;
+  const file = payloadFileEvidence(args[payloadAt], worktree, repositoryRoot);
+  if (file === null) return null;
+  return { kind: 'interpreter-file', family, file };
+}
+
 function repositoryRelativePath(repositoryRoot, target) {
   const relative = path.relative(repositoryRoot, target);
   if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
@@ -138,13 +266,13 @@ function repositoryRelativePath(repositoryRoot, target) {
 // worktree-relative tag; every other spelling stays bound to its raw and
 // absolute resolution evidence.
 function structuralPathEvidence(raw, canonicalCwd, repositoryRoot, { emptyMeansCwd = false } = {}) {
-  if (raw === '' && !emptyMeansCwd) return { scope: 'literal', value: '' };
+  if (raw === '' && !emptyMeansCwd) return { scope: 'literal', raw, value: '' };
   const spelling = raw === '' && emptyMeansCwd ? '.' : raw;
   const resolved = path.resolve(canonicalCwd, spelling);
   try {
     const canonical = realpathSync(resolved);
     const repositoryPath = repositoryRelativePath(repositoryRoot, canonical);
-    if (repositoryPath !== null) return { scope: 'worktree', path: repositoryPath };
+    if (repositoryPath !== null) return { scope: 'worktree', raw, path: repositoryPath };
     return {
       scope: 'external',
       raw,
@@ -170,6 +298,7 @@ function normalizedEnvironment(env, canonicalCwd, repositoryRoot) {
     } else if (name === 'PATH') {
       value = {
         scope: 'path-list',
+        raw,
         entries: raw.split(path.delimiter).map((entry) => (
           structuralPathEvidence(entry, canonicalCwd, repositoryRoot, { emptyMeansCwd: true })
         )),
@@ -244,15 +373,19 @@ export function commandBehaviorIdentity(worktree, command, { env = process.env, 
       .filter(Boolean);
     if (tracked.some((entry) => !entry.startsWith('H '))) return null;
 
-    const executable = executableEvidence(canonicalCwd, command, behaviorEnv);
+    const resolvedExecutable = resolveExecutable(canonicalCwd, command, behaviorEnv);
+    if (resolvedExecutable === null) return null;
+    const executable = executableEvidence(canonicalCwd, resolvedExecutable);
+    const payload = commandPayloadEvidence(canonicalCwd, command, behaviorEnv, repositoryRoot, resolvedExecutable);
     const environment = normalizedEnvironment(behaviorEnv, canonicalCwd, repositoryRoot);
-    if (executable === null || environment === null) return null;
+    if (executable === null || payload === null || environment === null) return null;
     const evidence = JSON.stringify({
       version: BEHAVIOR_IDENTITY_VERSION,
       revision,
       command,
-      cwd: relativeCwd,
+      cwd: { raw: worktree, canonical: canonicalCwd, repositoryRelative: relativeCwd },
       executable,
+      payload,
       environment,
     });
     return createHmac('sha256', machineToken(env)).update(evidence).digest('hex');
