@@ -67,6 +67,12 @@ describe('agent-guard conformance (ENG-0138)', () => {
     assert.match(runner, /state\.killTimer = setTimeout\(\(\) => killGroup\('SIGKILL'\)/u);
   });
 
+  test('the runner neither consumes nor records automatic lane peak history', () => {
+    const runner = readFileSync(path.join(root, 'tools/agent-guard/run-guarded.mjs'), 'utf8');
+    assert.doesNotMatch(runner, /\breadLanePeakMb\b/u, 'pre-existing lane peaks must not grant an admission exemption');
+    assert.doesNotMatch(runner, /\brecordLanePeak\b/u, 'a successful polled run must not seed automatic history');
+  });
+
   test('Claude Code registers the guard on Bash', () => {
     const settings = json('.claude/settings.json');
     const bash = (settings.hooks?.PreToolUse ?? []).find((entry) => entry.matcher === 'Bash');
@@ -396,7 +402,7 @@ describe('agent-guard conformance (ENG-0138)', () => {
     }
   });
 
-  test('pressure exemptions require measured lane history, not a caller-declared ceiling (#223)', () => {
+  test('the dormant admission seam requires an explicit proven peak, not a caller-declared ceiling (#223)', () => {
     const budget = deriveBudget(16384);
     const memory = { totalMb: 16384, availableMb: 8000, swapTotalMb: 2048, swapUsedMb: 1200, pressureLevel: 2 };
     assert.equal(decideAdmission({ budget, memory, requestMb: 256 }).reason, 'memory-pressure');
