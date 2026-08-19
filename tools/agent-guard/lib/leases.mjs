@@ -26,7 +26,11 @@ import path from 'node:path';
 import { CORE_LEASE_FIELDS, PROTOCOL_VERSION, ensureStateDirs, lanePeaksDir, leasesDir, machineToken, stateDir } from './protocol.mjs';
 
 const GIT_EXECUTABLES = ['/usr/bin/git', '/bin/git'];
-const BEHAVIOR_IDENTITY_VERSION = 2;
+const BEHAVIOR_IDENTITY_VERSION = 5;
+const UNTRACKED_GUARD_DIAGNOSTICS = new Set([
+  '? .guard/history.jsonl',
+  '? .guard/last-run.json',
+]);
 
 function canonicalWorktreePath(worktree) {
   try {
@@ -123,27 +127,81 @@ function executableEvidence(worktree, command, env) {
   }
 }
 
-function normalizedEnvironment(env, worktree, canonicalWorktree) {
-  const roots = [...new Set([path.resolve(worktree), canonicalWorktree])].sort((left, right) => right.length - left.length);
-  const normalizeWorktreePath = (value) => {
-    for (const root of roots) {
-      if (value === root) return '<worktree>';
-      if (value.startsWith(`${root}${path.sep}`)) return `<worktree>${value.slice(root.length)}`;
-    }
-    return value;
-  };
+function repositoryRelativePath(repositoryRoot, target) {
+  const relative = path.relative(repositoryRoot, target);
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+  return relative ? relative.split(path.sep).join('/') : '.';
+}
+
+// Objects, rather than sentinel strings, keep structural tags disjoint from
+// literal environment values. Only canonical containment earns a portable
+// worktree-relative tag; every other spelling stays bound to its raw and
+// absolute resolution evidence.
+function structuralPathEvidence(raw, canonicalCwd, repositoryRoot, { emptyMeansCwd = false } = {}) {
+  if (raw === '' && !emptyMeansCwd) return { scope: 'literal', value: '' };
+  const spelling = raw === '' && emptyMeansCwd ? '.' : raw;
+  const resolved = path.resolve(canonicalCwd, spelling);
+  try {
+    const canonical = realpathSync(resolved);
+    const repositoryPath = repositoryRelativePath(repositoryRoot, canonical);
+    if (repositoryPath !== null) return { scope: 'worktree', path: repositoryPath };
+    return {
+      scope: 'external',
+      raw,
+      resolved,
+      canonical,
+    };
+  } catch {
+    return { scope: 'unresolved', raw, resolved };
+  }
+}
+
+function normalizedEnvironment(env, canonicalCwd, repositoryRoot) {
   const entries = [];
   for (const name of Object.keys(env).sort()) {
     if (typeof env[name] !== 'string') return null;
-    let value = env[name];
+    const raw = env[name];
     // These are structural checkout locations, not caller-selected behavior:
     // model their repository-relative meaning so equivalent sibling
     // worktrees can share. Every other environment value remains exact.
-    if (name === 'PWD' || name === 'INIT_CWD') value = normalizeWorktreePath(value);
-    else if (name === 'PATH') value = value.split(path.delimiter).map(normalizeWorktreePath).join(path.delimiter);
+    let value = raw;
+    if (name === 'PWD' || name === 'INIT_CWD') {
+      value = structuralPathEvidence(raw, canonicalCwd, repositoryRoot);
+    } else if (name === 'PATH') {
+      value = {
+        scope: 'path-list',
+        entries: raw.split(path.delimiter).map((entry) => (
+          structuralPathEvidence(entry, canonicalCwd, repositoryRoot, { emptyMeansCwd: true })
+        )),
+      };
+    }
     entries.push([name, value]);
   }
   return entries;
+}
+
+export function repositoryWorktreeRoot(worktree, { env = process.env } = {}) {
+  const canonicalCwd = canonicalWorktreePath(worktree);
+  const git = GIT_EXECUTABLES.find((candidate) => existsSync(candidate));
+  if (git === undefined) return null;
+  try {
+    const topLevel = execFileSync(
+      git,
+      ['-C', canonicalCwd, 'rev-parse', '--path-format=absolute', '--show-toplevel'],
+      { encoding: 'utf8', env: gitEnvironment(env), timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] },
+    ).trim();
+    if (!path.isAbsolute(topLevel)) return null;
+    const repositoryRoot = realpathSync(topLevel);
+    const relative = path.relative(repositoryRoot, canonicalCwd);
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+    return repositoryRoot;
+  } catch {
+    return null;
+  }
+}
+
+function repositoryRelativeCwd(repositoryRoot, canonicalCwd) {
+  return repositoryRelativePath(repositoryRoot, canonicalCwd);
 }
 
 /**
@@ -157,29 +215,43 @@ function normalizedEnvironment(env, worktree, canonicalWorktree) {
  */
 export function commandBehaviorIdentity(worktree, command, { env = process.env, behaviorEnv = env } = {}) {
   if (!Array.isArray(command) || command.length === 0 || command.some((part) => typeof part !== 'string')) return null;
-  const canonicalWorktree = canonicalWorktreePath(worktree);
+  const canonicalCwd = canonicalWorktreePath(worktree);
   const git = GIT_EXECUTABLES.find((candidate) => existsSync(candidate));
   if (git === undefined) return null;
 
   try {
     const options = { encoding: 'utf8', env: gitEnvironment(env), timeout: 5000 };
+    const repositoryRoot = repositoryWorktreeRoot(canonicalCwd, { env });
+    if (repositoryRoot === null) return null;
+    const relativeCwd = repositoryRelativeCwd(repositoryRoot, canonicalCwd);
+    if (relativeCwd === null) return null;
     const status = execFileSync(
       git,
-      ['-C', canonicalWorktree, 'status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', '--ignore-submodules=none'],
+      ['-C', canonicalCwd, 'status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', '--ignore-submodules=none'],
       options,
     ).split('\0').filter(Boolean);
     const revision = status.find((entry) => entry.startsWith('# branch.oid '))?.slice('# branch.oid '.length);
-    const dirty = status.some((entry) => !entry.startsWith('# '));
+    const dirty = status.some((entry) => !entry.startsWith('# ') && !UNTRACKED_GUARD_DIAGNOSTICS.has(entry));
     if (!revision || revision === '(initial)' || dirty) return null;
 
-    const executable = executableEvidence(canonicalWorktree, command, behaviorEnv);
-    const environment = normalizedEnvironment(behaviorEnv, worktree, canonicalWorktree);
+    // status/diff intentionally trust index hints such as assume-unchanged and
+    // skip-worktree. Those hints are local performance controls, not evidence
+    // that the worktree bytes still match HEAD, so any such entry makes this a
+    // cold start. With `-v`, ordinary tracked entries are tagged `H`, while an
+    // assume-unchanged tag is lower-case and skip-worktree is tagged `S`.
+    const tracked = execFileSync(git, ['-C', canonicalCwd, 'ls-files', '-v', '-z'], options)
+      .split('\0')
+      .filter(Boolean);
+    if (tracked.some((entry) => !entry.startsWith('H '))) return null;
+
+    const executable = executableEvidence(canonicalCwd, command, behaviorEnv);
+    const environment = normalizedEnvironment(behaviorEnv, canonicalCwd, repositoryRoot);
     if (executable === null || environment === null) return null;
     const evidence = JSON.stringify({
       version: BEHAVIOR_IDENTITY_VERSION,
       revision,
       command,
-      cwd: '.',
+      cwd: relativeCwd,
       executable,
       environment,
     });
