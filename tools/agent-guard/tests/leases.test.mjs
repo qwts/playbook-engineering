@@ -7,7 +7,8 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { once } from 'node:events';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
@@ -31,7 +32,7 @@ import {
   withAdmissionLock,
 } from '../lib/leases.mjs';
 import { ensureStateDirs, leasesDir, machineToken } from '../lib/protocol.mjs';
-import { guardDiagnosticPaths } from '../run-guarded.mjs';
+import { guardedInvocation, guardDiagnosticPaths, POLL_MS, recordProcessTreeSample, releaseGuardedInvocation, startProcessTreeMonitor } from '../run-guarded.mjs';
 
 const roots = [];
 let env;
@@ -320,6 +321,123 @@ describe('liveness probe', () => {
 
   test('process inspection uses a portable absolute system binary', () => {
     assert.match(psExecutable(), /^\/(?:usr\/)?bin\/ps$/u);
+  });
+});
+
+describe('process-tree peak monitoring', () => {
+  test('the guarded command waits behind a private pipe without shell interpolation', () => {
+    const command = ['node', '-e', 'console.log("$HOME; $(whoami)")', 'argument with spaces'];
+    assert.deepEqual(guardedInvocation(command), {
+      executable: '/bin/sh',
+      args: ['-c', 'IFS= read -r _ <&3 || exit 125; exec 3<&-; exec "$@"', 'agent-guard', ...command],
+    });
+  });
+
+  test('monitoring takes a positive sample before scheduling and preserves the largest peak', () => {
+    const tinyState = { peakRssMb: 0, peakProcessCount: 0, commandStarted: false, termAt: null, done: false };
+    assert.deepEqual(
+      recordProcessTreeSample(tinyState, '701 1 701 1\n', 701),
+      { rssMb: 1, processCount: 1 },
+      'a live 1 KB process rounds up to positive whole-MB history',
+    );
+    const emptyState = { peakRssMb: 0, peakProcessCount: 0, commandStarted: false, termAt: null, done: false };
+    const emptySample = recordProcessTreeSample(emptyState, '701 1 701 0\n', 701);
+
+    const state = { peakRssMb: 0, peakProcessCount: 0, commandStarted: false, termAt: null, done: false };
+    const samples = [];
+    const gateTokens = [];
+    const gate = { end: (token) => gateTokens.push(token) };
+    assert.equal(releaseGuardedInvocation(emptyState, emptySample, gate), false, 'a zero-RSS row cannot release the command');
+    assert.equal(
+      releaseGuardedInvocation({ commandStarted: false, termAt: Date.now(), done: false }, { rssMb: 1, processCount: 1 }, gate),
+      false,
+      'an in-flight sample cannot start the command after termination begins',
+    );
+    assert.equal(
+      releaseGuardedInvocation({ commandStarted: false, termAt: null, done: true }, { rssMb: 1, processCount: 1 }, gate),
+      false,
+      'an in-flight sample cannot start the command after exit',
+    );
+    assert.equal(
+      releaseGuardedInvocation({ commandStarted: false, termAt: null, done: false }, { rssMb: 0, processCount: 1 }, gate),
+      false,
+      'a zero-RSS row is not positive measurement evidence',
+    );
+    const sample = () => {
+      const observed = recordProcessTreeSample(state, '701 1 701 1\n702 701 701 1536\n', 701);
+      samples.push({ ...observed, released: releaseGuardedInvocation(state, observed, gate) });
+    };
+    const scheduled = [];
+    const timer = startProcessTreeMonitor(sample, {
+      schedule(callback, intervalMs) {
+        scheduled.push({ callback, intervalMs });
+        return 'timer';
+      },
+    });
+
+    assert.equal(timer, 'timer');
+    assert.deepEqual(samples, [{ rssMb: 2, processCount: 2, released: true }], 'the initial sample runs synchronously and releases only after observing the held tree');
+    assert.deepEqual(gateTokens, ['\n'], 'one buffered token releases the launcher even before it reaches read(1)');
+    assert.equal(scheduled.length, 1);
+    assert.ok(scheduled[0].intervalMs > 0);
+    assert.equal(state.peakRssMb, 2, 'a real non-empty tree always produces a positive whole-MB peak');
+    assert.equal(state.peakProcessCount, 2);
+
+    scheduled[0].callback();
+    assert.equal(state.peakRssMb, 2, 'later smaller/equal samples cannot erase the maximum');
+    assert.equal(samples[1].released, false, 'later samples cannot release the command twice');
+    assert.deepEqual(gateTokens, ['\n']);
+    recordProcessTreeSample(state, '701 1 701 8192\n', 701);
+    assert.equal(state.peakRssMb, 8, 'later larger samples still raise the maximum');
+  });
+
+  test('a successful command that finishes before the polling interval records a positive peak', async () => {
+    const trueExecutable = ['/usr/bin/true', '/bin/true'].find((candidate) => existsSync(candidate));
+    const command = trueExecutable ? [trueExecutable] : [process.execPath, '-e', 'process.exit(0)'];
+    const invocation = guardedInvocation(command);
+    const state = { peakRssMb: 0, peakProcessCount: 0, commandStarted: false, termAt: null, done: false };
+    const child = spawn(invocation.executable, invocation.args, {
+      detached: true,
+      env: process.env,
+      stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
+    });
+    const exited = once(child, 'exit');
+    try {
+      const ps = psExecutable();
+      assert.ok(ps, 'a system ps binary is required for production-equivalent sampling');
+      const psOutput = execFileSync(ps, ['-axo', 'pid=,ppid=,pgid=,rss='], { encoding: 'utf8' });
+      const sample = recordProcessTreeSample(state, psOutput, child.pid);
+      const releasedAt = Date.now();
+      assert.equal(releaseGuardedInvocation(state, sample, child.stdio[3]), true);
+      const [code, signal] = await exited;
+      const durationMs = Date.now() - releasedAt;
+      assert.equal(code, 0);
+      assert.equal(signal, null);
+      assert.ok(durationMs < POLL_MS, `fixture must finish before the ${POLL_MS} ms interval (saw ${durationMs} ms)`);
+      assert.ok(state.peakRssMb > 0, 'the held launcher supplies a positive initial sample');
+
+      const recorded = await recordLanePeak({
+        env,
+        repo: 'fast-e2e',
+        label: 'test:fast-history',
+        command,
+        behaviorIdentity: 'fast-e2e-behavior',
+        peakRssMb: state.peakRssMb,
+      });
+      assert.equal(recorded, true);
+      assert.equal(
+        readLanePeakMb({ env, repo: 'fast-e2e', label: 'test:fast-history', command, behaviorIdentity: 'fast-e2e-behavior' }),
+        state.peakRssMb,
+      );
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // The fast child may have exited between the check and cleanup.
+        }
+      }
+    }
   });
 });
 
