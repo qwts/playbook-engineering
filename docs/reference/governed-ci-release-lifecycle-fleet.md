@@ -44,8 +44,9 @@ own issue-linked PR in its own repository; this one does not modify them.
    from the policy job.
 2. Branch on that output, and on nothing else. `source-policy` runs the
    repository's existing release-input gate exactly as reviewed;
-   `generated-projection` skips it. Do not re-derive the branch, author, or
-   repository identity locally — that is what the shared policy is for.
+   `generated-projection` and a proven `harness-projection` skip it. Do not
+   re-derive identity, provenance, or changed-path purity locally — that is what
+   the shared policy is for.
 3. For the generated projection, validate the version and changelog diff and
    assert a zero semantic release count through the shared
    [`changeset-release-count` action](../../.github/actions/changeset-release-count/action.yml).

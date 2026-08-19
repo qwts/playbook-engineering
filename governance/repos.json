@@ -29,6 +29,15 @@
       "publish": true,
       "status": "active",
       "sharedCi": false,
+      "codexSync": {
+        "enabled": true,
+        "exclude": [],
+        "preserveJsonArrayEntries": {
+          ".claude/settings.json": [
+            "scripts/guard-session-context.mjs"
+          ]
+        }
+      },
       "delta": "Coverage floor 71% lines / 80% branches; acceptance coverage-map update for UI/content changes.",
       "note": ""
     },

@@ -86,6 +86,7 @@ principles; it does not waive the lower priorities.
 | [ENG-0151](ENG-0151-model-routing.md) | Model routing is retrieved from a registry, never recalled | Proposed |
 | [ENG-0160](ENG-0160-semantic-judge-arbitrates-size-ratchets.md) | The semantic judge arbitrates size-ratchet adjustments | Accepted |
 | [ENG-0172](ENG-0172-agent-space-is-durable-per-soul-storage.md) | Agent Space is durable per-soul storage outside bot territory | Proposed |
+| [ENG-0178](ENG-0178-evidence-bound-harness-projections.md) | Governed harness projections are evidence-bound no-release inputs | Accepted |
 
 ## Related
 

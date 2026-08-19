@@ -140,6 +140,8 @@ its root layer is canonical; that manifest field and the local
 `sync-codex.mjs` command retain their original names as compatibility
 interfaces, not identity boundaries.
 
+Fleet snapshots: [hook composition audits](hook-composition-audits.md).
+
 After the source change is reviewed and merged, approve the generated pull
 requests from a normal human checkout:
 
