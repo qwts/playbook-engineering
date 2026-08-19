@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -89,8 +89,8 @@ const withoutGitIdentity = {
   GIT_COMMITTER_NAME: null,
 };
 
-function identityRepository(name, email) {
-  const cwd = mkdtempSync(join(tmpdir(), 'uninstalled-identity-'));
+function configureIdentityRepository(cwd, name, email) {
+  mkdirSync(cwd, { recursive: true });
   for (const args of [
     ['init', '-q'],
     ['config', 'user.name', name],
@@ -103,6 +103,14 @@ function identityRepository(name, email) {
   return cwd;
 }
 
+function identityRepository(name, email) {
+  return configureIdentityRepository(
+    mkdtempSync(join(tmpdir(), 'uninstalled-identity-')),
+    name,
+    email,
+  );
+}
+
 function runGit(cwd, args, overrides = {}) {
   const env = { ...process.env, ...overrides };
   for (const [name, value] of Object.entries(overrides)) {
@@ -111,6 +119,18 @@ function runGit(cwd, args, overrides = {}) {
   const run = spawnSync('git', args, { cwd, encoding: 'utf8', env });
   assert.equal(run.status, 0, `git ${args.join(' ')} failed: ${run.stderr}`);
   return run;
+}
+
+function runEnvGitIdent(cwd, args) {
+  const env = { ...process.env };
+  for (const name of Object.keys(withoutGitIdentity)) delete env[name];
+  const run = spawnSync('env', [...args, 'git', 'var', 'GIT_AUTHOR_IDENT'], {
+    cwd,
+    encoding: 'utf8',
+    env,
+  });
+  assert.equal(run.status, 0, `env ${args.join(' ')} failed: ${run.stderr}`);
+  return run.stdout.trim();
 }
 
 function headIdentity(cwd) {
@@ -261,6 +281,10 @@ test('every managed adapter denies shell spelling and wrapper bypasses', () => {
     'nohup git commit -m x',
     'nice git commit -m x',
     'PATH+=:/tmp git commit -m x',
+    "sh <<'EOF'\ngit commit -m x\nEOF",
+    'cat <<EOF\n$(git commit -m x)\nEOF',
+    "cat <<'EOF'\nbody without terminator",
+    "cat <<'EOF'\ninert\nEOF\ngit commit -m x",
     'git status \\',
     'gh pr create --title x --body y',
     'gh api -XDELETE repos/qwts/example/issues/1',
@@ -308,10 +332,20 @@ test('unambiguous reads and edits remain allowed in every managed adapter', () =
     'git stash list',
     'git stash show',
     'git stash show stash@{0}',
+    'git notes get-ref',
+    'git notes list',
+    'git notes show',
+    'git notes show deadbeef',
+    'git reset HEAD~1',
+    'git reset --hard',
     'gh pr view 1',
     'gh api --method GET repos/qwts/example',
     "echo 'git commit'",
     "printf '%s' 'git push'",
+    "cat > file <<'EOF'\ngit commit -m inert text\nEOF",
+    "python3 - <<'PY'\nprint('ok')\nPY",
+    "cat <<-'EOF'\n\tbody\n\tEOF",
+    "cat <<'EOF' # inert body follows\ntext\nEOF",
   ];
   for (const adapter of managedAdapters) {
     for (const command of benign) adapterAllowed(adapter, command);
@@ -425,6 +459,53 @@ test('repository and command-scoped Git config resolve with Git precedence', () 
   } finally {
     rmSync(unmanaged, { recursive: true, force: true });
     rmSync(human, { recursive: true, force: true });
+  }
+});
+
+test('nested env chdirs compose before Git identity inspection', () => {
+  const root = mkdtempSync(join(tmpdir(), 'uninstalled-nested-env-cwd-'));
+  const actual = configureIdentityRepository(join(root, 'a', 'b'), 'Human User', 'human@example.test');
+  const decoy = configureIdentityRepository(join(root, 'b'), 'ai9d', 'ai9d@example.test');
+  try {
+    assert.match(runEnvGitIdent(root, ['-C', 'a', 'env', '-C', 'b']), /^Human User </u);
+    assert.match(runEnvGitIdent(root, ['-C', 'a', '-C', 'b']), /^ai9d </u);
+    for (const adapter of managedAdapters) {
+      assert.equal(adapterDenied(
+        adapter,
+        'env -C a env --chdir=b git commit -m x',
+        'human',
+        { cwd: root, env: withoutGitIdentity },
+      ), true, `${adapter.path} must inspect the cwd reached by both env wrappers`);
+      adapterAllowed(
+        adapter,
+        'env -C a --chdir=b git commit -m x',
+        'human',
+        { cwd: root, env: withoutGitIdentity },
+      );
+    }
+
+    runGit(actual, ['config', 'user.name', 'ai9d']);
+    runGit(actual, ['config', 'user.email', 'ai9d@example.test']);
+    runGit(decoy, ['config', 'user.name', 'Human User']);
+    runGit(decoy, ['config', 'user.email', 'human@example.test']);
+    assert.match(runEnvGitIdent(root, ['-C', 'a', 'env', '-C', 'b']), /^ai9d </u);
+    assert.match(runEnvGitIdent(root, ['-C', 'a', '-C', 'b']), /^Human User </u);
+    for (const adapter of managedAdapters) {
+      adapterAllowed(
+        adapter,
+        'env --chdir=a env -Cb git commit -m x',
+        'human',
+        { cwd: root, env: withoutGitIdentity },
+      );
+      assert.equal(adapterDenied(
+        adapter,
+        'env --chdir=a -Cb git commit -m x',
+        'human',
+        { cwd: root, env: withoutGitIdentity },
+      ), true, `${adapter.path} must apply only the final chdir of one env wrapper`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
