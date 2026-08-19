@@ -33,7 +33,7 @@ import { acquireLease, commandBehaviorIdentity, heartbeatLease, leaseExists, psE
 import { evaluateLanePolicy, harnessName, isAgentSession } from './lib/policy.mjs';
 import { readMemoryStatus, topConsumers } from './lib/system-memory.mjs';
 
-const POLL_MS = 250;
+export const POLL_MS = 250;
 const HEARTBEAT_MS = 3000;
 const SIGKILL_AFTER_MS = 2000;
 // A runaway can allocate faster than a SIGTERM shutdown completes; past this
@@ -42,6 +42,8 @@ const HARD_KILL_FACTOR = 1.25;
 const MAX_MONITOR_FAILURES = 3;
 const DEFAULT_TIMEOUT_S = 900;
 const RETRY_MS = 5000;
+const GUARDED_LAUNCHER = '/bin/sh';
+const GUARDED_LAUNCHER_SCRIPT = 'IFS= read -r _ <&3 || exit 125; exec 3<&-; exec "$@"';
 
 function note(message) {
   process.stderr.write(`[guard] ${message}\n`);
@@ -143,6 +145,47 @@ export function collectTreeRssKb(psOutput, rootPid) {
     }
   }
   return { totalKb, processCount };
+}
+
+// Start the requested argv only after the monitor has observed its detached
+// process group once. The launcher blocks on a private pipe, so even a
+// sub-POLL_MS command stays measurable; the release token may be buffered
+// before read(1) begins, avoiding a lost-signal race. `"$@"` forwards every
+// argument literally, without evaluating caller-controlled shell text.
+export function guardedInvocation(command) {
+  return {
+    executable: GUARDED_LAUNCHER,
+    args: ['-c', GUARDED_LAUNCHER_SCRIPT, 'agent-guard', ...command],
+  };
+}
+
+export function recordProcessTreeSample(state, psOutput, rootPid) {
+  const { totalKb, processCount } = collectTreeRssKb(psOutput, rootPid);
+  // `ps` reports KB, but the public record is whole MB. A real one-process
+  // tree must never round down to the same zero used for "not measured".
+  const rssMb = processCount > 0 && totalKb > 0 ? Math.max(1, Math.ceil(totalKb / 1024)) : 0;
+  state.peakRssMb = Math.max(state.peakRssMb, rssMb);
+  state.peakProcessCount = Math.max(state.peakProcessCount, processCount);
+  return { rssMb, processCount };
+}
+
+export function releaseGuardedInvocation(state, sample, gate) {
+  if (
+    state.commandStarted ||
+    state.termAt !== null ||
+    state.done ||
+    sample?.processCount <= 0 ||
+    sample?.rssMb <= 0 ||
+    typeof gate?.end !== 'function'
+  ) return false;
+  gate.end('\n');
+  state.commandStarted = true;
+  return true;
+}
+
+export function startProcessTreeMonitor(sample, { schedule = setInterval, intervalMs = POLL_MS } = {}) {
+  sample();
+  return schedule(sample, intervalMs);
 }
 
 function passthrough(command) {
@@ -316,13 +359,19 @@ async function main() {
   mkdirSync(guardDir, { recursive: true });
 
   const startedAt = Date.now();
-  const child = spawn(command[0], command.slice(1), {
-    stdio: 'inherit',
+  const invocation = guardedInvocation(command);
+  const child = spawn(invocation.executable, invocation.args, {
+    // fd 3 is a one-token start gate owned only by this wrapper and launcher.
+    stdio: ['inherit', 'inherit', 'inherit', 'pipe'],
     detached: true, // new process group; kill(-pid) reaches every descendant
     // The marker carries this run's lease id, so a child can prove it is
     // nested inside a real guarded run rather than merely asserting it.
     env: { ...childEnvironment, AGENT_GUARDED: lease.id },
   });
+  const startGate = child.stdio[3];
+  // If the launcher dies before release, the pipe may report EPIPE before the
+  // child exit handler runs. The failed command is already authoritative.
+  startGate.on('error', () => {});
 
   // The admitted reservation must follow the detached group, not this
   // wrapper. A hard-killed wrapper can leave its descendants alive; binding
@@ -337,7 +386,7 @@ async function main() {
     fail('failed to bind the admission lease to the guarded process group');
   }
 
-  const state = { peakRssMb: 0, peakProcessCount: 0, reason: null, termAt: null, done: false, polling: false, lastBeat: 0, monitorFailures: 0, killTimer: null };
+  const state = { peakRssMb: 0, peakProcessCount: 0, reason: null, termAt: null, done: false, polling: false, commandStarted: false, lastBeat: 0, monitorFailures: 0, killTimer: null };
 
   const killGroup = (signal) => {
     try {
@@ -362,7 +411,7 @@ async function main() {
   const timeoutTimer =
     request.timeoutS > 0 ? setTimeout(() => terminate('timeout'), request.timeoutS * 1000) : null;
 
-  const poll = setInterval(() => {
+  const sampleTree = () => {
     if (state.polling) return;
     state.polling = true;
     execFile(ps, ['-axo', 'pid=,ppid=,pgid=,rss='], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => {
@@ -374,10 +423,8 @@ async function main() {
         return;
       }
       state.monitorFailures = 0;
-      const { totalKb, processCount } = collectTreeRssKb(stdout, child.pid);
-      const rssMb = Math.round(totalKb / 1024);
-      state.peakRssMb = Math.max(state.peakRssMb, rssMb);
-      state.peakProcessCount = Math.max(state.peakProcessCount, processCount);
+      const sample = recordProcessTreeSample(state, stdout, child.pid);
+      const { rssMb } = sample;
       // Report real usage so other repos' arbiters stop counting this run's
       // reservation twice (see lib/budget.mjs unmaterializedMb).
       if (Date.now() - state.lastBeat > HEARTBEAT_MS) {
@@ -388,10 +435,18 @@ async function main() {
         if (Date.now() - state.termAt > SIGKILL_AFTER_MS || rssMb > request.ceilingMb * HARD_KILL_FACTOR) killGroup('SIGKILL');
         return;
       }
-      if (rssMb > request.ceilingMb) terminate('rss-limit');
-      else if (request.timeoutS > 0 && Date.now() - startedAt > request.timeoutS * 1000) terminate('timeout');
+      if (rssMb > request.ceilingMb) {
+        terminate('rss-limit');
+        return;
+      }
+      if (request.timeoutS > 0 && Date.now() - startedAt > request.timeoutS * 1000) {
+        terminate('timeout');
+        return;
+      }
+      releaseGuardedInvocation(state, sample, startGate);
     });
-  }, POLL_MS);
+  };
+  const poll = startProcessTreeMonitor(sampleTree);
 
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
     process.on(signal, () => {
