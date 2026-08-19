@@ -644,6 +644,128 @@ describe('command hook', () => {
     assert.equal(evaluateCommand(`env -iP${outside} node scripts/check-traceability.mjs`, local).allow, false);
     assert.equal(evaluateCommand('env --env0-from=/tmp/evil node scripts/check-traceability.mjs', local).allow, false);
     assert.equal(evaluateCommand('env -a alternate node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(
+      evaluateCommand(`env -S"env -P ${outside} node scripts/check-traceability.mjs"`, local).allow,
+      false,
+    );
+    assert.equal(
+      evaluateCommand(`env -S"env --env0-from=/tmp/evil node scripts/check-traceability.mjs"`, local).allow,
+      false,
+    );
+    assert.equal(
+      evaluateCommand(`bash -c "env -S'-iC${outside}\\_node\\_scripts/check-traceability.mjs'"`, local).allow,
+      false,
+    );
+    assert.equal(
+      evaluateCommand(`sh -c "env -S'-iC${outside}\\_node\\_scripts/check-traceability.mjs'"`, local).allow,
+      false,
+    );
+    assert.equal(evaluateCommand(`sudo env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo -u root env -iP${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`doas env -iP${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`flock /tmp/x env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`chrt -b 0 env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo -D ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo --chdir=${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo -D${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo -nD ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo -nu root env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`doas -nu root env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`flock -xw 5 /tmp/x env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`chrt -rD 100 10 node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo --chd ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo --us root env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`flock --wai 5 /tmp/x env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand('chrt --sched-dea 100 10 node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('chrt -b node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand(`chrt -b env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand('chrt --deadline 0 node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('chrt --deadline node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('chrt -U 1 -X 2 -b node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('flock --timeout 5 /tmp/x node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('flock --start 5 /tmp/x node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand(`flock --length 5 /tmp/x env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`flock --fd=9 env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo FOO=bar -D ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo FOO=bar -u root env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo -u root FOO=bar -D ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo FOO=bar --chdir=${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo sudo env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo -u root doas env -iP${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo flock /tmp/x env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`flock /tmp/x sudo env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`chrt -b 0 sudo env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`doas sudo -D ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(
+      evaluateCommand(`sudo sh -c env\\ -iC${outside}\\ node\\ scripts/check-traceability.mjs`, local).allow,
+      false,
+    );
+    assert.equal(evaluateCommand(`sudo sh -c 'env -iC${outside} node scripts/check-traceability.mjs'`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo sh -c "env -iC${outside} node scripts/check-traceability.mjs"`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo sh -c $'env -iC${outside} node scripts/check-traceability.mjs'`, local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c node\\ scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c \'node scripts/check-traceability.mjs\'', local).allow, false);
+    assert.equal(evaluateCommand('doas bash -c "node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('chrt -b bash -c "node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('sudo bash +o errexit -c "node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('sudo bash +O extglob -c "node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c "$PAYLOAD"', local).allow, false);
+    assert.equal(evaluateCommand('doas bash -c "$PAYLOAD"', local).allow, false);
+    assert.equal(evaluateCommand('chrt -b sh -c "$PAYLOAD"', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c "echo ok; node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(
+      evaluateCommand(`sudo sh -c "printf env; env -iC${outside} node scripts/check-traceability.mjs"`, local).allow,
+      false,
+    );
+    assert.equal(evaluateCommand('sudo sh -c "echo ok && npm run test:e2e"', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c "echo ok | npx vitest"', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c "echo ok\nnode scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('sudo bash +o errexit -c "echo ok; node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c echo\\ ok\\;\\ node\\ scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c echo\\ ok\\&\\&\\ npx\\ vitest', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c echo\\ ok\\|\\ ./script.sh', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c "echo ok; python3 script.py"', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c "echo ok; bash script.sh"', local).allow, false);
+    assert.equal(evaluateCommand('{ sudo sh -c "node scripts/check-traceability.mjs"; }', local).allow, false);
+    assert.equal(
+      evaluateCommand('case x in x) sudo sh -c "node scripts/check-traceability.mjs" ;; esac', local).allow,
+      false,
+    );
+    assert.equal(
+      evaluateCommand(`case x in x) sudo env -iC${outside} node scripts/check-traceability.mjs ;; esac`, local).allow,
+      false,
+    );
+    assert.equal(evaluateCommand('>/tmp/log sudo sh -c "node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('> /tmp/log sudo sh -c "node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(
+      evaluateCommand(`2>/tmp/log sudo env -iC${outside} node scripts/check-traceability.mjs`, local).allow,
+      false,
+    );
+    assert.equal(evaluateCommand('< /dev/null sudo node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('3>/tmp/log sudo sh -c "npm run test:e2e"', local).allow, false);
+    assert.equal(evaluateCommand('{fd}>/tmp/log sudo sh -c "node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('< <(printf data) sudo node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(
+      evaluateCommand(`< <(printf data) sudo env -iC${outside} node scripts/check-traceability.mjs`, local).allow,
+      false,
+    );
+    assert.equal(evaluateCommand('< <(printf data) sudo sh -c "npm run test:e2e"', local).allow, false);
+    // A filename, target, username, or ordinary argument named `env` is data,
+    // not an execution wrapper. The fail-closed path starts only at the exact
+    // command position of a supported wrapper shape.
+    for (const benign of [
+      'cp env backup',
+      'mv env backup',
+      'touch env',
+      'make env',
+      'go env',
+      'sudo -u env id',
+      'sudo -i -u env id',
+      'sudo --preserve-groups -u env id',
+      'sudo --no-update -u env id',
+      'flock env true',
+      'flock --nb env true',
+    ]) assert.equal(evaluateCommand(benign, local).allow, true, benign);
     assert.equal(evaluateCommand(`command env -C ${outside} node scripts/check-traceability.mjs`, local).allow, false);
     assert.equal(evaluateCommand(`env -S '-C ${outside} node scripts/check-traceability.mjs'`, local).allow, false);
     assert.equal(evaluateCommand(`env --split-string='--chdir=${outside} node scripts/check-traceability.mjs'`, local).allow, false);

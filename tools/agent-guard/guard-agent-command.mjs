@@ -406,6 +406,7 @@ function maskHeredocBodies(text) {
 
 function scopeWords(text) {
   const words = [];
+  Object.defineProperty(words, 'source', { value: text });
   let index = 0;
   while (index < text.length) {
     while (/\s/u.test(text[index] ?? '')) index += 1;
@@ -424,9 +425,20 @@ function scopeWords(text) {
 
 function prefixReaches(words, index) {
   const marker = '__agent_guard_scope_command__';
-  // Re-stringifying parsed words with literal spaces would split a quoted
-  // operand back into multiple argv slots. Use the same sentinel as escaped
-  // shell blanks so prefix traversal preserves each parsed word boundary.
+  // Preserve shell syntax between argv words (case-arm `)`, redirections,
+  // grouping) while replacing each parsed word with its quote-removed value.
+  // The sentinel keeps a quoted or escaped blank inside one argv slot.
+  if (typeof words.source === 'string') {
+    let prefix = '';
+    let cursor = 0;
+    for (const word of words.slice(0, index)) {
+      prefix += words.source.slice(cursor, word.index);
+      prefix += word.value.replace(/\s/gu, '\u0004');
+      cursor = word.end;
+    }
+    prefix += words.source.slice(cursor, words[index]?.index ?? words.source.length);
+    return commandAfterPrefixes(`${prefix}${marker}`) === marker;
+  }
   const prefix = words.slice(0, index).map((word) => word.value.replace(/\s/gu, '\u0004'));
   return commandAfterPrefixes([...prefix, marker].join(' ')) === marker;
 }
@@ -498,11 +510,209 @@ function envOption(word) {
   return envLongOption(word) ?? envShortOption(word);
 }
 
-function hasUnmodeledEnvInvocation(command) {
+const UNMODELED_EXECUTION_WRAPPER_OPTIONS = {
+  sudo: {
+    long: [
+      '--askpass', '--auth-type', '--background', '--bell', '--chdir', '--chroot', '--close-from', '--command-timeout',
+      '--edit', '--group', '--help', '--host', '--list', '--login', '--login-class', '--non-interactive', '--other-user',
+      '--no-update', '--preserve-env', '--preserve-groups', '--prompt', '--remove-timestamp', '--reset-timestamp', '--role',
+      '--set-home', '--shell', '--stdin', '--type', '--user', '--validate', '--version',
+    ],
+    longOperands: new Set([
+      '--auth-type', '--chdir', '--chroot', '--close-from', '--command-timeout', '--group', '--host', '--login-class',
+      '--other-user', '--prompt', '--role', '--type', '--user',
+    ]),
+    shortFlags: new Set(['A', 'B', 'b', 'E', 'e', 'H', 'i', 'K', 'k', 'l', 'N', 'n', 'P', 'S', 's', 'V', 'v']),
+    shortOperands: new Set(['a', 'C', 'c', 'D', 'g', 'h', 'p', 'R', 'r', 'T', 't', 'U', 'u']),
+  },
+  doas: {
+    long: [],
+    longOperands: new Set(),
+    shortFlags: new Set(['L', 'n', 's']),
+    shortOperands: new Set(['a', 'C', 'u']),
+  },
+  flock: {
+    long: [
+      '--close', '--command', '--conflict-exit-code', '--exclusive', '--fcntl', '--fd', '--help', '--length',
+      '--nb', '--no-fork', '--nonblock', '--nonblocking', '--nofollow', '--shared', '--start', '--timeout', '--unlock',
+      '--verbose', '--version', '--wait',
+    ],
+    longOperands: new Set(['--command', '--conflict-exit-code', '--fd', '--length', '--start', '--timeout', '--wait']),
+    shortFlags: new Set(['e', 'F', 'n', 'o', 's', 'u', 'x']),
+    shortOperands: new Set(['c', 'E', 'w']),
+  },
+  chrt: {
+    long: [
+      '--all-tasks', '--batch', '--clamp-max', '--clamp-min', '--deadline', '--deadline-overrun', '--ext', '--fifo', '--help',
+      '--idle', '--max', '--other', '--pid', '--reclaim-grub', '--reset-on-fork', '--rr', '--sched-deadline', '--sched-period',
+      '--sched-runtime', '--verbose', '--version',
+    ],
+    longOperands: new Set(['--clamp-max', '--clamp-min', '--sched-deadline', '--sched-period', '--sched-runtime']),
+    shortFlags: new Set(['a', 'b', 'd', 'e', 'f', 'G', 'h', 'i', 'm', 'O', 'o', 'p', 'R', 'r', 'v', 'V']),
+    shortOperands: new Set(['D', 'P', 'T', 'U', 'X']),
+  },
+};
+
+function unmodeledWrapperOption(word, grammar) {
+  if (word.startsWith('--')) {
+    const equalsAt = word.indexOf('=');
+    const spelling = equalsAt === -1 ? word : word.slice(0, equalsAt);
+    const matches = grammar.long.includes(spelling)
+      ? [spelling]
+      : grammar.long.filter((option) => option.startsWith(spelling));
+    if (matches.length !== 1) return null;
+    return {
+      consumesNext: equalsAt === -1 && grammar.longOperands.has(matches[0]),
+      name: matches[0],
+      processOnly: matches[0] === '--pid',
+    };
+  }
+  if (!word.startsWith('-') || word.length < 2) return null;
+  const cluster = word.slice(1);
+  let processOnly = false;
+  for (let index = 0; index < cluster.length; index += 1) {
+    const option = cluster[index];
+    if (grammar.shortOperands.has(option)) {
+      // getopt stops at an operand-taking short option. A remaining suffix is
+      // the attached operand; otherwise the next argv word is consumed.
+      return { consumesNext: index === cluster.length - 1, name: option, processOnly };
+    }
+    if (!grammar.shortFlags.has(option)) return null;
+    if (option === 'p') processOnly = true;
+  }
+  return { consumesNext: false, name: null, processOnly };
+}
+
+function unmodeledExecutionCommand(words) {
+  const wrapperAt = words.findIndex((word, index) =>
+    Object.hasOwn(UNMODELED_EXECUTION_WRAPPER_OPTIONS, word.value.split('/').at(-1)) && prefixReaches(words, index));
+  if (wrapperAt < 0) return null;
+  const wrapper = words[wrapperAt].value.split('/').at(-1);
+  const grammar = UNMODELED_EXECUTION_WRAPPER_OPTIONS[wrapper];
+  let index = wrapperAt + 1;
+  let processOnly = false;
+  let flockFd = false;
+  const dataIndices = new Set();
+  const uncertain = () => ({
+    starts: words.map((_, candidate) => candidate).slice(wrapperAt + 1).filter((candidate) => !dataIndices.has(candidate)),
+    uncertain: true,
+    wrapperAt,
+  });
+  while (index < words.length) {
+    if ((wrapper === 'sudo' || wrapper === 'doas') && /^\w+=/u.test(words[index].value)) {
+      dataIndices.add(index);
+      index += 1;
+      continue;
+    }
+    if (!words[index].value.startsWith('-')) break;
+    const option = words[index].value;
+    if (option === '--') {
+      index += 1;
+      break;
+    }
+    const parsed = unmodeledWrapperOption(option, grammar);
+    if (parsed === null) return uncertain();
+    processOnly ||= wrapper === 'chrt' && parsed.processOnly;
+    flockFd ||= wrapper === 'flock' && parsed.name === '--fd';
+    if (parsed.consumesNext && index + 1 >= words.length) return uncertain();
+    if (parsed.consumesNext) dataIndices.add(index + 1);
+    index += parsed.consumesNext ? 2 : 1;
+  }
+  if (processOnly || index >= words.length) return { starts: [], uncertain: false, wrapperAt };
+  if (wrapper === 'sudo' || wrapper === 'doas') {
+    return { starts: [index], uncertain: false, wrapperAt };
+  }
+  if (wrapper === 'flock') {
+    if (!flockFd) {
+      dataIndices.add(index);
+      index += 1;
+    }
+    return { starts: index < words.length ? [index] : [], uncertain: false, wrapperAt };
+  }
+  // Modern chrt accepts an optional positional priority. Treat a numeric word
+  // as data; otherwise it is the executable (for example `chrt -b node ...`).
+  if (/^[+-]?\d+$/u.test(words[index].value)) index += 1;
+  return { starts: index < words.length ? [index] : [], uncertain: false, wrapperAt };
+}
+
+function unmodeledExecutionStarts(words, depth = 0) {
+  if (depth > 16) return words.map((_, index) => index);
+  const execution = unmodeledExecutionCommand(words);
+  if (execution === null) return [];
+  const starts = new Set(execution.starts);
+  for (const start of execution.starts) {
+    if (start <= execution.wrapperAt) continue;
+    for (const nested of unmodeledExecutionStarts(words.slice(start), depth + 1)) starts.add(start + nested);
+  }
+  return [...starts];
+}
+
+function splitOuterCommandSegments(command) {
+  const segments = [];
+  let start = 0;
+  let quote = null;
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index];
+    if (quote !== null) {
+      if (character === '\\' && quote !== "'") index += 1;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '\\') {
+      index += 1;
+      continue;
+    }
+    if (character === "'" || character === '"' || character === '`') {
+      quote = character;
+      continue;
+    }
+    if (!/[;\n|&]/u.test(character)) continue;
+    if (character === '&' && (command[index - 1] === '>' || command[index + 1] === '>')) continue;
+    const segment = command.slice(start, index).trim();
+    if (segment) segments.push(segment);
+    if (command[index + 1] === character && (character === '|' || character === '&')) index += 1;
+    start = index + 1;
+  }
+  const tail = command.slice(start).trim();
+  if (tail) segments.push(tail);
+  return segments;
+}
+
+function unmodeledWrapperShellPayloads(command) {
+  const payloads = [];
+  for (const segment of splitOuterCommandSegments(command)) {
+    const words = scopeWords(segment);
+    for (const start of unmodeledExecutionStarts(words)) {
+      if (!/(?:^|\/)(?:ba|da|z)?sh$/u.test(words[start]?.value ?? '')) continue;
+      for (let index = start + 1; index < words.length - 1; index += 1) {
+        const option = words[index].value;
+        if (option === '-c' || /^-[A-Za-z]*c[A-Za-z]*$/u.test(option)) {
+          payloads.push(words[index + 1].value);
+          break;
+        }
+        if (/^(?:-[A-Za-z]*[oO]|\+[oO]|--(?:option|shopt)|--rcfile|--init-file)$/u.test(option)) index += 1;
+        else if (!option.startsWith('-') && !option.startsWith('+')) break;
+      }
+    }
+  }
+  return payloads;
+}
+
+function envMayExecuteBehindUnknownHead(words, index) {
+  return unmodeledExecutionStarts(words).includes(index);
+}
+
+function hasUnmodeledEnvInvocation(command, depth = 0) {
   for (const segment of splitSegments(command)) {
     const words = scopeWords(segment);
     for (let index = 0; index < words.length; index += 1) {
-      if (words[index].value.split('/').at(-1) !== 'env' || !prefixReaches(words, index)) continue;
+      if (words[index].value.split('/').at(-1) !== 'env') continue;
+      const directlyReached = prefixReaches(words, index);
+      if (!directlyReached && !envMayExecuteBehindUnknownHead(words, index)) continue;
+      // An unmodeled wrapper may execute env, but its option operands and cwd
+      // semantics are not represented by prefixReaches. Refuse the reviewed-
+      // helper shortcut rather than authenticating the wrong execution path.
+      if (!directlyReached) return true;
       for (let optionAt = index + 1; optionAt < words.length; optionAt += 1) {
         const word = words[optionAt];
         if (/^\w+=/u.test(word.value)) continue;
@@ -529,10 +739,44 @@ function hasUnmodeledEnvInvocation(command) {
           option.name === '--split-string' &&
           /[\\$]/u.test(segment.slice(operand.index, operand.end))
         ) return true;
+        if (option.name === '--split-string') {
+          const payload = option.value === null ? operand.value : envSplitStringOption(word.value).value;
+          if (hasUnmodeledEnvCommand(payload, depth + 1)) return true;
+        }
       }
     }
   }
   return false;
+}
+
+function hasUnmodeledEnvCommand(command, depth = 0) {
+  if (depth > 16) return true;
+  if (hasUnmodeledEnvInvocation(command, depth)) return true;
+  const executablePayloads = [];
+  const effective = stripInertText(command, { executablePayloads });
+  if (effective !== command && hasUnmodeledEnvInvocation(effective, depth)) return true;
+  return [...executablePayloads, ...unmodeledWrapperShellPayloads(command)]
+    .some((payload) => hasUnmodeledEnvCommand(payload, depth + 1));
+}
+
+function hasRuntimeScriptBehindUnmodeledWrapper(command, depth = 0) {
+  if (depth > 16) return true;
+  const direct = splitSegments(command).some((segment) => {
+    const words = scopeWords(segment);
+    return unmodeledExecutionStarts(words).some((start) => {
+      const candidate = words
+        .slice(start)
+        .map((word) => word.value.replace(/\s/gu, '\u0004'))
+        .join(' ');
+      return runtimeProgram(candidate)?.kind === 'file';
+    });
+  });
+  if (direct) return true;
+  return unmodeledWrapperShellPayloads(command).some((payload) => {
+    const effective = stripInertText(payload);
+    return splitSegments(effective).some((segment) => runtimeProgram(segment)?.kind === 'file') ||
+      hasRuntimeScriptBehindUnmodeledWrapper(payload, depth + 1);
+  });
 }
 
 function directoryOptionTargets(segment) {
@@ -1486,7 +1730,7 @@ function isExecutableQuotedWord(scanned, word) {
 // the patterns can see them, executable argv words are preserved, and ordinary
 // quoted text is blanked. Order matters — a commit message that merely mentions
 // `bash -c "npm run test:e2e"` is blanked before its inner text is inspected.
-export function stripInertText(command) {
+export function stripInertText(command, { executablePayloads = null } = {}) {
   let scanned = '';
   let rest = transformHeredocs(command, 'strip');
   for (;;) {
@@ -1501,6 +1745,7 @@ export function stripInertText(command) {
         : quoted.startsWith("'")
           ? quoted.slice(1, -1)
           : quoted.slice(1, -1).replace(/\\(["\\$`])/gu, '$1');
+      executablePayloads?.push(inner);
       rest = `${inner}${rest}`;
       // `env -S/--split-string` expands its operand into the current argv;
       // preserve the `env` wrapper so directory options in that operand keep
@@ -2070,12 +2315,93 @@ export function heavyLaneFor(command) {
   return null;
 }
 
+function maskNestedShellWords(text) {
+  let masked = '';
+  let quote = null;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === '\\') {
+      masked += text.slice(index, index + 2);
+      index += 1;
+      continue;
+    }
+    if (quote === "'") {
+      masked += character;
+      if (character === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      if (character === '"') {
+        quote = null;
+      }
+      masked += character;
+      continue;
+    }
+    if (character === "'") {
+      quote = "'";
+      masked += character;
+      continue;
+    }
+    if (character === '"') {
+      quote = '"';
+      masked += character;
+      continue;
+    }
+    const substitution = text[index + 1] === '(' && (character === '<' || character === '>');
+    if (!substitution) {
+      masked += character;
+      continue;
+    }
+    let depth = 1;
+    let innerQuote = null;
+    let end = index + 2;
+    for (; end < text.length && depth > 0; end += 1) {
+      const inner = text[end];
+      if (inner === '\\') {
+        end += 1;
+      } else if (innerQuote !== null) {
+        if (inner === innerQuote) innerQuote = null;
+      } else if (inner === "'" || inner === '"' || inner === '`') {
+        innerQuote = inner;
+      } else if (inner === '(') {
+        depth += 1;
+      } else if (inner === ')') {
+        depth -= 1;
+      }
+    }
+    if (depth !== 0) {
+      masked += character;
+      continue;
+    }
+    masked += 'AGENT_GUARD_NESTED_SHELL_WORD';
+    index = end - 1;
+  }
+  return masked;
+}
+
 function commandAfterPrefixes(segment) {
-  const tokens = normalizeUnquotedEscapes(segment).split(/\s+/u).filter(Boolean);
+  const tokens = normalizeUnquotedEscapes(maskNestedShellWords(segment)).split(/\s+/u).filter(Boolean);
   let index = 0;
   while (index < tokens.length) {
-    while (/^\w+=\S*$/u.test(tokens[index] ?? '')) index += 1;
-    if (/^(?:then|do|else|elif|if|while|until|coproc|!)$/u.test(tokens[index] ?? '')) {
+    for (;;) {
+      if (/^\w+=\S*$/u.test(tokens[index] ?? '')) {
+        index += 1;
+        continue;
+      }
+      const token = tokens[index] ?? '';
+      const redirection = /^(?:(?:\d*|\{[A-Za-z_][A-Za-z0-9_]*\})(?:<<<|<<|<>|>>|>\||<&|>&|<|>)|&>>?)$/u;
+      const attachedRedirection = /^(?:(?:\d*|\{[A-Za-z_][A-Za-z0-9_]*\})(?:<<<|<<|<>|>>|>\||<&|>&|<|>)|&>>?).+$/u;
+      if (redirection.test(token)) {
+        index += 2;
+        continue;
+      }
+      if (attachedRedirection.test(token)) {
+        index += 1;
+        continue;
+      }
+      break;
+    }
+    if (/^(?:then|do|else|elif|if|while|until|coproc|!|\{|\})$/u.test(tokens[index] ?? '')) {
       index += 1;
       continue;
     }
@@ -2372,10 +2698,17 @@ export function hasProtectedEnvironmentAssignment(command) {
   return false;
 }
 
-export function evaluateCommand(command, { cwd = process.cwd() } = {}) {
+export function evaluateCommand(command, { cwd = process.cwd(), depth = 0 } = {}) {
   if (typeof command !== 'string' || command.length === 0) return { allow: true };
+  if (depth > 16) {
+    return {
+      allow: false,
+      reason: `Blocked a recursively nested executable command payload that exceeds the static policy depth. ${USE_ENTRYPOINT}`,
+    };
+  }
   const dynamicCommand = maskNonShellHeredocs(command);
-  if (hasUnmodeledEnvInvocation(dynamicCommand)) {
+  const wrapperShellPayloads = unmodeledWrapperShellPayloads(dynamicCommand);
+  if (hasUnmodeledEnvCommand(dynamicCommand)) {
     return {
       allow: false,
       reason:
@@ -2409,13 +2742,21 @@ export function evaluateCommand(command, { cwd = process.cwd() } = {}) {
       reason: `Blocked a runtime-computed identity removal before run-guarded.mjs: it could erase the active harness marker. ${GUIDANCE}`,
     };
   }
-  if (hasDynamicPackageScript(dynamicCommand) || hasDynamicExecutionPosition(dynamicCommand)) {
+  if (
+    hasDynamicPackageScript(dynamicCommand) ||
+    hasDynamicExecutionPosition(dynamicCommand) ||
+    wrapperShellPayloads.some((payload) => hasRuntimeShellExpansion(payload))
+  ) {
     return {
       allow: false,
       reason:
         'Blocked a runtime-computed executable, package command, or script: shell expansion can resolve to a protected ' +
         `lane after static admission checks. Use the guarded entrypoint with literal command slots. ${USE_ENTRYPOINT}`,
     };
+  }
+  for (const payload of wrapperShellPayloads) {
+    const nested = evaluateCommand(payload, { cwd, depth: depth + 1 });
+    if (!nested.allow) return nested;
   }
   if (hasRuntimeStdinProgram(command)) {
     return {
@@ -2424,6 +2765,18 @@ export function evaluateCommand(command, { cwd = process.cwd() } = {}) {
     };
   }
   const effective = stripInertText(command);
+
+  if (
+    hasRuntimeScriptBehindUnmodeledWrapper(command) ||
+    (effective !== command && hasRuntimeScriptBehindUnmodeledWrapper(effective))
+  ) {
+    return {
+      allow: false,
+      reason:
+        'Blocked direct runtime script dispatch behind an execution wrapper whose cwd and executable-selection semantics cannot be proven statically. ' +
+        `Use the repository's guarded entrypoint without sudo, doas, flock, or chrt. ${USE_ENTRYPOINT}`,
+    };
+  }
 
   // Re-run the dynamic-script check over wrapper argument tails on the
   // inert-stripped text: quoted mentions are blanked by now, so this cannot
