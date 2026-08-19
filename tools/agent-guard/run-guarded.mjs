@@ -29,7 +29,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { clampCeiling, decideAdmission, deriveBudgetForMemory, laneReservationMb } from './lib/budget.mjs';
-import { acquireLease, heartbeatLease, leaseExists, psExecutable, readLanePeakMb, readLeases, recordLanePeak, releaseLease, retargetLease, withAdmissionLock } from './lib/leases.mjs';
+import { acquireLease, heartbeatLease, leaseExists, psExecutable, readLanePeakMb, readLeases, recordLanePeak, releaseLease, repositoryIdentity, retargetLease, withAdmissionLock } from './lib/leases.mjs';
 import { evaluateLanePolicy, harnessName, isAgentSession } from './lib/policy.mjs';
 import { readMemoryStatus, topConsumers } from './lib/system-memory.mjs';
 
@@ -234,6 +234,7 @@ async function main() {
   }
 
   const worktree = process.cwd();
+  const repoIdentity = repositoryIdentity(worktree);
   const guardDir = path.join(worktree, '.guard');
 
   // Plan with what the lane actually costs, enforce with the ceiling. Peaks
@@ -241,7 +242,7 @@ async function main() {
   // RSS it measured, never from worktree files an agent can edit (#203
   // review) — so a trustworthy recent peak lowers the reservation while the
   // kill at the ceiling is unchanged by history.
-  const lanePeakMb = readLanePeakMb({ env: process.env, repo: path.basename(worktree), label: options.label });
+  const lanePeakMb = readLanePeakMb({ env: process.env, repo: repoIdentity, label: options.label });
   request.reserveMb = laneReservationMb(request.ceilingMb, lanePeakMb);
   if (request.reserveMb < request.ceilingMb) {
     note(`reserving ${request.reserveMb} MB from the lane's recent measured peak (${lanePeakMb} MB); the enforced ceiling stays ${request.ceilingMb} MB.`);
@@ -385,7 +386,7 @@ async function main() {
     }
     // Only a completed run's peak informs future reservations: a run killed
     // at the ceiling or timed out proves nothing about steady-state cost.
-    if (code === 0) recordLanePeak({ env: process.env, repo: path.basename(worktree), label: options.label, peakRssMb: state.peakRssMb });
+    if (code === 0) recordLanePeak({ env: process.env, repo: repoIdentity, label: options.label, peakRssMb: state.peakRssMb });
     process.exit(code ?? (signal ? 1 : 0));
   });
 

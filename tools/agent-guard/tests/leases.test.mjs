@@ -6,7 +6,7 @@
 // a different hat.
 
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -21,6 +21,7 @@ import {
   psExecutable,
   readLeases,
   releaseLease,
+  repositoryIdentity,
   retargetLease,
   readLanePeakMb,
   recordLanePeak,
@@ -319,6 +320,45 @@ describe('liveness probe', () => {
 });
 
 describe('lane peak store (#180)', () => {
+  test('linked worktrees share canonical history without colliding with same-basename clones (#236)', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'agent-guard-repos-'));
+    roots.push(root);
+    const first = path.join(root, 'first', 'app');
+    const second = path.join(root, 'second', 'app');
+    const sibling = path.join(root, 'linked-worktree');
+    mkdirSync(first, { recursive: true });
+    mkdirSync(second, { recursive: true });
+
+    const git = ['/usr/bin/git', '/bin/git'].find((candidate) => {
+      try {
+        execFileSync(candidate, ['--version'], { stdio: 'ignore' });
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(git, 'a system Git binary is required to resolve common-checkout identity');
+    for (const checkout of [first, second]) {
+      execFileSync(git, ['-C', checkout, 'init', '--quiet'], { stdio: 'ignore' });
+      execFileSync(git, ['-C', checkout, '-c', 'user.name=Agent Guard Test', '-c', 'user.email=guard@example.invalid', 'commit', '--quiet', '--allow-empty', '-m', 'fixture'], { stdio: 'ignore' });
+    }
+    execFileSync(git, ['-C', first, 'worktree', 'add', '--quiet', '--detach', sibling], { stdio: 'ignore' });
+
+    const firstIdentity = repositoryIdentity(first);
+    assert.equal(repositoryIdentity(sibling), firstIdentity, 'sibling worktrees must share measured peaks');
+    assert.notEqual(repositoryIdentity(second), firstIdentity, 'same-basename independent repositories must not share peaks');
+    assert.equal(
+      repositoryIdentity(sibling, { env: { ...process.env, GIT_DIR: path.join(second, '.git'), GIT_WORK_TREE: second } }),
+      firstIdentity,
+      'caller-controlled Git identity variables must not redirect peak history',
+    );
+
+    const peakEnv = scratchEnv();
+    recordLanePeak({ env: peakEnv, repo: firstIdentity, label: 'test', peakRssMb: 900 });
+    assert.equal(readLanePeakMb({ env: peakEnv, repo: repositoryIdentity(sibling), label: 'test' }), 900);
+    assert.equal(readLanePeakMb({ env: peakEnv, repo: repositoryIdentity(second), label: 'test' }), null);
+  });
+
   test('peaks round-trip through the protected store and keep the max of a rolling window', () => {
     const env = { AGENT_GUARD_STATE_DIR: mkdtempSync(path.join(tmpdir(), 'agent-guard-peaks-')) };
     assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test' }), null);
@@ -329,6 +369,10 @@ describe('lane peak store (#180)', () => {
     // Other lanes and repos do not bleed together.
     assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'other' }), null);
     assert.equal(readLanePeakMb({ env, repo: 'cartograph', label: 'test' }), null);
+    recordLanePeak({ env, repo: '/repos/a::b', label: 'test', peakRssMb: 400 });
+    recordLanePeak({ env, repo: '/repos/a', label: 'b::test', peakRssMb: 800 });
+    assert.equal(readLanePeakMb({ env, repo: '/repos/a::b', label: 'test' }), 400);
+    assert.equal(readLanePeakMb({ env, repo: '/repos/a', label: 'b::test' }), 800);
     // Junk values are never recorded or returned.
     recordLanePeak({ env, repo: 'overlook', label: 'junk', peakRssMb: Number.NaN });
     recordLanePeak({ env, repo: 'overlook', label: 'junk', peakRssMb: -5 });

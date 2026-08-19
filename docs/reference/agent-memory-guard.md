@@ -35,6 +35,9 @@ sanctioned local lane needs more. The cap is enforced on the running process
 tree, and what admission *reserves* is smaller still when the lane has a
 recent measured peak: peak plus a conservative margin, so a lane that
 measures well under the cap no longer books the full cap against admission.
+Peak history is keyed by the checkout's canonical Git common directory, so all
+linked worktrees share measurements while unrelated clones remain isolated even
+when their directory names match.
 
 ## Admission
 

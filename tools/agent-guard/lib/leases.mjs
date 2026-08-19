@@ -18,12 +18,65 @@
 // there: `.local` ↔ `.lan` drift made crashed same-machine locks permanently
 // unreclaimable, so the crash-recovery path became the outage.
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { CORE_LEASE_FIELDS, PROTOCOL_VERSION, ensureStateDirs, lanePeaksDir, leasesDir, machineToken, stateDir } from './protocol.mjs';
+
+const GIT_EXECUTABLES = ['/usr/bin/git', '/bin/git'];
+
+/**
+ * A stable identity for peak history shared by every worktree of one checkout.
+ *
+ * Git's common directory is the one filesystem object shared by a checkout's
+ * primary worktree and all of its linked worktrees. Canonicalising it also
+ * prevents symlink spellings of the same checkout from splitting history.
+ * Separate clones keep separate common directories even when their worktree
+ * basenames match. If Git cannot identify the checkout, fall back to the
+ * canonical full worktree path: losing history is safe; aliasing repositories
+ * is not.
+ */
+export function repositoryIdentity(worktree, { env = process.env } = {}) {
+  let canonicalWorktree;
+  try {
+    canonicalWorktree = realpathSync(worktree);
+  } catch {
+    canonicalWorktree = path.resolve(worktree);
+  }
+
+  const git = GIT_EXECUTABLES.find((candidate) => existsSync(candidate));
+  if (git === undefined) return canonicalWorktree;
+
+  // Git identity variables are caller-controlled process state. Letting them
+  // redirect this lookup would let a run borrow another checkout's light-lane
+  // history. Resolve from the worktree on disk instead.
+  const gitEnv = { ...env };
+  for (const name of Object.keys(gitEnv)) {
+    if (name.startsWith('GIT_')) delete gitEnv[name];
+  }
+  try {
+    const raw = execFileSync(git, ['-C', canonicalWorktree, 'rev-parse', '--path-format=absolute', '--git-common-dir'], {
+      encoding: 'utf8',
+      env: gitEnv,
+      timeout: 2000,
+    }).trim();
+    const commonDir = path.isAbsolute(raw) ? raw : path.resolve(canonicalWorktree, raw);
+    return realpathSync(commonDir);
+  } catch {
+    return canonicalWorktree;
+  }
+}
+
+function lanePeakFile(env, repo, label) {
+  // Full canonical paths are deliberately part of the identity, but must not
+  // become filenames: long worktree roots can exceed a filesystem component
+  // limit, and delimiter-based concatenation has ambiguous edge cases. Hash
+  // the structured tuple instead.
+  const digest = createHash('sha256').update(JSON.stringify([repo, label])).digest('hex');
+  return path.join(lanePeaksDir(env), `${digest}.json`);
+}
 
 export function isProcessAlive(pid) {
   try {
@@ -243,7 +296,7 @@ const LOCK_POLL_MS = 50;
  */
 export function recordLanePeak({ env = process.env, repo, label, peakRssMb }) {
   if (!Number.isFinite(peakRssMb) || peakRssMb <= 0) return;
-  const file = path.join(lanePeaksDir(env), `${encodeURIComponent(`${repo}::${label}`)}.json`);
+  const file = lanePeakFile(env, repo, label);
   let peaks = [];
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
@@ -262,7 +315,7 @@ export function recordLanePeak({ env = process.env, repo, label, peakRssMb }) {
 
 /** The largest recent recorded peak for a lane, or null without history. */
 export function readLanePeakMb({ env = process.env, repo, label }) {
-  const file = path.join(lanePeaksDir(env), `${encodeURIComponent(`${repo}::${label}`)}.json`);
+  const file = lanePeakFile(env, repo, label);
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
     const peaks = Array.isArray(parsed) ? parsed.filter((value) => Number.isFinite(value) && value > 0) : [];
