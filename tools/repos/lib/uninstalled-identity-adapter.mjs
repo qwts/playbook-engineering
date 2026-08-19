@@ -32,6 +32,23 @@ const INPUT_DERIVED_GIT_AUTHORS = new Set([
   'pull',
   'rebase',
 ]);
+const GIT_RECOVERY_SUBCOMMANDS = new Set([
+  'am',
+  'cherry-pick',
+  'merge',
+  'rebase',
+  'revert',
+]);
+const GIT_GLOBAL_QUERY_OPTIONS = new Set([
+  '-h',
+  '--help',
+  '-v',
+  '--version',
+  '--exec-path',
+  '--html-path',
+  '--info-path',
+  '--man-path',
+]);
 const GIT_NON_PUBLISH_SUBCOMMANDS = new Set([
   'add',
   'annotate',
@@ -560,6 +577,13 @@ function shellLex(command) {
     else if (ch === '{' && !wordStarted && /(?:\s|$)/u.test(text[i + 1] || '')) operator = ch;
     else if (ch === '}' && !wordStarted && /(?:\s|;|&|\||$)/u.test(text[i + 1] || '')) operator = ch;
     if (operator) {
+      // In zsh an adjacent parenthesis can be part of executable syntax such
+      // as a glob qualifier (`*(e:'command':)`). Splitting it into a benign
+      // word plus a shell group would hide the qualifier's command from the
+      // recursive scan. A separated `(` remains an ordinary control operator.
+      if (operator === '(' && wordStarted) {
+        return { safe: false, substitutions, tokens };
+      }
       if (REDIRECTION_OPERATORS.has(operator) && wordStarted && /^\d+$/u.test(value) && !dynamic) {
         value = '';
         wordStarted = false;
@@ -603,9 +627,11 @@ function stripRedirections(tokens) {
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (token.type === 'operator' && REDIRECTION_OPERATORS.has(token.value)) {
-      if (token.value === '<<<') return { safe: false, words: [] };
       const target = tokens[i + 1];
-      if (!target || target.type !== 'word' || target.dynamic) return { safe: false, words: [] };
+      // Redirection expansion produces a filename, descriptor, or input data,
+      // not another command. shellLex has already extracted every command
+      // substitution from dynamic operands for recursive classification.
+      if (!target || target.type !== 'word') return { safe: false, words: [] };
       i += 1;
       continue;
     }
@@ -813,6 +839,11 @@ function parseGit(words, context) {
       i += 2;
       continue;
     }
+    if (GIT_GLOBAL_QUERY_OPTIONS.has(option.value)) {
+      return i === words.length - 1
+        ? { operations: [], safe: true }
+        : unsafeScan();
+    }
     if (takesValue.has(option.value)) {
       const argument = words[i + 1];
       if (!argument || argument.dynamic) return unsafeScan();
@@ -854,6 +885,17 @@ function parseGit(words, context) {
   if (value === 'notes') {
     const action = words[i + 1];
     if (action && !action.dynamic && ['get-ref', 'list', 'show'].includes(action.value)) {
+      return { operations: [], safe: true };
+    }
+  }
+  if (GIT_RECOVERY_SUBCOMMANDS.has(value)) {
+    const action = words[i + 1];
+    if (
+      words.length === i + 2
+      && action
+      && !action.dynamic
+      && ['--abort', '--quit'].includes(action.value)
+    ) {
       return { operations: [], safe: true };
     }
   }
@@ -1380,6 +1422,8 @@ export function renderUninstalledIdentitySource(dialect) {
     `const REDIRECTION_OPERATORS = new Set(${JSON.stringify([...REDIRECTION_OPERATORS])});`,
     `const GIT_COMMIT_SUBCOMMANDS = new Set(${JSON.stringify([...GIT_COMMIT_SUBCOMMANDS])});`,
     `const INPUT_DERIVED_GIT_AUTHORS = new Set(${JSON.stringify([...INPUT_DERIVED_GIT_AUTHORS])});`,
+    `const GIT_RECOVERY_SUBCOMMANDS = new Set(${JSON.stringify([...GIT_RECOVERY_SUBCOMMANDS])});`,
+    `const GIT_GLOBAL_QUERY_OPTIONS = new Set(${JSON.stringify([...GIT_GLOBAL_QUERY_OPTIONS])});`,
     `const GIT_NON_PUBLISH_SUBCOMMANDS = new Set(${JSON.stringify([...GIT_NON_PUBLISH_SUBCOMMANDS])});`,
     `const SHELLS = new Set(${JSON.stringify([...SHELLS])});`,
     `const INDIRECT_EXECUTORS = new Set(${JSON.stringify([...INDIRECT_EXECUTORS])});`,

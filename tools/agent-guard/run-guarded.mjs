@@ -4,8 +4,8 @@
 // governed repo carried its own drifting copy of.
 //
 // What it does, in order:
-//   1. Gets out of the way for nested guarded commands.
-//   2. Applies the agent-vs-human lane policy (lib/policy.mjs).
+//   1. Applies the agent-vs-human lane policy (lib/policy.mjs).
+//   2. Gets out of the way for allowed nested guarded commands.
 //   3. Derives the ceiling from the effective machine/cgroup total and CLAMPS the request down to
 //      it — an `--rss-mb 8192` inherited from an old npm script becomes 3072 on
 //      an 8 GB machine instead of a ceiling that can never trip.
@@ -24,12 +24,12 @@
 //        AGENT_GUARDED=1 (set for children so nested guards pass through).
 
 import { execFile, spawn } from 'node:child_process';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
 import { clampCeiling, decideAdmission, deriveBudgetForMemory, laneReservationMb } from './lib/budget.mjs';
-import { acquireLease, commandBehaviorIdentity, heartbeatLease, leaseExists, psExecutable, readLanePeakMb, readLeases, recordLanePeak, releaseLease, repositoryIdentity, retargetLease, withAdmissionLock } from './lib/leases.mjs';
+import { acquireLease, commandBehaviorIdentity, heartbeatLease, leaseExists, psExecutable, readLanePeakMb, readLeases, recordLanePeak, releaseLease, repositoryIdentity, repositoryWorktreeRoot, retargetLease, withAdmissionLock } from './lib/leases.mjs';
 import { evaluateLanePolicy, harnessName, isAgentSession } from './lib/policy.mjs';
 import { readMemoryStatus, topConsumers } from './lib/system-memory.mjs';
 
@@ -93,6 +93,37 @@ export function resolveRequest(options, env, budget) {
     heapMb: Math.max(256, Math.round(pick('AGENT_GUARD_HEAP_MB', options.heapMb, Math.floor(ceiling.ceilingMb / 2)))),
     timeoutS: pick('AGENT_GUARD_TIMEOUT_S', options.timeoutS, DEFAULT_TIMEOUT_S),
     waitS: pick('AGENT_GUARD_WAIT_S', options.waitS, isAgentSession(env) ? 0 : 180),
+  };
+}
+
+/**
+ * Decide whether this invocation is refused, is already covered by its
+ * parent's lease, or needs its own admission. Lane policy comes first: a live
+ * lease proves that admission and enforcement already exist for the process
+ * group, but it does not authorize a different command hidden inside an
+ * innocuously named guarded package script (#235).
+ */
+export function resolveInvocation({ options, command, env = process.env, processGroupId }) {
+  const commandLine = command.join(' ');
+  const policy = evaluateLanePolicy({ label: options.label, command: commandLine, env });
+  if (!policy.allowed) return { action: 'refuse', commandLine, policy };
+  if (leaseExists(env.AGENT_GUARDED, env, { processGroupId })) return { action: 'passthrough', commandLine, policy };
+  return { action: 'admit', commandLine, policy };
+}
+
+export function guardDiagnosticPaths(worktree, { env = process.env } = {}) {
+  let cwd;
+  try {
+    cwd = realpathSync(worktree);
+  } catch {
+    cwd = path.resolve(worktree);
+  }
+  const guardDir = path.join(repositoryWorktreeRoot(cwd, { env }) ?? cwd, '.guard');
+  const lastRunPath = path.join(guardDir, 'last-run.json');
+  return {
+    guardDir,
+    lastRunPath,
+    lastRunDisplayPath: path.relative(cwd, lastRunPath) || lastRunPath,
   };
 }
 
@@ -214,12 +245,13 @@ async function main() {
   const { options, command } = parsed;
   if (command.length === 0) fail('no command given');
 
-  // Nested guarded scripts pass through — but only when the marker names a
-  // live lease bound to this caller's process group. Lease ids are visible to
-  // same-user processes, so id knowledge alone cannot prove nesting. A copied
-  // or unrecognised marker falls through to full admission rather than
-  // skipping the lease, ceiling, and headroom check.
-  if (leaseExists(process.env.AGENT_GUARDED, process.env)) return passthrough(command);
+  // Policy is evaluated even for nested guarded scripts. A live parent lease
+  // skips only duplicate admission; it cannot authorize a heavy inner lane.
+  // Lease ids are visible to same-user processes, so id knowledge alone also
+  // cannot prove nesting: an unrecognised marker falls through to admission.
+  const invocation = resolveInvocation({ options, command, env: process.env });
+  if (invocation.action === 'refuse') fail(invocation.policy.message);
+  if (invocation.action === 'passthrough') return passthrough(command);
   if (process.platform === 'win32') {
     note('WARNING: guard unsupported on win32; running unguarded.');
     return passthrough(command);
@@ -227,9 +259,7 @@ async function main() {
   const ps = psExecutable();
   if (ps === null) fail('guard requires ps at /bin/ps or /usr/bin/ps to enforce process-group memory limits');
 
-  const commandLine = command.join(' ');
-  const policy = evaluateLanePolicy({ label: options.label, command: commandLine, env: process.env });
-  if (!policy.allowed) fail(policy.message);
+  const { commandLine } = invocation;
 
   const initialMemory = readMemoryStatus();
   const totalMb = initialMemory.totalMb;
@@ -241,7 +271,11 @@ async function main() {
 
   const worktree = process.cwd();
   const repoIdentity = repositoryIdentity(worktree);
-  const guardDir = path.join(worktree, '.guard');
+  // One diagnostic location per Git worktree: a run from a nested cwd must
+  // not leave untracked files that make runs from every other cwd cold. A
+  // non-Git or unresolvable cwd already has no reusable behavior identity, so
+  // it safely falls back to its own local diagnostics.
+  const { guardDir, lastRunPath, lastRunDisplayPath } = guardDiagnosticPaths(worktree, { env: process.env });
   const nodeOptions = [process.env.NODE_OPTIONS, `--max-old-space-size=${request.heapMb}`].filter(Boolean).join(' ');
   // Model the exact environment the child receives. The lease id itself is
   // intentionally represented by a stable sentinel: every guarded child gets
@@ -405,13 +439,13 @@ async function main() {
       terminationReason: state.reason ?? 'completed',
     };
     try {
-      writeFileSync(path.join(guardDir, 'last-run.json'), `${JSON.stringify(record, null, 2)}\n`);
+      writeFileSync(lastRunPath, `${JSON.stringify(record, null, 2)}\n`);
       appendFileSync(path.join(guardDir, 'history.jsonl'), `${JSON.stringify(record)}\n`);
     } catch {
       // Diagnostics are best-effort.
     }
     if (state.reason !== null) {
-      note(`run failed: ${state.reason} (diagnostics in .guard/last-run.json).`);
+      note(`run failed: ${state.reason} (diagnostics in ${lastRunDisplayPath}).`);
       process.exit(1);
     }
     // Only a completed run's peak informs future reservations: a run killed
