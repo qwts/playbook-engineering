@@ -24,12 +24,14 @@ import {
   readLeases,
   releaseLease,
   repositoryIdentity,
+  repositoryWorktreeRoot,
   retargetLease,
   readLanePeakMb,
   recordLanePeak,
   withAdmissionLock,
 } from '../lib/leases.mjs';
 import { ensureStateDirs, leasesDir, machineToken } from '../lib/protocol.mjs';
+import { guardDiagnosticPaths } from '../run-guarded.mjs';
 
 const roots = [];
 let env;
@@ -378,6 +380,96 @@ describe('lane peak store (#180)', () => {
     });
     assert.match(firstBehavior, /^[0-9a-f]{64}$/u);
     assert.equal(siblingBehavior, firstBehavior, 'same revision and effective environment may share across worktrees');
+
+    const firstNested = path.join(first, 'packages', 'app');
+    const siblingNested = path.join(sibling, 'packages', 'app');
+    const firstOtherCwd = path.join(first, 'packages', 'other');
+    mkdirSync(firstNested, { recursive: true });
+    mkdirSync(siblingNested, { recursive: true });
+    mkdirSync(firstOtherCwd, { recursive: true });
+    const firstNestedBehavior = commandBehaviorIdentity(firstNested, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(firstNested),
+    });
+    const siblingNestedBehavior = commandBehaviorIdentity(siblingNested, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(siblingNested),
+    });
+    const firstOtherCwdBehavior = commandBehaviorIdentity(firstOtherCwd, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(firstOtherCwd),
+    });
+    assert.match(firstNestedBehavior, /^[0-9a-f]{64}$/u);
+    assert.equal(
+      siblingNestedBehavior,
+      firstNestedBehavior,
+      'linked worktrees may share behavior only at the same repository-relative cwd',
+    );
+    assert.notEqual(firstNestedBehavior, firstBehavior, 'the repository-relative cwd is command behavior');
+    assert.notEqual(firstOtherCwdBehavior, firstNestedBehavior, 'different repository-relative cwd values cannot share history');
+    assert.notEqual(
+      commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      firstBehavior,
+      'the actual relative cwd remains bound even when the structural environment is unchanged',
+    );
+
+    // Every cwd in one Git worktree writes diagnostics at the worktree root,
+    // so one nested run cannot poison the other cwd identities. Only those
+    // two root paths are exempt; the same suffix below a nested cwd is not.
+    assert.equal(repositoryWorktreeRoot(firstNested, { env: peakEnv }), repositoryWorktreeRoot(first, { env: peakEnv }));
+    assert.equal(repositoryWorktreeRoot(siblingNested, { env: peakEnv }), repositoryWorktreeRoot(sibling, { env: peakEnv }));
+    const nestedDiagnosticPaths = guardDiagnosticPaths(firstNested, { env: peakEnv });
+    const rootDiagnostics = path.join(repositoryWorktreeRoot(first, { env: peakEnv }), '.guard');
+    assert.equal(nestedDiagnosticPaths.guardDir, rootDiagnostics);
+    assert.equal(nestedDiagnosticPaths.lastRunPath, path.join(rootDiagnostics, 'last-run.json'));
+    assert.equal(nestedDiagnosticPaths.lastRunDisplayPath, path.join('..', '..', '.guard', 'last-run.json'));
+    mkdirSync(rootDiagnostics);
+    writeFileSync(path.join(rootDiagnostics, 'last-run.json'), '{}\n');
+    writeFileSync(path.join(rootDiagnostics, 'history.jsonl'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(firstNested) }),
+      firstNestedBehavior,
+      'root-owned diagnostics do not make a nested-cwd run cold',
+    );
+    assert.equal(
+      commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      firstBehavior,
+      'the same root-owned diagnostics remain inert for a root run',
+    );
+    writeFileSync(path.join(rootDiagnostics, 'caller-owned.json'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(firstNested) }),
+      null,
+      'the root diagnostic exemption does not cover other files in .guard',
+    );
+    rmSync(path.join(rootDiagnostics, 'caller-owned.json'));
+    const nestedDiagnostics = path.join(firstNested, '.guard');
+    mkdirSync(nestedDiagnostics);
+    writeFileSync(path.join(nestedDiagnostics, 'last-run.json'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(firstNested) }),
+      null,
+      'diagnostic suffixes beneath a nested cwd are not broadly exempted',
+    );
+    rmSync(nestedDiagnostics, { recursive: true, force: true });
+    rmSync(rootDiagnostics, { recursive: true, force: true });
+
+    const nonRepository = path.join(root, 'not-a-repository');
+    mkdirSync(nonRepository);
+    assert.equal(
+      commandBehaviorIdentity(nonRepository, command, { env: peakEnv, behaviorEnv: environmentFor(nonRepository) }),
+      null,
+      'a failed repository top-level probe must be a cold start',
+    );
+    assert.equal(repositoryWorktreeRoot(nonRepository, { env: peakEnv }), null);
+    assert.equal(
+      commandBehaviorIdentity(path.join(root, 'missing-cwd'), command, {
+        env: peakEnv,
+        behaviorEnv: environmentFor(path.join(root, 'missing-cwd')),
+      }),
+      null,
+      'an unresolvable cwd path must be a cold start',
+    );
     assert.notEqual(
       commandBehaviorIdentity(first, command, {
         env: peakEnv,

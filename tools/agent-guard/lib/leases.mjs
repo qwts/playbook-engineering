@@ -26,7 +26,7 @@ import path from 'node:path';
 import { CORE_LEASE_FIELDS, PROTOCOL_VERSION, ensureStateDirs, lanePeaksDir, leasesDir, machineToken, stateDir } from './protocol.mjs';
 
 const GIT_EXECUTABLES = ['/usr/bin/git', '/bin/git'];
-const BEHAVIOR_IDENTITY_VERSION = 3;
+const BEHAVIOR_IDENTITY_VERSION = 4;
 const UNTRACKED_GUARD_DIAGNOSTICS = new Set([
   '? .guard/history.jsonl',
   '? .guard/last-run.json',
@@ -127,12 +127,11 @@ function executableEvidence(worktree, command, env) {
   }
 }
 
-function normalizedEnvironment(env, worktree, canonicalWorktree) {
-  const roots = [...new Set([path.resolve(worktree), canonicalWorktree])].sort((left, right) => right.length - left.length);
+function normalizedEnvironment(env, repositoryRoots) {
   const normalizeWorktreePath = (value) => {
-    for (const root of roots) {
-      if (value === root) return '<worktree>';
-      if (value.startsWith(`${root}${path.sep}`)) return `<worktree>${value.slice(root.length)}`;
+    for (const repositoryRoot of repositoryRoots) {
+      if (value === repositoryRoot) return '<worktree>';
+      if (value.startsWith(`${repositoryRoot}${path.sep}`)) return `<worktree>${value.slice(repositoryRoot.length)}`;
     }
     return value;
   };
@@ -150,6 +149,32 @@ function normalizedEnvironment(env, worktree, canonicalWorktree) {
   return entries;
 }
 
+export function repositoryWorktreeRoot(worktree, { env = process.env } = {}) {
+  const canonicalCwd = canonicalWorktreePath(worktree);
+  const git = GIT_EXECUTABLES.find((candidate) => existsSync(candidate));
+  if (git === undefined) return null;
+  try {
+    const topLevel = execFileSync(
+      git,
+      ['-C', canonicalCwd, 'rev-parse', '--path-format=absolute', '--show-toplevel'],
+      { encoding: 'utf8', env: gitEnvironment(env), timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] },
+    ).trim();
+    if (!path.isAbsolute(topLevel)) return null;
+    const repositoryRoot = realpathSync(topLevel);
+    const relative = path.relative(repositoryRoot, canonicalCwd);
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+    return repositoryRoot;
+  } catch {
+    return null;
+  }
+}
+
+function repositoryRelativeCwd(repositoryRoot, canonicalCwd) {
+  const relative = path.relative(repositoryRoot, canonicalCwd);
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+  return relative ? relative.split(path.sep).join('/') : '.';
+}
+
 /**
  * Evidence that a command still means what the recorded peak measured.
  *
@@ -161,15 +186,20 @@ function normalizedEnvironment(env, worktree, canonicalWorktree) {
  */
 export function commandBehaviorIdentity(worktree, command, { env = process.env, behaviorEnv = env } = {}) {
   if (!Array.isArray(command) || command.length === 0 || command.some((part) => typeof part !== 'string')) return null;
-  const canonicalWorktree = canonicalWorktreePath(worktree);
+  const resolvedCwd = path.resolve(worktree);
+  const canonicalCwd = canonicalWorktreePath(worktree);
   const git = GIT_EXECUTABLES.find((candidate) => existsSync(candidate));
   if (git === undefined) return null;
 
   try {
     const options = { encoding: 'utf8', env: gitEnvironment(env), timeout: 5000 };
+    const repositoryRoot = repositoryWorktreeRoot(canonicalCwd, { env });
+    if (repositoryRoot === null) return null;
+    const relativeCwd = repositoryRelativeCwd(repositoryRoot, canonicalCwd);
+    if (relativeCwd === null) return null;
     const status = execFileSync(
       git,
-      ['-C', canonicalWorktree, 'status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', '--ignore-submodules=none'],
+      ['-C', canonicalCwd, 'status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', '--ignore-submodules=none'],
       options,
     ).split('\0').filter(Boolean);
     const revision = status.find((entry) => entry.startsWith('# branch.oid '))?.slice('# branch.oid '.length);
@@ -181,19 +211,32 @@ export function commandBehaviorIdentity(worktree, command, { env = process.env, 
     // that the worktree bytes still match HEAD, so any such entry makes this a
     // cold start. With `-v`, ordinary tracked entries are tagged `H`, while an
     // assume-unchanged tag is lower-case and skip-worktree is tagged `S`.
-    const tracked = execFileSync(git, ['-C', canonicalWorktree, 'ls-files', '-v', '-z'], options)
+    const tracked = execFileSync(git, ['-C', canonicalCwd, 'ls-files', '-v', '-z'], options)
       .split('\0')
       .filter(Boolean);
     if (tracked.some((entry) => !entry.startsWith('H '))) return null;
 
-    const executable = executableEvidence(canonicalWorktree, command, behaviorEnv);
-    const environment = normalizedEnvironment(behaviorEnv, worktree, canonicalWorktree);
+    const executable = executableEvidence(canonicalCwd, command, behaviorEnv);
+    const cwdDepth = relativeCwd === '.' ? 0 : relativeCwd.split('/').length;
+    const resolvedRepositoryRoot = path.resolve(resolvedCwd, ...Array(cwdDepth).fill('..'));
+    const repositoryRoots = [repositoryRoot];
+    try {
+      // Preserve a non-canonical spelling such as macOS's /var -> /private/var
+      // only when it resolves to this repository root. A symlink inside the
+      // checkout can change path depth, so blindly ascending could otherwise
+      // normalize an unrelated ancestor (even `/`) as the worktree.
+      if (realpathSync(resolvedRepositoryRoot) === repositoryRoot) repositoryRoots.push(resolvedRepositoryRoot);
+    } catch {
+      // The canonical root remains sufficient and errs toward isolated peaks.
+    }
+    repositoryRoots.sort((left, right) => right.length - left.length);
+    const environment = normalizedEnvironment(behaviorEnv, repositoryRoots);
     if (executable === null || environment === null) return null;
     const evidence = JSON.stringify({
       version: BEHAVIOR_IDENTITY_VERSION,
       revision,
       command,
-      cwd: '.',
+      cwd: relativeCwd,
       executable,
       environment,
     });
