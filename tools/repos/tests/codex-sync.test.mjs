@@ -2,7 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { GOVERNED_HARNESS_FILES } from '../lib/baseline-files.mjs';
+import {
+  GOVERNED_FORMAT_EXEMPT_FILES,
+  GOVERNED_HARNESS_FILES,
+} from '../lib/baseline-files.mjs';
 import {
   CODEX_REVIEW_BOT,
   CODEX_SYNC_BOT,
@@ -15,6 +18,7 @@ import {
   diffManagedFiles,
   gitBlobSha,
   materializeManagedFiles,
+  MANAGED_TEXT_BLOCKS,
   mergeManagedFile,
   managedCodexPaths,
   preferredMergeFlag,
@@ -94,6 +98,90 @@ test('managed diff detects missing, changed, and mode-only drift', () => {
     diffManagedFiles(files, tree, ['a', 'b', 'c', 'd']).map((file) => file.path),
     ['b', 'c', 'd'],
   );
+});
+
+test('the governed formatter block covers the exact byte-managed inventory', () => {
+  const source = readFileSync('.prettierignore', 'utf8');
+  const markers = MANAGED_TEXT_BLOCKS.get('.prettierignore');
+  const begin = source.indexOf(markers.begin);
+  const end = source.indexOf(markers.end);
+  assert.ok(begin >= 0 && end > begin);
+  const lines = new Set(source.slice(begin, end).split(/\r?\n/u));
+
+  assert.deepEqual(
+    GOVERNED_FORMAT_EXEMPT_FILES.filter((path) => !lines.has(path)),
+    [],
+    'every governed byte path must be exempt from downstream formatters',
+  );
+  assert.deepEqual(
+    [...lines].filter((line) => GOVERNED_FORMAT_EXEMPT_FILES.includes(line) === false && /^(?:\.|governance\/|tools\/)/u.test(line)),
+    [],
+    'the format block must not retain paths outside the governed inventory',
+  );
+});
+
+test('managed formatter composition preserves repository rules and updates only its block', async () => {
+  const pathname = '.prettierignore';
+  const source = canonical(pathname, readFileSync(pathname, 'utf8'));
+  const stale = [
+    'dist/',
+    'repo-owned-generated/',
+    '',
+    '# governed:agent-harness-format:start',
+    'stale-managed-path',
+    '# governed:agent-harness-format:end',
+    '',
+    'coverage/',
+  ].join('\n');
+  const targetContent = Buffer.from(stale);
+  const target = new Map([[pathname, {
+    path: pathname,
+    type: 'blob',
+    sha: gitBlobSha(targetContent),
+    mode: '100644',
+  }]]);
+
+  const files = await materializeManagedFiles(
+    new Map([[pathname, source]]),
+    target,
+    [pathname],
+    async () => targetContent,
+  );
+  const first = files.get(pathname);
+  const second = mergeManagedFile(source, first.content);
+  const merged = first.content.toString('utf8');
+
+  assert.match(merged, /^dist\/\nrepo-owned-generated\//u);
+  assert.match(merged, /\ncoverage\/$/u);
+  assert.doesNotMatch(merged, /stale-managed-path/u);
+  assert.equal(first.content.toString('utf8'), second.content.toString('utf8'));
+});
+
+test('managed formatter composition appends once and fails closed on marker corruption', () => {
+  const pathname = '.prettierignore';
+  const source = canonical(pathname, readFileSync(pathname, 'utf8'));
+  const appended = mergeManagedFile(source, Buffer.from('dist/\n'));
+
+  assert.match(appended.content.toString('utf8'), /^dist\/\n\n# governed:agent-harness-format:start/um);
+  assert.throws(
+    () => mergeManagedFile(source, Buffer.from([
+      '# governed:agent-harness-format:start',
+      'stale',
+      '# governed:agent-harness-format:start',
+      '# governed:agent-harness-format:end',
+    ].join('\n'))),
+    /must contain exactly one ordered/u,
+  );
+});
+
+test('a missing formatter file receives only the governed block', () => {
+  const pathname = '.prettierignore';
+  const block = readFileSync(pathname, 'utf8');
+  const source = canonical(pathname, `playbook-only-ignore/\n\n${block}`);
+  const merged = mergeManagedFile(source, null).content.toString('utf8');
+
+  assert.match(merged, /^# governed:agent-harness-format:start/u);
+  assert.doesNotMatch(merged, /playbook-only-ignore/u);
 });
 
 test('managed JSON overlays preserve repository-owned agent harness configuration', async () => {

@@ -16,6 +16,12 @@ export const COPILOT_REVIEW_BOT = 'copilot-pull-request-reviewer[bot]';
 export const CODEX_SOURCE_REPO = 'playbook-engineering';
 export const CODEX_SYNC_TITLE = 'governance: sync managed agent harness files';
 export const CODEX_SYNC_COMMIT_PREFIX = `governance: sync agent harness from ${CODEX_SOURCE_REPO}@`;
+export const MANAGED_TEXT_BLOCKS = new Map([
+  ['.prettierignore', {
+    begin: '# governed:agent-harness-format:start',
+    end: '# governed:agent-harness-format:end',
+  }],
+]);
 // Paths governance owns inside a downstream JSON file; everything else in that
 // file belongs to the repo and survives a sync untouched. `hooks.PreToolUse`
 // joined the list with ENG-0138: the memory guard is only a fleet control if
@@ -162,11 +168,93 @@ function parseJsonObject(path, content, owner) {
   return value;
 }
 
+function decodeText(path, content, owner) {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(content);
+  } catch (error) {
+    throw new Error(`${path}: invalid UTF-8 in ${owner} text (${error.message})`);
+  }
+}
+
+function markerLineRanges(source, marker) {
+  const ranges = [];
+  let start = 0;
+  while (start <= source.length) {
+    const newline = source.indexOf('\n', start);
+    const end = newline === -1 ? source.length : newline;
+    const contentEnd = end > start && source[end - 1] === '\r' ? end - 1 : end;
+    if (source.slice(start, contentEnd) === marker) {
+      ranges.push({ start, end: newline === -1 ? end : end + 1 });
+    }
+    if (newline === -1) break;
+    start = newline + 1;
+  }
+  return ranges;
+}
+
+function managedTextBlock(path, source, owner) {
+  const markers = MANAGED_TEXT_BLOCKS.get(path);
+  const begins = markerLineRanges(source, markers.begin);
+  const ends = markerLineRanges(source, markers.end);
+  if (begins.length !== 1 || ends.length !== 1 || begins[0].start >= ends[0].start) {
+    throw new Error(
+      `${path}: ${owner} text must contain exactly one ordered ${markers.begin} / ${markers.end} block`,
+    );
+  }
+  return {
+    begin: begins[0],
+    end: ends[0],
+    content: `${source.slice(begins[0].start, ends[0].end).replace(/\r?\n?$/u, '')}\n`,
+  };
+}
+
+function mergeManagedTextFile(canonicalFile, targetContent) {
+  const canonicalText = decodeText(canonicalFile.path, canonicalFile.content, 'managed');
+  const canonicalBlock = managedTextBlock(canonicalFile.path, canonicalText, 'managed');
+  if (!targetContent) {
+    const content = Buffer.from(canonicalBlock.content);
+    return {
+      ...canonicalFile,
+      content,
+      sha: gitBlobSha(content),
+    };
+  }
+
+  const target = decodeText(canonicalFile.path, targetContent, 'downstream');
+  const markers = MANAGED_TEXT_BLOCKS.get(canonicalFile.path);
+  const begins = markerLineRanges(target, markers.begin);
+  const ends = markerLineRanges(target, markers.end);
+  let content;
+  if (begins.length === 0 && ends.length === 0) {
+    const separator = target.length === 0
+      ? ''
+      : target.endsWith('\n\n')
+        ? ''
+        : target.endsWith('\n')
+          ? '\n'
+          : '\n\n';
+    content = Buffer.from(`${target}${separator}${canonicalBlock.content}`);
+  } else {
+    const downstreamBlock = managedTextBlock(canonicalFile.path, target, 'downstream');
+    content = Buffer.from(
+      `${target.slice(0, downstreamBlock.begin.start)}${canonicalBlock.content}${target.slice(downstreamBlock.end.end)}`,
+    );
+  }
+  return {
+    ...canonicalFile,
+    content,
+    sha: gitBlobSha(content),
+  };
+}
+
 export function mergeManagedFile(
   canonicalFile,
   targetContent,
   { preserveArrayEntriesContaining = [] } = {},
 ) {
+  if (MANAGED_TEXT_BLOCKS.has(canonicalFile.path)) {
+    return mergeManagedTextFile(canonicalFile, targetContent);
+  }
   const ownedPaths = MANAGED_JSON_OVERLAYS.get(canonicalFile.path);
   if (!ownedPaths && preserveArrayEntriesContaining.length === 0) return canonicalFile;
   const managed = parseJsonObject(canonicalFile.path, canonicalFile.content, 'managed');
@@ -214,7 +302,9 @@ export async function materializeManagedFiles(
     if (!canonical) throw new Error(`${path}: canonical managed file is missing`);
     const target = targetTree.get(path);
     const markers = preserveJsonArrayEntries[path] ?? [];
-    const content = target && (MANAGED_JSON_OVERLAYS.has(path) || markers.length)
+    const content = target && (
+      MANAGED_JSON_OVERLAYS.has(path) || MANAGED_TEXT_BLOCKS.has(path) || markers.length
+    )
       ? await readTargetContent(target)
       : null;
     files.set(path, mergeManagedFile(canonical, content, {
@@ -272,7 +362,7 @@ export function syncPullBody({ owner, sourceSha, paths }) {
   const sourceUrl = `https://github.com/${owner}/${CODEX_SOURCE_REPO}/commit/${sourceSha}`;
   const managed = paths.map((path) => `- \`${path}\``).join('\n');
   return [
-    `Synchronizes the centrally managed agent-harness environment (\`.codex/\`, \`.claude/\`) from [\`${sourceSha.slice(0, 12)}\`](${sourceUrl}).`,
+    `Synchronizes the centrally managed agent-harness environment and its consumer compatibility metadata from [\`${sourceSha.slice(0, 12)}\`](${sourceUrl}).`,
     '',
     'Managed files:',
     '',

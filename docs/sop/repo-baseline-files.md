@@ -15,6 +15,7 @@ inherit by default, vary by explicit delta.
 | Feature issue template | The shared [feature-lifecycle](feature-lifecycle.md) form ([ENG-0007](../decisions/ENG-0007-feature-lifecycle-convention.md)); repos may add fields, not drop sections. |
 | `.codex/` | Shared project environment, command rules, and setup/cleanup scripts from this repository; existing repo-specific files are preserved as explicit deltas. |
 | `.claude/settings.json` | Shared Claude Code harness config from this repository — the `WorktreeCreate` hook, the machine-memory guard, and the uninstalled identity adapters ([ENG-0128](../decisions/ENG-0128-agent-bot-runtime-ownership.md)). Machine-local overrides belong in the gitignored `.claude/settings.local.json`, never here. |
+| `.prettierignore` | Repository-owned rules plus the marked governance block. Synchronization refreshes only that block, which exempts the byte-managed harness inventory from consumer formatters while preserving every local rule outside it. The source repository's `lint:synced` gate owns language and syntax validation for those files. |
 
 ## Required when applicable
 
@@ -49,6 +50,8 @@ the repository's enabled merge methods.
 
 ## Changelog
 
+- 2026-08-18 — compose a governed formatter-exemption block into every
+  consumer's `.prettierignore`; canonical harness validation stays upstream.
 - 2026-08-16 — ship uninstalled identity adapters (default unmanaged
   principal `ai9d`) next to the memory guard and WorktreeCreate hook.
 - 2026-08-05 — make the shared agent-context discovery block status-aware,

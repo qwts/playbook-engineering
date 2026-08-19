@@ -69,11 +69,22 @@ export const GOVERNED_MODEL_ROUTING_FILES = [
 // onboarded. The manifest field that scopes it stays `codexSync` — renaming it
 // would orphan the manifests, and the sync branch and title are what an open
 // downstream PR is matched on.
-export const GOVERNED_HARNESS_FILES = [
+// Managed bytes must be exempt from consumer formatters. The source repository
+// validates their language contracts with lint:synced; formatting them after
+// synchronization would only create a byte-drift loop. Keep the governed block
+// in .prettierignore aligned with this exact inventory.
+export const GOVERNED_FORMAT_EXEMPT_FILES = [
   ...GOVERNED_CODEX_FILES,
   ...GOVERNED_HOOK_ADAPTER_FILES,
   ...GOVERNED_AGENT_GUARD_FILES,
   ...GOVERNED_MODEL_ROUTING_FILES,
+];
+
+export const GOVERNED_HARNESS_FILES = [
+  ...GOVERNED_FORMAT_EXEMPT_FILES,
+  // Partially managed: synchronization replaces only its marked governance
+  // block and preserves every repository-owned line outside it.
+  '.prettierignore',
 ];
 
 export const BASELINE_FILES = [
