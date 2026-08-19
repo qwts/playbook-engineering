@@ -627,8 +627,11 @@ describe('command hook', () => {
     assert.equal(evaluateCommand(`env --chdir=${outside} node scripts/check-traceability.mjs`, local).allow, false);
     assert.equal(evaluateCommand(`env --chd=${outside} node scripts/check-traceability.mjs`, local).allow, false);
     assert.equal(evaluateCommand(`env --c ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env -ivC ${outside} node scripts/check-traceability.mjs`, local).allow, false);
     assert.equal(evaluateCommand(`env --uns TOKEN --chd=${outside} node scripts/check-traceability.mjs`, local).allow, false);
     assert.equal(evaluateCommand(`env --spl='--chd=${outside} node scripts/check-traceability.mjs'`, local).allow, false);
+    assert.equal(evaluateCommand(`env -iS'--chd=${outside} node scripts/check-traceability.mjs'`, local).allow, false);
     assert.equal(evaluateCommand(`command env -C ${outside} node scripts/check-traceability.mjs`, local).allow, false);
     assert.equal(evaluateCommand(`env -S '-C ${outside} node scripts/check-traceability.mjs'`, local).allow, false);
     assert.equal(evaluateCommand(`env --split-string='--chdir=${outside} node scripts/check-traceability.mjs'`, local).allow, false);
@@ -845,6 +848,8 @@ describe('hook helpers', () => {
     assert.deepEqual(resolveExecutionDirs('/outside', 'env --chdir=/project npm run ci'), ['/outside', '/project']);
     assert.deepEqual(resolveExecutionDirs('/outside', 'env --chd=/project npm run ci'), ['/outside', '/project']);
     assert.deepEqual(resolveExecutionDirs('/outside', 'env --c /project npm run ci'), ['/outside', '/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'env -iC/project npm run ci'), ['/outside', '/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'env -ivC /project npm run ci'), ['/outside', '/project']);
     assert.deepEqual(
       resolveExecutionDirs('/outside', 'env --uns TOKEN --chd=/project npm run ci'),
       ['/outside', '/project'],
