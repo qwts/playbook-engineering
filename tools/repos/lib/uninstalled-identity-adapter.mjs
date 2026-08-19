@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+
 const UNINSTALLED_REASON = 'uninstalled identity: refuse human-attributed commit or GitHub write; finish durable bootstrap to publish as the bot';
 
 const CONTROL_OPERATORS = new Set([
@@ -84,7 +86,7 @@ const GIT_NON_PUBLISH_SUBCOMMANDS = new Set([
 ]);
 const SHELLS = new Set(['bash', 'dash', 'ksh', 'sh', 'zsh']);
 const INDIRECT_EXECUTORS = new Set([
-  '.', 'eval', 'find', 'parallel', 'source', 'sudo', 'watch', 'xargs',
+  '.', 'eval', 'find', 'nice', 'nohup', 'parallel', 'source', 'sudo', 'watch', 'xargs',
 ]);
 const GH_READ_SUBCOMMANDS = {
   alias: ['list'],
@@ -163,8 +165,19 @@ function readDollarParen(text, start) {
         continue;
       }
       if (ch === '$' && text[i + 1] === '(') {
-        depth += 1;
-        i += 1;
+        const nested = text[i + 2] === '('
+          ? readArithmeticExpansion(text, i + 3)
+          : readDollarParen(text, i + 2);
+        if (!nested) return null;
+        i = nested.end;
+      } else if (ch === '$' && text[i + 1] === '{') {
+        const nested = readBracedExpansion(text, i + 2);
+        if (!nested) return null;
+        i = nested.end;
+      } else if (ch === '`') {
+        const nested = readBackticks(text, i + 1);
+        if (!nested) return null;
+        i = nested.end;
       }
       continue;
     }
@@ -173,13 +186,135 @@ function readDollarParen(text, start) {
       continue;
     }
     if (ch === '$' && text[i + 1] === '(') {
-      depth += 1;
-      i += 1;
+      const nested = text[i + 2] === '('
+        ? readArithmeticExpansion(text, i + 3)
+        : readDollarParen(text, i + 2);
+      if (!nested) return null;
+      i = nested.end;
       continue;
     }
+    if (ch === '$' && text[i + 1] === '{') {
+      const nested = readBracedExpansion(text, i + 2);
+      if (!nested) return null;
+      i = nested.end;
+      continue;
+    }
+    if (ch === '`') {
+      const nested = readBackticks(text, i + 1);
+      if (!nested) return null;
+      i = nested.end;
+      continue;
+    }
+    if (ch === '(') depth += 1;
     if (ch === ')') {
       depth -= 1;
       if (depth === 0) return { end: i, value: text.slice(start, i) };
+    }
+  }
+  return null;
+}
+
+function readBracedExpansion(text, start) {
+  let depth = 1;
+  let quote = null;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      continue;
+    }
+    if (ch === '\\') {
+      i += 1;
+      if (i >= text.length) return null;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === '"') {
+        quote = null;
+        continue;
+      }
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+    if (quote === '"' && ch !== '$' && ch !== '`') continue;
+    if (ch === '$' && text[i + 1] === '(') {
+      const nested = text[i + 2] === '('
+        ? readArithmeticExpansion(text, i + 3)
+        : readDollarParen(text, i + 2);
+      if (!nested) return null;
+      i = nested.end;
+      continue;
+    }
+    if (ch === '$' && text[i + 1] === '{') {
+      const nested = readBracedExpansion(text, i + 2);
+      if (!nested) return null;
+      i = nested.end;
+      continue;
+    }
+    if (ch === '`') {
+      const nested = readBackticks(text, i + 1);
+      if (!nested) return null;
+      i = nested.end;
+      continue;
+    }
+    if (ch === '{') depth += 1;
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return { end: i, value: text.slice(start, i) };
+    }
+  }
+  return null;
+}
+
+function readArithmeticExpansion(text, start) {
+  let depth = 2;
+  let quote = null;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      continue;
+    }
+    if (ch === '\\') {
+      i += 1;
+      if (i >= text.length) return null;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === '"') {
+        quote = null;
+        continue;
+      }
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+    if (quote === '"' && ch !== '$' && ch !== '`') continue;
+    if (ch === '$' && text[i + 1] === '(') {
+      const nested = text[i + 2] === '('
+        ? readArithmeticExpansion(text, i + 3)
+        : readDollarParen(text, i + 2);
+      if (!nested) return null;
+      i = nested.end;
+      continue;
+    }
+    if (ch === '$' && text[i + 1] === '{') {
+      const nested = readBracedExpansion(text, i + 2);
+      if (!nested) return null;
+      i = nested.end;
+      continue;
+    }
+    if (ch === '`') {
+      const nested = readBackticks(text, i + 1);
+      if (!nested) return null;
+      i = nested.end;
+      continue;
+    }
+    if (ch === '(') depth += 1;
+    if (ch === ')') {
+      depth -= 1;
+      if (depth === 0) return { end: i, value: text.slice(start, i - 1) };
     }
   }
   return null;
@@ -228,12 +363,20 @@ function shellLex(command) {
       return { end: nested.end, safe: true };
     }
     if (text[i + 1] === '{') {
-      const end = text.indexOf('}', i + 2);
-      return end === -1 ? { end: text.length, safe: false } : { end, safe: true };
+      const nested = readBracedExpansion(text, i + 2);
+      if (!nested) return { end: text.length, safe: false };
+      const nestedLexed = shellLex(nested.value);
+      if (!nestedLexed.safe) return { end: text.length, safe: false };
+      substitutions.push(...nestedLexed.substitutions);
+      return { end: nested.end, safe: true };
     }
     if (text[i + 1] === '(' && text[i + 2] === '(') {
-      const end = text.indexOf('))', i + 3);
-      return end === -1 ? { end: text.length, safe: false } : { end: end + 1, safe: true };
+      const nested = readArithmeticExpansion(text, i + 3);
+      if (!nested) return { end: text.length, safe: false };
+      const nestedLexed = shellLex(nested.value);
+      if (!nestedLexed.safe) return { end: text.length, safe: false };
+      substitutions.push(...nestedLexed.substitutions);
+      return { end: nested.end, safe: true };
     }
     if (text[i + 1] === "'") {
       const end = text.indexOf("'", i + 2);
@@ -393,14 +536,32 @@ function stripRedirections(tokens) {
 }
 
 function assignment(word) {
-  const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/u.exec(word.value);
+  const match = /^([A-Za-z_][A-Za-z0-9_]*)(\+?=)(.*)$/u.exec(word.value);
   if (!match) return null;
-  return { dynamic: word.dynamic, name: match[1], value: match[2] };
+  return {
+    append: match[2] === '+=',
+    dynamic: word.dynamic,
+    name: match[1],
+    value: match[3],
+  };
 }
 
 function withAssignment(context, item) {
   const next = cloneContext(context);
-  next.env[item.name] = { dynamic: item.dynamic, value: item.value };
+  const previous = next.env[item.name];
+  if (item.append && previous) {
+    next.env[item.name] = {
+      append: Boolean(previous.append),
+      dynamic: Boolean(previous.dynamic || item.dynamic),
+      value: `${previous.value}${item.value}`,
+    };
+  } else {
+    next.env[item.name] = {
+      append: item.append,
+      dynamic: item.dynamic,
+      value: item.value,
+    };
+  }
   next.unset = next.unset.filter((name) => name !== item.name);
   return next;
 }
@@ -575,6 +736,12 @@ function parseGit(words, context) {
   if (value === 'push') {
     return { operations: [{ context, globalArgs, kind: 'git-push', subcommand: value, words }], safe: true };
   }
+  if (value === 'stash') {
+    const action = words[i + 1];
+    if (action && !action.dynamic && ['list', 'show'].includes(action.value)) {
+      return { operations: [], safe: true };
+    }
+  }
   if (GIT_COMMIT_SUBCOMMANDS.has(value)) {
     return { operations: [{ context, globalArgs, kind: 'git-commit', subcommand: value, subcommandIndex: i, words }], safe: true };
   }
@@ -691,7 +858,7 @@ function parseShell(words, context, depth) {
     }
     return unsafeScan();
   }
-  return i < words.length ? unsafeScan() : { operations: [], safe: true };
+  return unsafeScan();
 }
 
 function inspectSimpleCommand(tokens, depth, inheritedContext) {
@@ -700,12 +867,16 @@ function inspectSimpleCommand(tokens, depth, inheritedContext) {
   let words = stripped.words;
   if (!words.length) return { operations: [], safe: true };
 
-  const structural = words[0].dynamic ? '' : words[0].value;
-  if (['case', 'for', 'function', 'select'].includes(structural)) return { operations: [], safe: true };
-  if (['done', 'esac', 'fi', 'in'].includes(structural)) return { operations: [], safe: true };
-  if (['!', 'coproc', 'do', 'elif', 'else', 'if', 'then', 'time', 'until', 'while'].includes(structural)) {
+  while (
+    words.length
+    && !words[0].dynamic
+    && ['!', 'coproc', 'do', 'elif', 'else', 'if', 'then', 'time', 'until', 'while'].includes(words[0].value)
+  ) {
     words = words.slice(1);
   }
+  const structural = words[0]?.dynamic ? '' : words[0]?.value;
+  if (['case', 'for', 'function', 'select'].includes(structural)) return { operations: [], safe: true };
+  if (['done', 'esac', 'fi', 'in'].includes(structural)) return { operations: [], safe: true };
 
   const unwrapped = unwrapPrefixes(words, inheritedContext);
   if (!unwrapped.safe) return unsafeScan();
@@ -764,7 +935,9 @@ function operationEnvironment(env, context) {
   for (const name of context.unset) delete merged[name];
   for (const [name, setting] of Object.entries(context.env)) {
     if (setting.dynamic) return null;
-    merged[name] = setting.value;
+    merged[name] = setting.append
+      ? `${merged[name] || ''}${setting.value}`
+      : setting.value;
   }
   return merged;
 }
@@ -884,6 +1057,8 @@ const RUNTIME_FUNCTIONS = [
   mergeScan,
   extractCommand,
   readDollarParen,
+  readBracedExpansion,
+  readArithmeticExpansion,
   readBackticks,
   shellLex,
   commandGroups,
