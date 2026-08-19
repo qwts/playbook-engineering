@@ -42,8 +42,6 @@ const HARD_KILL_FACTOR = 1.25;
 const MAX_MONITOR_FAILURES = 3;
 const DEFAULT_TIMEOUT_S = 900;
 const RETRY_MS = 5000;
-const GUARDED_LAUNCHER = '/bin/sh';
-const GUARDED_LAUNCHER_SCRIPT = 'IFS= read -r _ <&3 || exit 125; exec 3<&-; exec "$@"';
 
 function note(message) {
   process.stderr.write(`[guard] ${message}\n`);
@@ -147,15 +145,13 @@ export function collectTreeRssKb(psOutput, rootPid) {
   return { totalKb, processCount };
 }
 
-// Start the requested argv only after the monitor has observed its detached
-// process group once. The launcher blocks on a private pipe, so even a
-// sub-POLL_MS command stays measurable; the release token may be buffered
-// before read(1) begins, avoiding a lost-signal race. `"$@"` forwards every
-// argument literally, without evaluating caller-controlled shell text.
+// Spawn the exact requested argv. A shell launcher is not target evidence: a
+// command that exits before `ps` observes its real process tree must remain a
+// cold lane rather than borrowing the launcher's small RSS peak.
 export function guardedInvocation(command) {
   return {
-    executable: GUARDED_LAUNCHER,
-    args: ['-c', GUARDED_LAUNCHER_SCRIPT, 'agent-guard', ...command],
+    executable: command[0],
+    args: command.slice(1),
   };
 }
 
@@ -164,23 +160,11 @@ export function recordProcessTreeSample(state, psOutput, rootPid) {
   // `ps` reports KB, but the public record is whole MB. A real one-process
   // tree must never round down to the same zero used for "not measured".
   const rssMb = processCount > 0 && totalKb > 0 ? Math.max(1, Math.ceil(totalKb / 1024)) : 0;
+  if (state.done) return { rssMb, processCount };
   state.peakRssMb = Math.max(state.peakRssMb, rssMb);
   state.peakProcessCount = Math.max(state.peakProcessCount, processCount);
+  if (rssMb > 0 && processCount > 0) state.targetObserved = true;
   return { rssMb, processCount };
-}
-
-export function releaseGuardedInvocation(state, sample, gate) {
-  if (
-    state.commandStarted ||
-    state.termAt !== null ||
-    state.done ||
-    sample?.processCount <= 0 ||
-    sample?.rssMb <= 0 ||
-    typeof gate?.end !== 'function'
-  ) return false;
-  gate.end('\n');
-  state.commandStarted = true;
-  return true;
 }
 
 export function startProcessTreeMonitor(sample, { schedule = setInterval, intervalMs = POLL_MS } = {}) {
@@ -361,17 +345,12 @@ async function main() {
   const startedAt = Date.now();
   const invocation = guardedInvocation(command);
   const child = spawn(invocation.executable, invocation.args, {
-    // fd 3 is a one-token start gate owned only by this wrapper and launcher.
-    stdio: ['inherit', 'inherit', 'inherit', 'pipe'],
+    stdio: 'inherit',
     detached: true, // new process group; kill(-pid) reaches every descendant
     // The marker carries this run's lease id, so a child can prove it is
     // nested inside a real guarded run rather than merely asserting it.
     env: { ...childEnvironment, AGENT_GUARDED: lease.id },
   });
-  const startGate = child.stdio[3];
-  // If the launcher dies before release, the pipe may report EPIPE before the
-  // child exit handler runs. The failed command is already authoritative.
-  startGate.on('error', () => {});
 
   // The admitted reservation must follow the detached group, not this
   // wrapper. A hard-killed wrapper can leave its descendants alive; binding
@@ -386,7 +365,7 @@ async function main() {
     fail('failed to bind the admission lease to the guarded process group');
   }
 
-  const state = { peakRssMb: 0, peakProcessCount: 0, reason: null, termAt: null, done: false, polling: false, commandStarted: false, lastBeat: 0, monitorFailures: 0, killTimer: null };
+  const state = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, reason: null, termAt: null, done: false, polling: false, lastBeat: 0, monitorFailures: 0, killTimer: null };
 
   const killGroup = (signal) => {
     try {
@@ -443,7 +422,6 @@ async function main() {
         terminate('timeout');
         return;
       }
-      releaseGuardedInvocation(state, sample, startGate);
     });
   };
   const poll = startProcessTreeMonitor(sampleTree);
@@ -497,7 +475,13 @@ async function main() {
       env: process.env,
       behaviorEnv: childEnvironment,
     });
-    if (code === 0 && behaviorIdentity !== null && completedIdentity === behaviorIdentity) {
+    if (
+      code === 0 &&
+      state.targetObserved &&
+      state.peakRssMb > 0 &&
+      behaviorIdentity !== null &&
+      completedIdentity === behaviorIdentity
+    ) {
       await recordLanePeak({
         env: process.env,
         repo: repoIdentity,
