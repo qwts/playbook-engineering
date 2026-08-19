@@ -35,9 +35,11 @@ sanctioned local lane needs more. The cap is enforced on the running process
 tree, and what admission *reserves* is smaller still when the lane has a
 recent measured peak: peak plus a conservative margin, so a lane that
 measures well under the cap no longer books the full cap against admission.
-Peak history is keyed by the checkout's canonical Git common directory, so all
-linked worktrees share measurements while unrelated clones remain isolated even
-when their directory names match.
+Peak history is keyed by the checkout's canonical Git common directory, lane
+label, and exact command arguments. All linked worktrees share measurements,
+unrelated clones remain isolated even when their directory names match, and a
+cheap command cannot lend its measurement to a heavy command under the same
+label.
 
 ## Admission
 
@@ -48,8 +50,10 @@ A run is granted only if all three hold:
    run outright, and normal (green) pressure retires committed-but-idle swap as
    evidence — macOS keeps swap allocated after pressure subsides. Without
    pressure evidence, refused when swap is at least 50% committed. Either gate
-   spares runs no larger than the light-run size. A machine already trading
-   pages for progress is one more Electron worker away from a freeze.
+   spares only lanes whose recent measured peak is no larger than the light-run
+   size. An unmeasured lane is not light, and lowering a caller-declared ceiling
+   cannot claim the exemption. A machine already trading pages for progress is
+   one more Electron worker away from a freeze.
 2. **Headroom.** `available − (what running leases have not yet materialized) −
    this request` must stay above the availability floor. Availability comes from
    `vm_stat` and `sysctl vm.swapusage` on macOS, `/proc/meminfo` on Linux.

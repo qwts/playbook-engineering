@@ -69,12 +69,21 @@ export function repositoryIdentity(worktree, { env = process.env } = {}) {
   }
 }
 
-function lanePeakFile(env, repo, label) {
+function lanePeakFile(env, repo, label, command) {
+  const valid =
+    typeof repo === 'string' &&
+    repo !== '' &&
+    typeof label === 'string' &&
+    label !== '' &&
+    Array.isArray(command) &&
+    command.length > 0 &&
+    command.every((part) => typeof part === 'string');
+  if (!valid) return null;
   // Full canonical paths are deliberately part of the identity, but must not
   // become filenames: long worktree roots can exceed a filesystem component
   // limit, and delimiter-based concatenation has ambiguous edge cases. Hash
   // the structured tuple instead.
-  const digest = createHash('sha256').update(JSON.stringify([repo, label])).digest('hex');
+  const digest = createHash('sha256').update(JSON.stringify([repo, label, command])).digest('hex');
   return path.join(lanePeaksDir(env), `${digest}.json`);
 }
 
@@ -288,15 +297,18 @@ const LOCK_STALE_MS = 30_000;
 const LOCK_POLL_MS = 50;
 
 /**
- * Record a lane's measured peak after a COMPLETED run, keyed by repo and
- * label. Stored in the protected state directory so shell commands cannot
- * plant a low peak to shrink the next reservation; only run-guarded itself
- * writes here, from RSS it measured. Kept as a small rolling window so one
- * unusually light run does not undersize the next reservation.
+ * Record a lane's measured peak after a COMPLETED run, keyed by repository,
+ * label, and exact command argv. Stored in the protected state directory so
+ * shell commands cannot plant a low peak to shrink the next reservation; only
+ * run-guarded itself writes here, from RSS it measured. Binding the command
+ * prevents a cheap command from lending its light classification to a heavy
+ * command under the same caller-declared label. Kept as a small rolling window
+ * so one unusually light run does not undersize the next reservation.
  */
-export function recordLanePeak({ env = process.env, repo, label, peakRssMb }) {
+export function recordLanePeak({ env = process.env, repo, label, command, peakRssMb }) {
   if (!Number.isFinite(peakRssMb) || peakRssMb <= 0) return;
-  const file = lanePeakFile(env, repo, label);
+  const file = lanePeakFile(env, repo, label, command);
+  if (file === null) return;
   let peaks = [];
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
@@ -314,8 +326,9 @@ export function recordLanePeak({ env = process.env, repo, label, peakRssMb }) {
 }
 
 /** The largest recent recorded peak for a lane, or null without history. */
-export function readLanePeakMb({ env = process.env, repo, label }) {
-  const file = lanePeakFile(env, repo, label);
+export function readLanePeakMb({ env = process.env, repo, label, command }) {
+  const file = lanePeakFile(env, repo, label, command);
+  if (file === null) return null;
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
     const peaks = Array.isArray(parsed) ? parsed.filter((value) => Number.isFinite(value) && value > 0) : [];
