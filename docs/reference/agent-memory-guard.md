@@ -36,10 +36,17 @@ tree, and what admission *reserves* is smaller still when the lane has a
 recent measured peak: peak plus a conservative margin, so a lane that
 measures well under the cap no longer books the full cap against admission.
 Peak history is keyed by the checkout's canonical Git common directory, lane
-label, and exact command arguments. All linked worktrees share measurements,
-unrelated clones remain isolated even when their directory names match, and a
-cheap command cannot lend its measurement to a heavy command under the same
-label.
+label, exact command arguments, and a versioned command-behavior identity. That
+identity requires a clean exact Git revision and binds the resolved executable
+plus the complete effective child environment; environment values are
+authenticated with the machine token and are never stored. The structural
+`PWD`, `INIT_CWD`, and `PATH` entries rooted in the checkout are represented
+relative to it so linked worktrees at the same revision can share when all
+other evidence matches; every other environment value remains exact. A staged,
+dirty, untracked, non-Git, or otherwise unprovable state is a cold start.
+Unrelated clones remain isolated, and a cheap command, older revision,
+different top-level runtime, or different environment cannot lend its
+measurement to a heavier behavior under the same label.
 
 ## Admission
 

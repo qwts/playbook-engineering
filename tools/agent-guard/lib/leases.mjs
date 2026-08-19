@@ -18,14 +18,32 @@
 // there: `.local` ↔ `.lan` drift made crashed same-machine locks permanently
 // unreclaimable, so the crash-recovery path became the outage.
 
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { CORE_LEASE_FIELDS, PROTOCOL_VERSION, ensureStateDirs, lanePeaksDir, leasesDir, machineToken, stateDir } from './protocol.mjs';
 
 const GIT_EXECUTABLES = ['/usr/bin/git', '/bin/git'];
+const BEHAVIOR_IDENTITY_VERSION = 2;
+
+function canonicalWorktreePath(worktree) {
+  try {
+    return realpathSync(worktree);
+  } catch {
+    return path.resolve(worktree);
+  }
+}
+
+function gitEnvironment(env) {
+  const clean = { ...env };
+  for (const name of Object.keys(clean)) {
+    if (name.startsWith('GIT_')) delete clean[name];
+  }
+  clean.GIT_OPTIONAL_LOCKS = '0';
+  return clean;
+}
 
 /**
  * A stable identity for peak history shared by every worktree of one checkout.
@@ -39,12 +57,7 @@ const GIT_EXECUTABLES = ['/usr/bin/git', '/bin/git'];
  * is not.
  */
 export function repositoryIdentity(worktree, { env = process.env } = {}) {
-  let canonicalWorktree;
-  try {
-    canonicalWorktree = realpathSync(worktree);
-  } catch {
-    canonicalWorktree = path.resolve(worktree);
-  }
+  const canonicalWorktree = canonicalWorktreePath(worktree);
 
   const git = GIT_EXECUTABLES.find((candidate) => existsSync(candidate));
   if (git === undefined) return canonicalWorktree;
@@ -52,14 +65,10 @@ export function repositoryIdentity(worktree, { env = process.env } = {}) {
   // Git identity variables are caller-controlled process state. Letting them
   // redirect this lookup would let a run borrow another checkout's light-lane
   // history. Resolve from the worktree on disk instead.
-  const gitEnv = { ...env };
-  for (const name of Object.keys(gitEnv)) {
-    if (name.startsWith('GIT_')) delete gitEnv[name];
-  }
   try {
     const raw = execFileSync(git, ['-C', canonicalWorktree, 'rev-parse', '--path-format=absolute', '--git-common-dir'], {
       encoding: 'utf8',
-      env: gitEnv,
+      env: gitEnvironment(env),
       timeout: 2000,
     }).trim();
     const commonDir = path.isAbsolute(raw) ? raw : path.resolve(canonicalWorktree, raw);
@@ -69,7 +78,118 @@ export function repositoryIdentity(worktree, { env = process.env } = {}) {
   }
 }
 
-function lanePeakFile(env, repo, label, command) {
+function executableEvidence(worktree, command, env) {
+  const requested = command[0];
+  const candidates = requested.includes(path.sep)
+    ? [path.isAbsolute(requested) ? requested : path.resolve(worktree, requested)]
+    : (env.PATH ?? '/usr/bin:/bin').split(path.delimiter).map((entry) => path.resolve(entry || worktree, requested));
+
+  let executable;
+  for (const candidate of candidates) {
+    try {
+      accessSync(candidate, fsConstants.X_OK);
+      executable = realpathSync(candidate);
+      break;
+    } catch {
+      // execvp-style search: keep looking for a runnable candidate.
+    }
+  }
+  if (executable === undefined) return null;
+
+  try {
+    const stats = statSync(executable, { bigint: true });
+    if (!stats.isFile()) return null;
+    const relative = path.relative(worktree, executable);
+    const insideWorktree = relative === '' || (!relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+    if (insideWorktree) {
+      return {
+        scope: 'worktree',
+        path: relative || '.',
+        sha256: createHash('sha256').update(readFileSync(executable)).digest('hex'),
+      };
+    }
+    return {
+      scope: 'external',
+      path: executable,
+      device: String(stats.dev),
+      inode: String(stats.ino),
+      mode: String(stats.mode),
+      size: String(stats.size),
+      modifiedNs: String(stats.mtimeNs),
+      changedNs: String(stats.ctimeNs),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizedEnvironment(env, worktree, canonicalWorktree) {
+  const roots = [...new Set([path.resolve(worktree), canonicalWorktree])].sort((left, right) => right.length - left.length);
+  const normalizeWorktreePath = (value) => {
+    for (const root of roots) {
+      if (value === root) return '<worktree>';
+      if (value.startsWith(`${root}${path.sep}`)) return `<worktree>${value.slice(root.length)}`;
+    }
+    return value;
+  };
+  const entries = [];
+  for (const name of Object.keys(env).sort()) {
+    if (typeof env[name] !== 'string') return null;
+    let value = env[name];
+    // These are structural checkout locations, not caller-selected behavior:
+    // model their repository-relative meaning so equivalent sibling
+    // worktrees can share. Every other environment value remains exact.
+    if (name === 'PWD' || name === 'INIT_CWD') value = normalizeWorktreePath(value);
+    else if (name === 'PATH') value = value.split(path.delimiter).map(normalizeWorktreePath).join(path.delimiter);
+    entries.push([name, value]);
+  }
+  return entries;
+}
+
+/**
+ * Evidence that a command still means what the recorded peak measured.
+ *
+ * The common Git directory deliberately lets sibling worktrees share state,
+ * but that is safe only when their clean revision, executable, argv and child
+ * environment agree. Any missing or dirty evidence returns null so admission
+ * treats the lane as unmeasured. Environment values are authenticated with the
+ * machine token and never persisted in the peak filename or file contents.
+ */
+export function commandBehaviorIdentity(worktree, command, { env = process.env, behaviorEnv = env } = {}) {
+  if (!Array.isArray(command) || command.length === 0 || command.some((part) => typeof part !== 'string')) return null;
+  const canonicalWorktree = canonicalWorktreePath(worktree);
+  const git = GIT_EXECUTABLES.find((candidate) => existsSync(candidate));
+  if (git === undefined) return null;
+
+  try {
+    const options = { encoding: 'utf8', env: gitEnvironment(env), timeout: 5000 };
+    const status = execFileSync(
+      git,
+      ['-C', canonicalWorktree, 'status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', '--ignore-submodules=none'],
+      options,
+    ).split('\0').filter(Boolean);
+    const revision = status.find((entry) => entry.startsWith('# branch.oid '))?.slice('# branch.oid '.length);
+    const dirty = status.some((entry) => !entry.startsWith('# '));
+    if (!revision || revision === '(initial)' || dirty) return null;
+
+    const executable = executableEvidence(canonicalWorktree, command, behaviorEnv);
+    const environment = normalizedEnvironment(behaviorEnv, worktree, canonicalWorktree);
+    if (executable === null || environment === null) return null;
+    const evidence = JSON.stringify({
+      version: BEHAVIOR_IDENTITY_VERSION,
+      revision,
+      command,
+      cwd: '.',
+      executable,
+      environment,
+    });
+    return createHmac('sha256', machineToken(env)).update(evidence).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+function lanePeakFile(env, repo, label, command, behaviorIdentity) {
   const valid =
     typeof repo === 'string' &&
     repo !== '' &&
@@ -77,13 +197,17 @@ function lanePeakFile(env, repo, label, command) {
     label !== '' &&
     Array.isArray(command) &&
     command.length > 0 &&
-    command.every((part) => typeof part === 'string');
+    command.every((part) => typeof part === 'string') &&
+    typeof behaviorIdentity === 'string' &&
+    behaviorIdentity !== '';
   if (!valid) return null;
   // Full canonical paths are deliberately part of the identity, but must not
   // become filenames: long worktree roots can exceed a filesystem component
   // limit, and delimiter-based concatenation has ambiguous edge cases. Hash
   // the structured tuple instead.
-  const digest = createHash('sha256').update(JSON.stringify([repo, label, command])).digest('hex');
+  const digest = createHash('sha256')
+    .update(JSON.stringify([BEHAVIOR_IDENTITY_VERSION, repo, label, command, behaviorIdentity]))
+    .digest('hex');
   return path.join(lanePeaksDir(env), `${digest}.json`);
 }
 
@@ -310,16 +434,15 @@ const LOCK_POLL_MS = 50;
 
 /**
  * Record a lane's measured peak after a COMPLETED run, keyed by repository,
- * label, and exact command argv. Stored in the protected state directory so
- * shell commands cannot plant a low peak to shrink the next reservation; only
- * run-guarded itself writes here, from RSS it measured. Binding the command
- * prevents a cheap command from lending its light classification to a heavy
- * command under the same caller-declared label. Kept as a small rolling window
- * so one unusually light run does not undersize the next reservation.
+ * label, exact command argv, and verified behavior identity. Stored in the
+ * protected state directory so shell commands cannot plant a low peak to
+ * shrink the next reservation; only run-guarded itself writes here, from RSS
+ * it measured. Kept as a small rolling window so one unusually light run does
+ * not undersize the next reservation.
  */
-export async function recordLanePeak({ env = process.env, repo, label, command, peakRssMb }) {
+export async function recordLanePeak({ env = process.env, repo, label, command, behaviorIdentity, peakRssMb }) {
   if (!Number.isFinite(peakRssMb) || peakRssMb <= 0) return false;
-  const file = lanePeakFile(env, repo, label, command);
+  const file = lanePeakFile(env, repo, label, command, behaviorIdentity);
   if (file === null) return false;
   try {
     return await withAdmissionLock(env, () => {
@@ -341,8 +464,8 @@ export async function recordLanePeak({ env = process.env, repo, label, command, 
 }
 
 /** The largest recent recorded peak for a lane, or null without history. */
-export function readLanePeakMb({ env = process.env, repo, label, command }) {
-  const file = lanePeakFile(env, repo, label, command);
+export function readLanePeakMb({ env = process.env, repo, label, command, behaviorIdentity }) {
+  const file = lanePeakFile(env, repo, label, command, behaviorIdentity);
   if (file === null) return null;
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
