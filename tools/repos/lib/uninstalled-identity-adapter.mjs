@@ -1002,6 +1002,14 @@ function commitOptionSummary(operation) {
       resetsAuthor = true;
       continue;
     }
+    if (argument === '--no-reset-author') {
+      resetsAuthor = false;
+      continue;
+    }
+    if (argument === '--no-author') {
+      author = '';
+      continue;
+    }
     if (argument === '--gpg-sign' || argument.startsWith('--gpg-sign=')) continue;
     if (flags.has(argument)) continue;
 

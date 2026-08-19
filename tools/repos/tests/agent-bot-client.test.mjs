@@ -95,11 +95,28 @@ function identityRepository(name, email) {
     ['init', '-q'],
     ['config', 'user.name', name],
     ['config', 'user.email', email],
+    ['config', 'commit.gpgsign', 'false'],
   ]) {
     const run = spawnSync('git', args, { cwd, encoding: 'utf8' });
     assert.equal(run.status, 0, `git ${args.join(' ')} failed: ${run.stderr}`);
   }
   return cwd;
+}
+
+function runGit(cwd, args, overrides = {}) {
+  const env = { ...process.env, ...overrides };
+  for (const [name, value] of Object.entries(overrides)) {
+    if (value === null) delete env[name];
+  }
+  const run = spawnSync('git', args, { cwd, encoding: 'utf8', env });
+  assert.equal(run.status, 0, `git ${args.join(' ')} failed: ${run.stderr}`);
+  return run;
+}
+
+function headIdentity(cwd) {
+  const run = runGit(cwd, ['show', '-s', '--format=%an%x00%ae%x00%cn%x00%ce', 'HEAD']);
+  const [authorName, authorEmail, committerName, committerEmail] = run.stdout.trimEnd().split('\0');
+  return { authorEmail, authorName, committerEmail, committerName };
 }
 
 const grant = (token = 'secret-token') => JSON.stringify({
@@ -591,6 +608,90 @@ test('--author overrides only the author and malformed identity options fail clo
     }
   } finally {
     rmSync(unmanaged, { recursive: true, force: true });
+  }
+});
+
+test('negated commit identity options use Git last-option-wins semantics', () => {
+  const authorRepo = identityRepository('Human User', 'human@example.test');
+  const resetRepo = identityRepository('Human User', 'human@example.test');
+  const botCommitter = {
+    ...withoutGitIdentity,
+    GIT_COMMITTER_EMAIL: 'ai9d@example.test',
+    GIT_COMMITTER_NAME: 'ai9d',
+  };
+  const botIdentity = {
+    GIT_AUTHOR_EMAIL: 'ai9d@example.test',
+    GIT_AUTHOR_NAME: 'ai9d',
+    GIT_COMMITTER_EMAIL: 'ai9d@example.test',
+    GIT_COMMITTER_NAME: 'ai9d',
+  };
+  const cancelledAuthor = "git commit --allow-empty --author='ai9d <ai9d@example.test>' --no-author -m x";
+  const restoredAuthor = "git commit --allow-empty --no-author --author='ai9d <ai9d@example.test>' -m x";
+  const cancelledReset = 'git commit --allow-empty -C HEAD --reset-author --no-reset-author';
+  const restoredReset = 'git commit --allow-empty -C HEAD --no-reset-author --reset-author';
+
+  try {
+    runGit(authorRepo, [
+      'commit', '--allow-empty', '--author=ai9d <ai9d@example.test>', '--no-author', '-m', 'cancel author',
+    ], botCommitter);
+    assert.deepEqual(headIdentity(authorRepo), {
+      authorEmail: 'human@example.test',
+      authorName: 'Human User',
+      committerEmail: 'ai9d@example.test',
+      committerName: 'ai9d',
+    }, 'real Git must cancel an earlier --author');
+    for (const adapter of managedAdapters) {
+      assert.equal(adapterDenied(adapter, cancelledAuthor, 'human', {
+        cwd: authorRepo,
+        env: botCommitter,
+      }), true, `${adapter.path} must deny the real --author/--no-author identity`);
+    }
+
+    runGit(authorRepo, [
+      'commit', '--allow-empty', '--no-author', '--author=ai9d <ai9d@example.test>', '-m', 'restore author',
+    ], botCommitter);
+    assert.deepEqual(headIdentity(authorRepo), {
+      authorEmail: 'ai9d@example.test',
+      authorName: 'ai9d',
+      committerEmail: 'ai9d@example.test',
+      committerName: 'ai9d',
+    }, 'real Git must honor a final --author');
+    for (const adapter of managedAdapters) {
+      adapterAllowed(adapter, restoredAuthor, 'human', { cwd: authorRepo, env: botCommitter });
+    }
+
+    runGit(resetRepo, ['commit', '--allow-empty', '-m', 'human seed'], withoutGitIdentity);
+    runGit(resetRepo, [
+      'commit', '--allow-empty', '-C', 'HEAD', '--reset-author', '--no-reset-author',
+    ], botIdentity);
+    assert.deepEqual(headIdentity(resetRepo), {
+      authorEmail: 'human@example.test',
+      authorName: 'Human User',
+      committerEmail: 'ai9d@example.test',
+      committerName: 'ai9d',
+    }, 'real Git must cancel an earlier --reset-author');
+    for (const adapter of managedAdapters) {
+      assert.equal(adapterDenied(adapter, cancelledReset, 'human', {
+        cwd: resetRepo,
+        env: botIdentity,
+      }), true, `${adapter.path} must deny the real --reset-author/--no-reset-author identity`);
+    }
+
+    runGit(resetRepo, [
+      'commit', '--allow-empty', '-C', 'HEAD', '--no-reset-author', '--reset-author',
+    ], botIdentity);
+    assert.deepEqual(headIdentity(resetRepo), {
+      authorEmail: 'ai9d@example.test',
+      authorName: 'ai9d',
+      committerEmail: 'ai9d@example.test',
+      committerName: 'ai9d',
+    }, 'real Git must honor a final --reset-author');
+    for (const adapter of managedAdapters) {
+      adapterAllowed(adapter, restoredReset, 'human', { cwd: resetRepo, env: botIdentity });
+    }
+  } finally {
+    rmSync(authorRepo, { recursive: true, force: true });
+    rmSync(resetRepo, { recursive: true, force: true });
   }
 });
 
