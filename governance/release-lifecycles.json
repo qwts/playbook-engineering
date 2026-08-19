@@ -5,7 +5,8 @@
       "repository": "qwts/playbook-engineering",
       "metadataSystem": "none",
       "sourceInputPolicy": "not-applicable",
-      "generatedProjection": null
+      "generatedProjection": null,
+      "harnessProjection": null
     },
     {
       "repository": "qwts/overlook",
@@ -15,6 +16,12 @@
         "baseRef": "main",
         "headRef": "changeset-release/main",
         "author": "chores-dumb[bot]"
+      },
+      "harnessProjection": {
+        "baseRef": "main",
+        "headRef": "governance/harness-sync",
+        "author": "chores-dumb[bot]",
+        "sourceRepository": "qwts/playbook-engineering"
       }
     },
     {
@@ -25,6 +32,12 @@
         "baseRef": "main",
         "headRef": "changeset-release/main",
         "author": "chores-dumb[bot]"
+      },
+      "harnessProjection": {
+        "baseRef": "main",
+        "headRef": "governance/harness-sync",
+        "author": "chores-dumb[bot]",
+        "sourceRepository": "qwts/playbook-engineering"
       }
     },
     {
@@ -35,6 +48,12 @@
         "baseRef": "main",
         "headRef": "changeset-release/main",
         "author": "chores-dumb[bot]"
+      },
+      "harnessProjection": {
+        "baseRef": "main",
+        "headRef": "governance/harness-sync",
+        "author": "chores-dumb[bot]",
+        "sourceRepository": "qwts/playbook-engineering"
       }
     },
     {
@@ -45,49 +64,62 @@
         "baseRef": "main",
         "headRef": "changeset-release/main",
         "author": "chores-dumb[bot]"
+      },
+      "harnessProjection": {
+        "baseRef": "main",
+        "headRef": "governance/harness-sync",
+        "author": "chores-dumb[bot]",
+        "sourceRepository": "qwts/playbook-engineering"
       }
     },
     {
       "repository": "qwts/quorum",
       "metadataSystem": "none",
       "sourceInputPolicy": "not-applicable",
-      "generatedProjection": null
+      "generatedProjection": null,
+      "harnessProjection": null
     },
     {
       "repository": "qwts/agent-bot-identity",
       "metadataSystem": "none",
       "sourceInputPolicy": "not-applicable",
-      "generatedProjection": null
+      "generatedProjection": null,
+      "harnessProjection": null
     },
     {
       "repository": "qwts/codex-rules-editor",
       "metadataSystem": "none",
       "sourceInputPolicy": "not-applicable",
-      "generatedProjection": null
+      "generatedProjection": null,
+      "harnessProjection": null
     },
     {
       "repository": "qwts/playbook-dashboard",
       "metadataSystem": "none",
       "sourceInputPolicy": "not-applicable",
-      "generatedProjection": null
+      "generatedProjection": null,
+      "harnessProjection": null
     },
     {
       "repository": "qwts/agentic-code-analysis",
       "metadataSystem": "none",
       "sourceInputPolicy": "not-applicable",
-      "generatedProjection": null
+      "generatedProjection": null,
+      "harnessProjection": null
     },
     {
       "repository": "qwts/localnotes",
       "metadataSystem": "none",
       "sourceInputPolicy": "not-applicable",
-      "generatedProjection": null
+      "generatedProjection": null,
+      "harnessProjection": null
     },
     {
       "repository": "qwts/universal-agentic-workflow",
       "metadataSystem": "none",
       "sourceInputPolicy": "not-applicable",
-      "generatedProjection": null
+      "generatedProjection": null,
+      "harnessProjection": null
     }
   ]
 }

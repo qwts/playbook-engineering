@@ -47,8 +47,8 @@ result in [`release-lifecycles.json`](../../governance/release-lifecycles.json):
 - Advanced CodeQL runs through governed CI for every configured language and
   retains a default-branch scan.
 - Source PRs keep their repository-specific release-input rule; generated
-  release projections skip only consumed-input presence. The classification and
-  origin-resolution contract is in the
+  release and governed harness projections skip only consumed-input presence.
+  The classification and origin-resolution contract is in the
   [CI policy](ci-execution-policy.md#changesets-version-prs-and-releases) — grant
   the workflow `pull-requests: read` so the policy action can resolve it.
 
