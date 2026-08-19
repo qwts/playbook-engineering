@@ -601,6 +601,17 @@ describe('command hook', () => {
     git('init', '--quiet');
     mkdirSync(path.join(repo, 'scripts'), { recursive: true });
     writeFileSync(path.join(repo, 'scripts', 'check-traceability.mjs'), 'process.exit(0);\n');
+    mkdirSync(path.join(repo, 'child', 'scripts'), { recursive: true });
+    writeFileSync(path.join(repo, 'child', 'scripts', 'check-traceability.mjs'), 'process.exit(0);\n');
+    mkdirSync(path.join(repo, 'child path', 'scripts'), { recursive: true });
+    writeFileSync(path.join(repo, 'child path', 'scripts', 'check-traceability.mjs'), 'process.exit(0);\n');
+    writeFileSync(
+      path.join(repo, 'scripts', 'option-dispatch.mjs'),
+      "import { execFileSync } from 'node:child_process';\n" +
+        "const command = process.argv.find((arg) => arg.startsWith('--cmd=')).slice(6);\n" +
+        "const argument = process.argv.find((arg) => arg.startsWith('--arg=')).slice(6);\n" +
+        "execFileSync(command, [argument], { stdio: 'inherit' });\n",
+    );
     git('add', '-A');
     git('commit', '--quiet', '-m', 'helper');
     const local = { ...opts(), cwd: repo };
@@ -627,6 +638,38 @@ describe('command hook', () => {
     assert.equal(evaluateCommand(`command env -C ${outside} node scripts/check-traceability.mjs`, local).allow, false);
     assert.equal(evaluateCommand(`env -S '-C ${outside} node scripts/check-traceability.mjs'`, local).allow, false);
     assert.equal(evaluateCommand(`env --split-string='--chdir=${outside} node scripts/check-traceability.mjs'`, local).allow, false);
+    const outsideWithSpaces = path.join(outside, 'out side');
+    mkdirSync(path.join(outsideWithSpaces, 'scripts'), { recursive: true });
+    writeFileSync(path.join(outsideWithSpaces, 'scripts', 'check-traceability.mjs'), "process.exitCode = 1;\n");
+    assert.equal(evaluateCommand(`env -C '${outsideWithSpaces}' node scripts/check-traceability.mjs`, local).allow, false);
+    // Nested env wrappers inherit the cwd selected by their enclosing env.
+    // Resolving the inner relative directory from the hook cwd authenticates
+    // the reviewed repo copy while Node executes the planted outside copy.
+    mkdirSync(path.join(outside, 'child', 'scripts'), { recursive: true });
+    writeFileSync(path.join(outside, 'child', 'scripts', 'check-traceability.mjs'), "process.exitCode = 1;\n");
+    assert.equal(evaluateCommand(`env -C ${repo} env -C child node scripts/check-traceability.mjs`, local).allow, true);
+    assert.equal(evaluateCommand(`env -C ${outside} env -C child node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env -S '-C ${outside} env -C child node scripts/check-traceability.mjs'`, local).allow, false);
+    mkdirSync(path.join(outsideWithSpaces, 'child path', 'scripts'), { recursive: true });
+    writeFileSync(path.join(outsideWithSpaces, 'child path', 'scripts', 'check-traceability.mjs'), "process.exitCode = 1;\n");
+    assert.equal(evaluateCommand(`env -C '${repo}' env -C 'child path' node scripts/check-traceability.mjs`, local).allow, true);
+    assert.equal(evaluateCommand(`env -C '${outsideWithSpaces}' env -C 'child path' node scripts/check-traceability.mjs`, local).allow, false);
+    // `env -C` does not retarget an absolute path: provenance follows the
+    // resolved file's checkout even when the child cwd is outside it.
+    assert.equal(evaluateCommand(`env -C '${outsideWithSpaces}' node ${path.join(repo, 'scripts', 'check-traceability.mjs')}`, local).allow, true);
+    // An absolute path cannot nominate some other repository's remote ref as
+    // the trust anchor for this checkout's reviewed-helper allowance.
+    const otherRepo = mkdtempSync(path.join(tmpdir(), 'agent-guard-other-repo-'));
+    roots.push(otherRepo);
+    const otherGit = (...args) =>
+      execFileSync('git', ['-C', otherRepo, '-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { stdio: 'ignore' });
+    otherGit('init', '--quiet');
+    mkdirSync(path.join(otherRepo, 'scripts'), { recursive: true });
+    writeFileSync(path.join(otherRepo, 'scripts', 'check-traceability.mjs'), 'process.exit(0);\n');
+    otherGit('add', '-A');
+    otherGit('commit', '--quiet', '-m', 'helper');
+    otherGit('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    assert.equal(evaluateCommand(`node ${path.join(otherRepo, 'scripts', 'check-traceability.mjs')}`, local).allow, false);
     // Provenance vouches for the script's bytes, not its argv: a checked-in
     // argv-forwarding dispatcher relays whatever follows `--` (the
     // measure-runner-capacity shape), and a command-shaped or unreadable
@@ -635,6 +678,9 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs -- npm run ci', local).allow, false);
     assert.equal(evaluateCommand("node scripts/check-traceability.mjs 'npx vitest'", local).allow, false);
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs --shell bash', local).allow, false);
+    assert.equal(evaluateCommand('node scripts/option-dispatch.mjs --cmd=npx --arg=vitest', local).allow, false);
+    assert.equal(evaluateCommand('node scripts/option-dispatch.mjs --cmd=/usr/bin/npm --arg=ci', local).allow, false);
+    assert.equal(evaluateCommand('node scripts/option-dispatch.mjs --CMD=custom-runner --arg=ci', local).allow, false);
     // Provenance vouches only for a substitution-free first segment: an
     // earlier segment can cd away from the hook's cwd or rewrite the file,
     // and a substitution executes before the runtime does.
@@ -804,6 +850,10 @@ describe('hook helpers', () => {
     assert.deepEqual(resolveExecutionDirs('/outside', 'env -C /project npx vitest'), ['/outside', '/project']);
     assert.deepEqual(resolveExecutionDirs('/outside', 'env --chdir=/project npm run ci'), ['/outside', '/project']);
     assert.deepEqual(resolveExecutionDirs('/outside', 'env --chdir "/project with spaces" npm run ci'), ['/outside', '/project with spaces']);
+    assert.deepEqual(
+      resolveExecutionDirs('/outside', "env -C '/project with spaces' env -C 'child path' npm run ci"),
+      ['/outside', '/project with spaces', '/project with spaces/child path']
+    );
     assert.deepEqual(resolveExecutionDirs('/outside', 'env -u TOKEN -C /project npm run ci'), ['/outside', '/project']);
     assert.deepEqual(resolveExecutionDirs('/outside', "env -S '-u TOKEN -C /project npm run ci'"), ['/outside', '/project']);
     assert.deepEqual(resolveExecutionDirs('/outside', 'env -C /project -C /elsewhere npm run ci'), ['/outside', '/elsewhere']);

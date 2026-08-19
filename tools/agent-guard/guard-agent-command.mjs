@@ -405,15 +405,30 @@ function maskHeredocBodies(text) {
 }
 
 function scopeWords(text) {
-  return [...text.matchAll(/\$'(?:[^'\\]|\\.)*'|'([^']*)'|"((?:[^"\\]|\\.)*)"|([^\s]+)/gu)].map((match) => ({
-    index: match.index,
-    value: match[1] ?? match[2]?.replace(/\\(["\\$`])/gu, '$1') ?? match[3] ?? decodeAnsiCWord(match[0]),
-  }));
+  const words = [];
+  let index = 0;
+  while (index < text.length) {
+    while (/\s/u.test(text[index] ?? '')) index += 1;
+    if (index >= text.length) break;
+    const start = index;
+    const word = parseHeredocWord(text, start);
+    if (word.end === start) {
+      index += 1;
+      continue;
+    }
+    words.push({ index: start, value: word.value });
+    index = word.end;
+  }
+  return words;
 }
 
 function prefixReaches(words, index) {
   const marker = '__agent_guard_scope_command__';
-  return commandAfterPrefixes([...words.slice(0, index).map((word) => word.value), marker].join(' ')) === marker;
+  // Re-stringifying parsed words with literal spaces would split a quoted
+  // operand back into multiple argv slots. Use the same sentinel as escaped
+  // shell blanks so prefix traversal preserves each parsed word boundary.
+  const prefix = words.slice(0, index).map((word) => word.value.replace(/\s/gu, '\u0004'));
+  return commandAfterPrefixes([...prefix, marker].join(' ')) === marker;
 }
 
 function directoryOptionTargets(segment) {
@@ -432,8 +447,24 @@ function directoryOptionTargets(segment) {
           envTarget = option.slice('--chdir='.length);
         } else if (/^-C.+/u.test(option)) {
           envTarget = option.slice(2);
-        } else if (/^(?:-u|--unset|-P|--path|-S|--split-string)$/u.test(option)) {
+        } else if (/^(?:-u|--unset|-P|--path)$/u.test(option)) {
           optionAt += 1;
+        } else if (option === '-S' || option === '--split-string') {
+          const operand = words[optionAt + 1];
+          if (!operand) break;
+          const splitWords = scopeWords(operand.value).map((part) => ({
+            index: operand.index + part.index / 100_000,
+            value: part.value,
+          }));
+          words.splice(optionAt, 2, ...splitWords);
+          optionAt -= 1;
+        } else if (/^(?:-S|--split-string)=/u.test(option)) {
+          const splitWords = scopeWords(option.slice(option.indexOf('=') + 1)).map((part) => ({
+            index: words[optionAt].index + part.index / 100_000,
+            value: part.value,
+          }));
+          words.splice(optionAt, 1, ...splitWords);
+          optionAt -= 1;
         } else if (option === '--') {
           break;
         } else if (!option.startsWith('-') && !/^\w+=/u.test(option)) {
@@ -546,7 +577,7 @@ export function resolveExecutionDirs(cwd, command) {
   for (const match of scopedCommand.matchAll(envCommands)) {
     const envIndex = match.index + match[0].indexOf('env');
     if (!shellSyntax[envIndex]) continue;
-    const words = [...match[1].matchAll(/"([^"]*)"|'([^']*)'|([^\s]+)/gu)].map((word) => word[1] ?? word[2] ?? word[3]);
+    const words = scopeWords(match[1]).map((word) => word.value);
     let chdirTarget;
     for (let index = 0; index < words.length; index += 1) {
       const word = words[index];
@@ -560,11 +591,11 @@ export function resolveExecutionDirs(cwd, command) {
       } else if (/^(?:-u|--unset|-P|--path)$/u.test(word)) {
         index += 1;
       } else if (word === '-S' || word === '--split-string') {
-        const splitWords = [...(words[index + 1] ?? '').matchAll(/"([^"]*)"|'([^']*)'|([^\s]+)/gu)].map((part) => part[1] ?? part[2] ?? part[3]);
+        const splitWords = scopeWords(words[index + 1] ?? '').map((part) => part.value);
         words.splice(index, 2, ...splitWords);
         index -= 1;
       } else if (/^(?:-S|--split-string)=/u.test(word)) {
-        const splitWords = [...word.slice(word.indexOf('=') + 1).matchAll(/"([^"]*)"|'([^']*)'|([^\s]+)/gu)].map((part) => part[1] ?? part[2] ?? part[3]);
+        const splitWords = scopeWords(word.slice(word.indexOf('=') + 1)).map((part) => part.value);
         words.splice(index, 1, ...splitWords);
         index -= 1;
       } else if (word === '--') {
@@ -573,7 +604,7 @@ export function resolveExecutionDirs(cwd, command) {
         break;
       }
     }
-    if (chdirTarget) events.push({ index: envIndex, target: chdirTarget, type: 'env-chdir' });
+    if (chdirTarget) events.push({ index: envIndex, scope: match.index, target: chdirTarget, type: 'env-chdir' });
   }
 
   // Normalize supported execution prefixes before looking for directory
@@ -584,7 +615,7 @@ export function resolveExecutionDirs(cwd, command) {
     const firstWord = scopeWords(match[1])[0];
     if (!firstWord || !shellSyntax[segmentOffset + firstWord.index]) continue;
     for (const option of directoryOptionTargets(match[1])) {
-      events.push({ index: segmentOffset + option.index, target: option.target, type: 'env-chdir' });
+      events.push({ index: segmentOffset + option.index, scope: match.index, target: option.target, type: 'env-chdir' });
     }
   }
 
@@ -600,19 +631,37 @@ export function resolveExecutionDirs(cwd, command) {
   const order = { 'subshell-open': 0, cd: 1, 'env-chdir': 1, 'subshell-close': 2 };
   const uniqueEvents = [...new Map(events.map((event) => [`${event.index}:${event.type}:${event.target ?? ''}`, event])).values()];
   uniqueEvents.sort((left, right) => left.index - right.index || order[left.type] - order[right.type]);
+  let envScope = null;
+  let envCurrent = null;
   for (const event of uniqueEvents) {
     if (event.type === 'subshell-open') {
       parentScopes.push(current);
+      envScope = null;
+      envCurrent = null;
       continue;
     }
     if (event.type === 'subshell-close') {
       current = parentScopes.pop() ?? current;
+      envScope = null;
+      envCurrent = null;
       continue;
     }
-    const target = resolveTarget(event.target, current);
+    // Consecutive directory-changing wrappers form one child process chain.
+    // Each nested relative target is resolved from the cwd selected by its
+    // enclosing wrapper, but the resulting cwd does not leak to the next shell
+    // command in the parent (#209).
+    const base = event.type === 'env-chdir' && event.scope === envScope ? envCurrent : current;
+    const target = resolveTarget(event.target, base);
     if (!target) continue;
     directories.push(target);
-    if (event.type === 'cd') current = target;
+    if (event.type === 'cd') {
+      current = target;
+      envScope = null;
+      envCurrent = null;
+    } else {
+      envScope = event.scope;
+      envCurrent = target;
+    }
   }
   const effective = stripInertText(command);
   const hasShellCommandString = /(?:^|[;\n|&(){}])[^;\n|&(){}]*\b(?:ba|da|z)?sh\b[^;\n|&(){}]*\s-[A-Za-z]*c[A-Za-z]*\s+(?:\$)?["']/u.test(command);
@@ -1062,8 +1111,8 @@ function reviewedBaseRef(cwd) {
 // not a filename allowlist an agent could extend (#141's fake-wrapper
 // defect), and not mere trackedness an agent could satisfy with `git add`
 // or a local commit. Any git failure, path escape, or mismatch fails closed.
-function isReviewedCheckedInScript(token, cwd) {
-  let file = resolve(cwd, token);
+function isReviewedCheckedInScript(token, executionCwd, provenanceCwd) {
+  let file = resolve(executionCwd, token);
   if (!existsSync(file)) return false;
   // git prints physical paths; resolve symlinked segments (macOS /var → /private/var)
   // so the toplevel-relative computation compares like with like.
@@ -1073,13 +1122,18 @@ function isReviewedCheckedInScript(token, cwd) {
     return false;
   }
   try {
-    const toplevel = git(cwd, 'rev-parse', '--show-toplevel');
+    // The execution cwd determines a relative script path, but provenance is
+    // anchored to the checkout that supplied the hook's reported cwd. An
+    // absolute path continues to name a reviewed file after `env -C`, without
+    // letting the command nominate an unrelated repository as its own trust
+    // anchor (#209).
+    const toplevel = git(provenanceCwd, 'rev-parse', '--show-toplevel');
     const relPath = relative(toplevel, file);
     if (relPath.startsWith('..') || isAbsolute(relPath)) return false;
-    const base = reviewedBaseRef(cwd);
+    const base = reviewedBaseRef(toplevel);
     if (base === null) return false;
-    const reviewedBlob = git(cwd, 'rev-parse', '--verify', '--quiet', `${base}:${relPath.split(sep).join('/')}`);
-    const onDiskBlob = git(cwd, 'hash-object', '--', file);
+    const reviewedBlob = git(toplevel, 'rev-parse', '--verify', '--quiet', `${base}:${relPath.split(sep).join('/')}`);
+    const onDiskBlob = git(toplevel, 'hash-object', '--', file);
     return reviewedBlob === onDiskBlob;
   } catch {
     return false;
@@ -1091,10 +1145,19 @@ function isReviewedCheckedInScript(token, cwd) {
 // (`node scripts/measure-runner-capacity.mjs -- npx vitest`) spawns the
 // delegated command sight-unseen, outside static classification. The
 // provenance allowance therefore also requires inert arguments — no `--`
-// forwarding separator, no token naming a runtime, shell, package manager, or
-// test binary, and no blanked quoted word this scan cannot read. Ordinary
-// flags and path arguments stay allowed.
+// forwarding separator, no token (including an option-encoded value) naming a
+// runtime, shell, package manager, or test binary, and no blanked quoted word
+// this scan cannot read. Ordinary flags and path arguments stay allowed.
 const DISPATCHABLE_ARGUMENT = /^(?:node|electron|deno|npm|npx|bunx|corepack|pnpm|yarn|bun|playwright|vitest|c8|test-storybook|xargs|env|sh|bash|dash|zsh|ksh|python(?:\d+(?:\.\d+)*)?|perl|ruby|php)$/u;
+const COMMAND_VALUE_OPTION = /^--(?:cmd|command|exec|execute|executable|launcher|program|shell)(?:=|$)/iu;
+
+function hasCommandLikeScriptArgument(token) {
+  if (COMMAND_VALUE_OPTION.test(token)) return true;
+  return token
+    .split(/[^A-Za-z0-9_./+-]+/u)
+    .filter(Boolean)
+    .some((component) => DISPATCHABLE_ARGUMENT.test(component.split('/').at(-1) ?? ''));
+}
 
 function hasInertScriptArguments(segment, scriptToken) {
   const tokens = commandAfterPrefixes(segment).split(/\s+/u).filter(Boolean);
@@ -1105,10 +1168,10 @@ function hasInertScriptArguments(segment, scriptToken) {
   return tail.every((token) =>
     token !== '--' &&
     !/['"]/u.test(token) &&
-    !DISPATCHABLE_ARGUMENT.test(token.split('/').at(-1) ?? ''));
+    !hasCommandLikeScriptArgument(token));
 }
 
-function hasRuntimeScriptFile(command, cwd = process.cwd()) {
+function hasRuntimeScriptFile(command, cwd = process.cwd(), sourceCommand = command) {
   const segments = splitSegments(command);
   for (let index = 0; index < segments.length; index += 1) {
     const program = runtimeProgram(segments[index]);
@@ -1119,7 +1182,10 @@ function hasRuntimeScriptFile(command, cwd = process.cwd()) {
     // reported cwd, so resolving against `cwd` alone can authenticate the
     // reviewed repository copy while Node executes a planted same-path script
     // elsewhere (#209).
-    const executionCwd = resolveExecutionDir(cwd, segments[index]) ?? cwd;
+    // Classification runs over inert-stripped text, but provenance resolution
+    // needs the original shell spelling: quote removal may otherwise erase a
+    // directory operand such as `env -C '/tmp/out side'` (#209).
+    const executionCwd = resolveExecutionDir(cwd, sourceCommand) ?? cwd;
     if (program.family === 'node' && /(?:^|\/)tools\/agent-guard\/(?:run-guarded|arbiter)\.mjs$/u.test(normalized)) continue;
     // Checked-in Node helpers whose content matches the reviewed base ref
     // are the repository's own documented tooling (#191). Provenance only
@@ -1136,7 +1202,7 @@ function hasRuntimeScriptFile(command, cwd = process.cwd()) {
       segments.length === 1 &&
       !/\$\(|`|[<>]\(/u.test(segments[index]) &&
       hasInertScriptArguments(segments[index], program.token) &&
-      isReviewedCheckedInScript(normalized, executionCwd)
+      isReviewedCheckedInScript(normalized, executionCwd, cwd)
     )
       continue;
     return true;
@@ -2234,7 +2300,7 @@ export function evaluateCommand(command, { cwd = process.cwd() } = {}) {
     };
   }
 
-  if (hasRuntimeScriptFile(effective, cwd)) {
+  if (hasRuntimeScriptFile(effective, cwd, command)) {
     return {
       allow: false,
       reason: `Blocked direct runtime script-file dispatch: a script can launch a protected lane after static shell checks. Run it through the repository's guarded entrypoint. ${USE_ENTRYPOINT}`,
