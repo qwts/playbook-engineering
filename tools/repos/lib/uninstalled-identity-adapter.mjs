@@ -24,6 +24,14 @@ const GIT_COMMIT_SUBCOMMANDS = new Set([
   'revert',
   'stash',
 ]);
+const INPUT_DERIVED_GIT_AUTHORS = new Set([
+  'am',
+  'cherry-pick',
+  'fast-import',
+  'filter-branch',
+  'pull',
+  'rebase',
+]);
 const GIT_RECOVERY_SUBCOMMANDS = new Set([
   'am',
   'cherry-pick',
@@ -818,7 +826,7 @@ function unwrapPrefixes(input, inheritedContext) {
 function parseGit(words, context) {
   let i = 1;
   const globalArgs = [];
-  const takesValue = new Set(['-C', '-c', '--config-env', '--git-dir', '--namespace', '--work-tree']);
+  const takesValue = new Set(['-C', '--config-env', '--git-dir', '--namespace', '--work-tree']);
   while (i < words.length) {
     const option = words[i];
     if (option.dynamic) return unsafeScan();
@@ -826,6 +834,13 @@ function parseGit(words, context) {
     if (option.value === '--') {
       i += 1;
       break;
+    }
+    if (option.value === '-c') {
+      const config = words[i + 1];
+      if (!config || config.dynamic || !config.value) return unsafeScan();
+      globalArgs.push('-c', config.value);
+      i += 2;
+      continue;
     }
     if (GIT_GLOBAL_QUERY_OPTIONS.has(option.value)) {
       return i === words.length - 1
@@ -1106,17 +1121,11 @@ function identMatches(value, authors) {
   const lower = String(value).trim().toLowerCase();
   if (authors.includes(lower)) return true;
   const at = lower.indexOf('@');
-  return at > 0 && authors.includes(lower.slice(0, at));
-}
-
-function parseAuthorIdent(raw) {
-  const text = String(raw || '').trim();
-  const lt = text.lastIndexOf(' <');
-  if (lt > 0 && text.endsWith('>')) {
-    return { email: text.slice(lt + 2, -1).trim(), name: text.slice(0, lt).trim() };
-  }
-  if (text.includes('@') && !text.includes(' ')) return { email: text, name: '' };
-  return { email: '', name: text };
+  if (at <= 0) return false;
+  const local = lower.slice(0, at);
+  if (authors.includes(local)) return true;
+  const plus = local.lastIndexOf('+');
+  return plus >= 0 && authors.includes(local.slice(plus + 1));
 }
 
 function operationEnvironment(env, context) {
@@ -1132,42 +1141,171 @@ function operationEnvironment(env, context) {
   return merged;
 }
 
-function gitAuthorOverride(operation) {
-  if (operation.subcommand !== 'commit') return '';
+function commitOptionSummary(operation) {
+  if (operation.subcommand !== 'commit') {
+    return { author: '', usesCurrentAuthor: true };
+  }
+  const flags = new Set([
+    '--ahead-behind', '--all', '--allow-empty', '--allow-empty-message', '--branch',
+    '--dry-run', '--edit', '--include', '--interactive', '--long', '--no-ahead-behind',
+    '--no-edit', '--no-gpg-sign', '--no-post-rewrite', '--no-signoff', '--no-status',
+    '--no-verify', '--null', '--only', '--patch', '--pathspec-file-nul', '--porcelain',
+    '--quiet', '--short', '--signoff', '--status', '--verbose', '--verify',
+  ]);
+  const takesValue = new Set([
+    '--author', '--cleanup', '--date', '--file', '--fixup', '--message',
+    '--pathspec-from-file', '--reedit-message', '--reuse-message', '--squash',
+    '--template', '--trailer',
+  ]);
+  const reuseOptions = new Set([
+    '--reedit-message', '--reuse-message', '-C', '-c',
+  ]);
+  const untrackedModes = new Set(['all', 'no', 'normal']);
+  const shortFlags = new Set(['a', 'e', 'i', 'n', 'o', 'p', 'q', 's', 'v', 'z']);
+  const shortValues = new Set(['C', 'F', 'c', 'm', 't']);
+  let author = '';
+  let options = true;
+  let resetsAuthor = false;
+  let reusesAuthor = false;
+
   for (let i = operation.subcommandIndex + 1; i < operation.words.length; i += 1) {
     const item = operation.words[i];
+    if (!options) continue;
     if (item.dynamic) return null;
-    if (item.value === '--author') {
-      const author = operation.words[i + 1];
-      return !author || author.dynamic ? null : author.value;
+    const argument = item.value;
+    if (argument === '--') {
+      options = false;
+      continue;
     }
-    if (item.value.startsWith('--author=')) return item.value.slice('--author='.length);
+    if (!argument.startsWith('-') || argument === '-') continue;
+    if (argument === '--amend') {
+      reusesAuthor = true;
+      continue;
+    }
+    if (argument === '--reset-author') {
+      resetsAuthor = true;
+      continue;
+    }
+    if (argument === '--no-reset-author') {
+      resetsAuthor = false;
+      continue;
+    }
+    if (argument === '--no-author') {
+      author = '';
+      continue;
+    }
+    if (argument === '--gpg-sign' || argument.startsWith('--gpg-sign=')) continue;
+    if (argument === '--no-untracked-files') continue;
+    if (argument === '--untracked-files') continue;
+    if (argument.startsWith('--untracked-files=')) {
+      if (!untrackedModes.has(argument.slice('--untracked-files='.length))) return null;
+      continue;
+    }
+    if (flags.has(argument)) continue;
+
+    const equals = argument.indexOf('=');
+    const option = equals >= 0 ? argument.slice(0, equals) : argument;
+    if (takesValue.has(option)) {
+      let value;
+      if (equals >= 0) value = argument.slice(equals + 1);
+      else {
+        const operand = operation.words[i + 1];
+        if (!operand) return null;
+        value = operand.value;
+        i += 1;
+        if (option === '--author' && (operand.dynamic || !value)) return null;
+      }
+      if (option === '--author') {
+        if (!value) return null;
+        author = value;
+      }
+      if (reuseOptions.has(option)) reusesAuthor = true;
+      continue;
+    }
+    if (argument.startsWith('--')) return null;
+
+    for (let offset = 1; offset < argument.length; offset += 1) {
+      const short = argument[offset];
+      if (shortFlags.has(short)) continue;
+      if (short === 'u') {
+        const attached = argument.slice(offset + 1);
+        if (attached && !untrackedModes.has(attached)) return null;
+        break;
+      }
+      if (short === 'S') break;
+      if (!shortValues.has(short)) return null;
+      let value = argument.slice(offset + 1);
+      if (!value) {
+        const operand = operation.words[i + 1];
+        if (!operand) return null;
+        value = operand.value;
+        i += 1;
+      }
+      if (reuseOptions.has(`-${short}`)) reusesAuthor = true;
+      break;
+    }
   }
-  return '';
+  return {
+    author,
+    usesCurrentAuthor: !reusesAuthor || resetsAuthor,
+  };
 }
 
-function resolveGitAuthor(env = {}, operation = {}) {
-  const name = env.GIT_AUTHOR_NAME || env.GIT_COMMITTER_NAME || '';
-  const email = env.GIT_AUTHOR_EMAIL || env.GIT_COMMITTER_EMAIL || '';
-  if (name || email) return { email, name };
+function gitAuthorOverride(operation) {
+  return commitOptionSummary(operation)?.author ?? null;
+}
+
+function parseExplicitAuthor(raw) {
+  const match = /^(.*?)\s*<([^<>]+)>$/u.exec(String(raw || '').trim());
+  if (!match || !match[1].trim() || !match[2].trim()) return null;
+  return { email: match[2].trim(), name: match[1].trim() };
+}
+
+function parseGitVarIdent(raw) {
+  const match = /^(.*?) <([^<>]+)> [0-9]+ [+-][0-9]{4}$/u.exec(String(raw || '').trim());
+  if (!match || !match[1].trim() || !match[2].trim()) return null;
+  return { email: match[2].trim(), name: match[1].trim() };
+}
+
+function commitUsesCurrentAuthor(operation) {
+  return commitOptionSummary(operation)?.usesCurrentAuthor ?? false;
+}
+
+function runGitIdent(operation, env, variable) {
   try {
-    const globalArgs = Array.isArray(operation.globalArgs) ? operation.globalArgs : [];
-    const options = {
+    const run = spawnSync('git', [...operation.globalArgs, 'var', variable], {
+      cwd: operation.context.cwd || undefined,
       encoding: 'utf8',
       env,
       timeout: 2000,
-    };
-    if (operation.context?.cwd) options.cwd = operation.context.cwd;
-    const nameRun = spawnSync('git', [...globalArgs, 'config', '--get', 'user.name'], options);
-    const emailRun = spawnSync('git', [...globalArgs, 'config', '--get', 'user.email'], options);
-    if (nameRun.status !== 0 || emailRun.status !== 0) return { email: '', name: '' };
-    return {
-      email: (emailRun.stdout || '').trim(),
-      name: (nameRun.stdout || '').trim(),
-    };
+    });
+    if (run.status !== 0 || run.error) return null;
+    return parseGitVarIdent(run.stdout);
   } catch {
-    return { email: '', name: '' };
+    return null;
   }
+}
+
+function resolveGitIdentities(env, operation) {
+  if (INPUT_DERIVED_GIT_AUTHORS.has(operation.subcommand)) return null;
+  const effectiveEnv = operationEnvironment(env, operation.context);
+  if (!effectiveEnv) return null;
+  const override = gitAuthorOverride(operation);
+  if (override === null) return null;
+  if (!override && !commitUsesCurrentAuthor(operation)) return null;
+  if (override) {
+    const explicit = parseExplicitAuthor(override);
+    if (!explicit) return null;
+    effectiveEnv.GIT_AUTHOR_NAME = explicit.name;
+    effectiveEnv.GIT_AUTHOR_EMAIL = explicit.email;
+  }
+  const author = runGitIdent(operation, effectiveEnv, 'GIT_AUTHOR_IDENT');
+  const committer = runGitIdent(operation, effectiveEnv, 'GIT_COMMITTER_IDENT');
+  return author && committer ? { author, committer } : null;
+}
+
+function identityAllowed(identity, authors) {
+  return identMatches(identity.name, authors) && identMatches(identity.email, authors);
 }
 
 function resolveGhLogin(env = {}, context = {}) {
@@ -1185,12 +1323,12 @@ function resolveGhLogin(env = {}, context = {}) {
 }
 
 function isUnmanagedGitAuthor(env, authors, operation) {
-  const effectiveEnv = operationEnvironment(env, operation.context);
-  if (!effectiveEnv) return false;
-  const override = gitAuthorOverride(operation);
-  if (override === null) return false;
-  const ident = override ? parseAuthorIdent(override) : resolveGitAuthor(effectiveEnv, operation);
-  return identMatches(ident.name, authors) || identMatches(ident.email, authors);
+  const identities = resolveGitIdentities(env, operation);
+  return Boolean(
+    identities
+    && identityAllowed(identities.author, authors)
+    && identityAllowed(identities.committer, authors)
+  );
 }
 
 function isUnmanagedGhActor(env, authors, operation = {}) {
@@ -1221,6 +1359,7 @@ function uninstalledDecision({ event, command = '', env = {} }) {
   if (event === 'pre-commit') {
     const operation = {
       context: cloneContext(),
+      globalArgs: [],
       subcommand: 'commit',
       subcommandIndex: 1,
       words: [{ dynamic: false, value: 'git' }, { dynamic: false, value: 'commit' }],
@@ -1270,10 +1409,15 @@ const RUNTIME_FUNCTIONS = [
   inspectCommand,
   parseUnmanagedAuthors,
   identMatches,
-  parseAuthorIdent,
   operationEnvironment,
+  commitOptionSummary,
   gitAuthorOverride,
-  resolveGitAuthor,
+  parseExplicitAuthor,
+  parseGitVarIdent,
+  commitUsesCurrentAuthor,
+  runGitIdent,
+  resolveGitIdentities,
+  identityAllowed,
   resolveGhLogin,
   isUnmanagedGitAuthor,
   isUnmanagedGhActor,
@@ -1328,6 +1472,7 @@ export function renderUninstalledIdentitySource(dialect) {
     `const CONTROL_OPERATORS = new Set(${JSON.stringify([...CONTROL_OPERATORS])});`,
     `const REDIRECTION_OPERATORS = new Set(${JSON.stringify([...REDIRECTION_OPERATORS])});`,
     `const GIT_COMMIT_SUBCOMMANDS = new Set(${JSON.stringify([...GIT_COMMIT_SUBCOMMANDS])});`,
+    `const INPUT_DERIVED_GIT_AUTHORS = new Set(${JSON.stringify([...INPUT_DERIVED_GIT_AUTHORS])});`,
     `const GIT_RECOVERY_SUBCOMMANDS = new Set(${JSON.stringify([...GIT_RECOVERY_SUBCOMMANDS])});`,
     `const GIT_GLOBAL_QUERY_OPTIONS = new Set(${JSON.stringify([...GIT_GLOBAL_QUERY_OPTIONS])});`,
     `const GIT_NON_PUBLISH_SUBCOMMANDS = new Set(${JSON.stringify([...GIT_NON_PUBLISH_SUBCOMMANDS])});`,
