@@ -84,7 +84,7 @@ function gitEnvironment(env) {
 }
 
 /**
- * A stable identity for peak history shared by every worktree of one checkout.
+ * Dormant future-provenance identity for a peak store namespace.
  *
  * Git's common directory is the one filesystem object shared by a checkout's
  * primary worktree and all of its linked worktrees. Canonicalising it also
@@ -356,7 +356,8 @@ function repositoryRelativeCwd(repositoryRoot, canonicalCwd) {
 }
 
 /**
- * Evidence that a command still means what the recorded peak measured.
+ * Dormant future-provenance evidence that a command still means what a proven
+ * peak measured. The production runner does not consume this identity today.
  *
  * The common Git directory deliberately lets sibling worktrees share state,
  * but that is safe only when their clean revision, executable, argv and child
@@ -660,12 +661,10 @@ const LOCK_STALE_MS = 30_000;
 const LOCK_POLL_MS = 50;
 
 /**
- * Record a lane's measured peak after a COMPLETED run, keyed by repository,
- * label, exact command argv, and verified behavior identity. Stored in the
- * protected state directory so shell commands cannot plant a low peak to
- * shrink the next reservation; only run-guarded itself writes here, from RSS
- * it measured. Kept as a small rolling window so one unusually light run does
- * not undersize the next reservation.
+ * Dormant future-provenance store API, keyed by repository, label, exact argv,
+ * and verified behavior identity. run-guarded currently neither calls this nor
+ * reads its output: automatic polling cannot prove a true high-water mark.
+ * Retained for compatibility tests and a future trusted recorder.
  */
 export async function recordLanePeak({ env = process.env, repo, label, command, behaviorIdentity, peakRssMb }) {
   if (!Number.isFinite(peakRssMb) || peakRssMb <= 0) return false;
