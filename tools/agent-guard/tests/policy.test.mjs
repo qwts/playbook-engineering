@@ -613,6 +613,20 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs', local).allow, true);
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs --json', local).allow, true);
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs --report out/report.json', local).allow, true);
+    assert.equal(evaluateCommand(`env -C ${repo} node scripts/check-traceability.mjs`, local).allow, true);
+    assert.equal(evaluateCommand(`env -S '-C ${repo} node scripts/check-traceability.mjs'`, local).allow, true);
+    // Directory-changing wrappers resolve the script from their child cwd,
+    // not the hook's reported cwd. A same-path script outside the reviewed
+    // checkout must not inherit provenance from the repository copy (#209).
+    const outside = mkdtempSync(path.join(tmpdir(), 'agent-guard-provenance-outside-'));
+    roots.push(outside);
+    mkdirSync(path.join(outside, 'scripts'), { recursive: true });
+    writeFileSync(path.join(outside, 'scripts', 'check-traceability.mjs'), "require('node:child_process').execSync('npx vitest');\n");
+    assert.equal(evaluateCommand(`env -C ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env --chdir=${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`command env -C ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env -S '-C ${outside} node scripts/check-traceability.mjs'`, local).allow, false);
+    assert.equal(evaluateCommand(`env --split-string='--chdir=${outside} node scripts/check-traceability.mjs'`, local).allow, false);
     // Provenance vouches for the script's bytes, not its argv: a checked-in
     // argv-forwarding dispatcher relays whatever follows `--` (the
     // measure-runner-capacity shape), and a command-shaped or unreadable

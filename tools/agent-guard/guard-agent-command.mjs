@@ -810,14 +810,20 @@ function normalizeUnquotedEscapes(text) {
   return normalized;
 }
 
+function endsWithEnvSplitString(scanned) {
+  const segment = scanned.split(/\|\||&&|[;\n|&]/u).at(-1).trim();
+  const rawTokens = segment.split(/\s+/u).filter(Boolean);
+  const envAt = rawTokens.findLastIndex((token) => token.split('/').at(-1) === 'env');
+  return envAt >= 0 && /^(?:-S|--split-string)=?$/u.test(rawTokens.at(-1) ?? '');
+}
+
 function endsWithExecutableString(scanned) {
   if (endsWithShellC(scanned)) return true;
   if (dispatcherCommandPayloads(scanned).some((payload) => endsWithShellC(payload))) return true;
   if (endsWithWatchCommandString(scanned)) return true;
+  if (endsWithEnvSplitString(scanned)) return true;
   const segment = scanned.split(/\|\||&&|[;\n|&]/u).at(-1).trim();
   const rawTokens = segment.split(/\s+/u).filter(Boolean);
-  const envAt = rawTokens.findLastIndex((token) => token.split('/').at(-1) === 'env');
-  if (envAt >= 0 && /^(?:-S|--split-string)=?$/u.test(rawTokens.at(-1) ?? '')) return true;
   const tokens = commandAfterPrefixes(segment).split(/\s+/u).filter(Boolean);
   const command = tokens[0]?.split('/').at(-1);
   if (command === 'node' && /^(?:-[A-Za-z]*[ep][A-Za-z]*|--eval|--print)$/u.test(tokens.at(-1) ?? '')) return true;
@@ -1108,6 +1114,12 @@ function hasRuntimeScriptFile(command, cwd = process.cwd()) {
     const program = runtimeProgram(segments[index]);
     if (program?.kind !== 'file') continue;
     const normalized = program.token.replaceAll('\u0004', ' ');
+    // Provenance must be checked from the directory the runtime will actually
+    // use. `env -C/--chdir` changes the child cwd without changing the hook's
+    // reported cwd, so resolving against `cwd` alone can authenticate the
+    // reviewed repository copy while Node executes a planted same-path script
+    // elsewhere (#209).
+    const executionCwd = resolveExecutionDir(cwd, segments[index]) ?? cwd;
     if (program.family === 'node' && /(?:^|\/)tools\/agent-guard\/(?:run-guarded|arbiter)\.mjs$/u.test(normalized)) continue;
     // Checked-in Node helpers whose content matches the reviewed base ref
     // are the repository's own documented tooling (#191). Provenance only
@@ -1124,7 +1136,7 @@ function hasRuntimeScriptFile(command, cwd = process.cwd()) {
       segments.length === 1 &&
       !/\$\(|`|[<>]\(/u.test(segments[index]) &&
       hasInertScriptArguments(segments[index], program.token) &&
-      isReviewedCheckedInScript(normalized, cwd)
+      isReviewedCheckedInScript(normalized, executionCwd)
     )
       continue;
     return true;
@@ -1296,7 +1308,12 @@ export function stripInertText(command) {
           ? quoted.slice(1, -1)
           : quoted.slice(1, -1).replace(/\\(["\\$`])/gu, '$1');
       rest = `${inner}${rest}`;
-      scanned += '\n';
+      // `env -S/--split-string` expands its operand into the current argv;
+      // preserve the `env` wrapper so directory options in that operand keep
+      // governing provenance resolution. Shell `-c` and other command-string
+      // consumers execute a nested payload and remain separate segments.
+      if (endsWithEnvSplitString(scanned)) scanned = scanned.replace(/(?:-S|--split-string)=?\s*$/u, '');
+      else scanned += '\n';
     } else {
       const substitutions = quoted.startsWith('"') ? commandSubstitutionBodies(quoted.slice(1, -1)) : [];
       if (substitutions.length > 0) {
