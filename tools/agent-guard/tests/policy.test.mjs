@@ -98,13 +98,10 @@ describe('agent-vs-human detection', () => {
     assert.equal(isAgentSession({ AI_AGENT: 'a-harness-that-did-not-exist-yet' }), true);
   });
 
-  test('a <NAME>_AGENT session cannot use an owner grant on disk (#142)', () => {
-    // The owner-grant path keys on harnessName === 'human'. A Devin session
-    // resolving to its own harness cannot borrow a grant the owner left live.
+  test('no session can use a legacy grant on disk (#142, #235)', () => {
     writeGrant({ laneId: 'e2e', minutes: 30, env });
     assert.equal(evaluateLanePolicy({ label: 'test:e2e', env: { ...env, DEVIN_AGENT: '1' } }).allowed, false);
-    // The owner (no agent marker) still can.
-    assert.equal(evaluateLanePolicy({ label: 'test:e2e', env }).allowed, true);
+    assert.equal(evaluateLanePolicy({ label: 'test:e2e', env }).allowed, false);
   });
 });
 
@@ -131,7 +128,7 @@ describe('lane policy', () => {
     const verdict = evaluateLanePolicy({ label: 'test:e2e', env: { ...env, CLAUDECODE: '1' } });
     assert.equal(verdict.allowed, false);
     assert.match(verdict.message, /Push the branch and let GitHub CI verify/u);
-    assert.match(verdict.message, /owner can open a window from their own \(non-agent\) terminal/u);
+    assert.match(verdict.message, /outside its lease, admission, ceiling, and timeout protections/u);
   });
 
   test('an unmarked local caller cannot claim human authentication', () => {
@@ -150,44 +147,37 @@ describe('lane policy', () => {
     assert.equal(evaluateLanePolicy({ label: 'test:stories:ci', env: agent }).allowed, false);
   });
 
-  test('a live grant in an unmarked session is the owner path (#180)', () => {
-    // Grants cannot be minted from agent sessions (the hook denies arbiter
-    // grant) and markers cannot be scrubbed (the hook denies identity
-    // removal), so unmarked + grant is owner evidence. Enforcement — lease,
-    // ceiling, timeout, admission — still applies to the granted run.
+  test('an unmarked session plus a live grant is not owner evidence (#235)', () => {
     writeGrant({ laneId: 'e2e', minutes: 30, env });
     const verdict = evaluateLanePolicy({ label: 'test:e2e', env });
-    assert.equal(verdict.allowed, true);
-    assert.equal(verdict.actor, 'owner-grant');
-    // Lane-scoped: the e2e grant says nothing about ci.
+    assert.equal(verdict.allowed, false);
+    assert.equal(verdict.actor, 'agent');
     assert.equal(evaluateLanePolicy({ label: 'ci', env }).allowed, false);
   });
 
-  test('an expired grant is not an owner path', () => {
+  test('grant lifetime never changes authorization', () => {
     const now = Date.parse('2026-08-02T12:00:00Z');
     writeGrant({ laneId: 'e2e', minutes: 5, env, now });
-    assert.equal(evaluateLanePolicy({ label: 'test:e2e', env, now: now + 4 * 60_000 }).allowed, true);
+    assert.equal(evaluateLanePolicy({ label: 'test:e2e', env, now: now + 4 * 60_000 }).allowed, false);
     assert.equal(evaluateLanePolicy({ label: 'test:e2e', env, now: now + 10 * 60_000 }).allowed, false);
   });
 
-  test('arbiter grant refuses marked sessions and unknown lanes before writing anything', () => {
-    // The mint path writes to the REAL machine store by design — stateDir
-    // deliberately ignores ambient AGENT_GUARD_STATE_DIR so production state
-    // cannot be redirected — so the hermetic spawn test covers only the
-    // refusal paths; the mint→honor flow is covered at the policy layer by
-    // the writeGrant tests above.
+  test('arbiter grant is disabled for marked, unmarked, and unknown callers', () => {
     const arbiter = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'arbiter.mjs');
     const base = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' };
     const marked = spawnSync(process.execPath, [arbiter, 'grant', 'e2e', '10'], { env: { ...base, CLAUDECODE: '1' }, encoding: 'utf8' });
     assert.equal(marked.status, 1);
-    assert.match(marked.stderr, /cannot be minted from an agent session/u);
+    assert.match(marked.stderr, /legacy grant minting is disabled/u);
+    const unmarked = spawnSync(process.execPath, [arbiter, 'grant', 'e2e', '10'], { env: base, encoding: 'utf8' });
+    assert.equal(unmarked.status, 1);
+    assert.match(unmarked.stderr, /same-user files cannot authenticate human approval/u);
     const unknown = spawnSync(process.execPath, [arbiter, 'grant', 'nonsense'], { env: { ...base, CLAUDECODE: '1' }, encoding: 'utf8' });
     assert.equal(unknown.status, 1);
   });
 
-  test('the refusal tells the owner how to open a granted window', () => {
+  test('the refusal names the non-delegable owner path', () => {
     const verdict = evaluateLanePolicy({ label: 'test:e2e', env: { ...env, CLAUDECODE: '1' } });
-    assert.match(verdict.message, /arbiter\.mjs grant e2e/u);
+    assert.match(verdict.message, /same-user grant files are not authorization/u);
   });
 });
 
@@ -601,6 +591,17 @@ describe('command hook', () => {
     git('init', '--quiet');
     mkdirSync(path.join(repo, 'scripts'), { recursive: true });
     writeFileSync(path.join(repo, 'scripts', 'check-traceability.mjs'), 'process.exit(0);\n');
+    mkdirSync(path.join(repo, 'child', 'scripts'), { recursive: true });
+    writeFileSync(path.join(repo, 'child', 'scripts', 'check-traceability.mjs'), 'process.exit(0);\n');
+    mkdirSync(path.join(repo, 'child path', 'scripts'), { recursive: true });
+    writeFileSync(path.join(repo, 'child path', 'scripts', 'check-traceability.mjs'), 'process.exit(0);\n');
+    writeFileSync(
+      path.join(repo, 'scripts', 'option-dispatch.mjs'),
+      "import { execFileSync } from 'node:child_process';\n" +
+        "const command = process.argv.find((arg) => arg.startsWith('--cmd=')).slice(6);\n" +
+        "const argument = process.argv.find((arg) => arg.startsWith('--arg=')).slice(6);\n" +
+        "execFileSync(command, [argument], { stdio: 'inherit' });\n",
+    );
     git('add', '-A');
     git('commit', '--quiet', '-m', 'helper');
     const local = { ...opts(), cwd: repo };
@@ -613,6 +614,199 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs', local).allow, true);
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs --json', local).allow, true);
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs --report out/report.json', local).allow, true);
+    assert.equal(evaluateCommand(`env -C ${repo} node scripts/check-traceability.mjs`, local).allow, true);
+    assert.equal(evaluateCommand(`env -S '-C ${repo} node scripts/check-traceability.mjs'`, local).allow, true);
+    // Directory-changing wrappers resolve the script from their child cwd,
+    // not the hook's reported cwd. A same-path script outside the reviewed
+    // checkout must not inherit provenance from the repository copy (#209).
+    const outside = mkdtempSync(path.join(tmpdir(), 'agent-guard-provenance-outside-'));
+    roots.push(outside);
+    mkdirSync(path.join(outside, 'scripts'), { recursive: true });
+    writeFileSync(path.join(outside, 'scripts', 'check-traceability.mjs'), "require('node:child_process').execSync('npx vitest');\n");
+    assert.equal(evaluateCommand(`env -C ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env --chdir=${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env --chd=${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env --c ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env -ivC ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env --uns TOKEN --chd=${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env --spl='--chd=${outside} node scripts/check-traceability.mjs'`, local).allow, false);
+    assert.equal(evaluateCommand(`env -iS'--chd=${outside} node scripts/check-traceability.mjs'`, local).allow, false);
+    assert.equal(
+      evaluateCommand(`env -S'-iC${outside}\\_node\\_scripts/check-traceability.mjs'`, local).allow,
+      false,
+    );
+    assert.equal(
+      evaluateCommand(`EVIL=-iC${outside} env -S '\${EVIL} node scripts/check-traceability.mjs'`, local).allow,
+      false,
+    );
+    assert.equal(evaluateCommand('env --future-operand ignored node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand(`env -iP${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand('env --env0-from=/tmp/evil node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('env -a alternate node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(
+      evaluateCommand(`env -S"env -P ${outside} node scripts/check-traceability.mjs"`, local).allow,
+      false,
+    );
+    assert.equal(
+      evaluateCommand(`env -S"env --env0-from=/tmp/evil node scripts/check-traceability.mjs"`, local).allow,
+      false,
+    );
+    assert.equal(
+      evaluateCommand(`bash -c "env -S'-iC${outside}\\_node\\_scripts/check-traceability.mjs'"`, local).allow,
+      false,
+    );
+    assert.equal(
+      evaluateCommand(`sh -c "env -S'-iC${outside}\\_node\\_scripts/check-traceability.mjs'"`, local).allow,
+      false,
+    );
+    assert.equal(evaluateCommand(`sudo env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo -u root env -iP${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`doas env -iP${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`flock /tmp/x env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`chrt -b 0 env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo -D ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo --chdir=${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo -D${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo -nD ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo -nu root env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`doas -nu root env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`flock -xw 5 /tmp/x env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`chrt -rD 100 10 node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo --chd ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo --us root env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`flock --wai 5 /tmp/x env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand('chrt --sched-dea 100 10 node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('chrt -b node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand(`chrt -b env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand('chrt --deadline 0 node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('chrt --deadline node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('chrt -U 1 -X 2 -b node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('flock --timeout 5 /tmp/x node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('flock --start 5 /tmp/x node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand(`flock --length 5 /tmp/x env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`flock --fd=9 env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo FOO=bar -D ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo FOO=bar -u root env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo -u root FOO=bar -D ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo FOO=bar --chdir=${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo sudo env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo -u root doas env -iP${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo flock /tmp/x env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`flock /tmp/x sudo env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`chrt -b 0 sudo env -iC${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`doas sudo -D ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(
+      evaluateCommand(`sudo sh -c env\\ -iC${outside}\\ node\\ scripts/check-traceability.mjs`, local).allow,
+      false,
+    );
+    assert.equal(evaluateCommand(`sudo sh -c 'env -iC${outside} node scripts/check-traceability.mjs'`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo sh -c "env -iC${outside} node scripts/check-traceability.mjs"`, local).allow, false);
+    assert.equal(evaluateCommand(`sudo sh -c $'env -iC${outside} node scripts/check-traceability.mjs'`, local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c node\\ scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c \'node scripts/check-traceability.mjs\'', local).allow, false);
+    assert.equal(evaluateCommand('doas bash -c "node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('chrt -b bash -c "node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('sudo bash +o errexit -c "node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('sudo bash +O extglob -c "node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c "$PAYLOAD"', local).allow, false);
+    assert.equal(evaluateCommand('doas bash -c "$PAYLOAD"', local).allow, false);
+    assert.equal(evaluateCommand('chrt -b sh -c "$PAYLOAD"', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c "echo ok; node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(
+      evaluateCommand(`sudo sh -c "printf env; env -iC${outside} node scripts/check-traceability.mjs"`, local).allow,
+      false,
+    );
+    assert.equal(evaluateCommand('sudo sh -c "echo ok && npm run test:e2e"', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c "echo ok | npx vitest"', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c "echo ok\nnode scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('sudo bash +o errexit -c "echo ok; node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c echo\\ ok\\;\\ node\\ scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c echo\\ ok\\&\\&\\ npx\\ vitest', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c echo\\ ok\\|\\ ./script.sh', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c "echo ok; python3 script.py"', local).allow, false);
+    assert.equal(evaluateCommand('sudo sh -c "echo ok; bash script.sh"', local).allow, false);
+    assert.equal(evaluateCommand('{ sudo sh -c "node scripts/check-traceability.mjs"; }', local).allow, false);
+    assert.equal(
+      evaluateCommand('case x in x) sudo sh -c "node scripts/check-traceability.mjs" ;; esac', local).allow,
+      false,
+    );
+    assert.equal(
+      evaluateCommand(`case x in x) sudo env -iC${outside} node scripts/check-traceability.mjs ;; esac`, local).allow,
+      false,
+    );
+    assert.equal(evaluateCommand('>/tmp/log sudo sh -c "node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('> /tmp/log sudo sh -c "node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(
+      evaluateCommand(`2>/tmp/log sudo env -iC${outside} node scripts/check-traceability.mjs`, local).allow,
+      false,
+    );
+    assert.equal(evaluateCommand('< /dev/null sudo node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('3>/tmp/log sudo sh -c "npm run test:e2e"', local).allow, false);
+    assert.equal(evaluateCommand('{fd}>/tmp/log sudo sh -c "node scripts/check-traceability.mjs"', local).allow, false);
+    assert.equal(evaluateCommand('< <(printf data) sudo node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(
+      evaluateCommand(`< <(printf data) sudo env -iC${outside} node scripts/check-traceability.mjs`, local).allow,
+      false,
+    );
+    assert.equal(evaluateCommand('< <(printf data) sudo sh -c "npm run test:e2e"', local).allow, false);
+    // A filename, target, username, or ordinary argument named `env` is data,
+    // not an execution wrapper. The fail-closed path starts only at the exact
+    // command position of a supported wrapper shape.
+    for (const benign of [
+      'cp env backup',
+      'mv env backup',
+      'touch env',
+      'make env',
+      'go env',
+      'sudo -u env id',
+      'sudo -i -u env id',
+      'sudo --preserve-groups -u env id',
+      'sudo --no-update -u env id',
+      'flock env true',
+      'flock --nb env true',
+    ]) assert.equal(evaluateCommand(benign, local).allow, true, benign);
+    assert.equal(evaluateCommand(`command env -C ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env -S '-C ${outside} node scripts/check-traceability.mjs'`, local).allow, false);
+    assert.equal(evaluateCommand(`env --split-string='--chdir=${outside} node scripts/check-traceability.mjs'`, local).allow, false);
+    const outsideWithSpaces = path.join(outside, 'out side');
+    mkdirSync(path.join(outsideWithSpaces, 'scripts'), { recursive: true });
+    writeFileSync(path.join(outsideWithSpaces, 'scripts', 'check-traceability.mjs'), "process.exitCode = 1;\n");
+    assert.equal(evaluateCommand(`env -C '${outsideWithSpaces}' node scripts/check-traceability.mjs`, local).allow, false);
+    // Nested env wrappers inherit the cwd selected by their enclosing env.
+    // Resolving the inner relative directory from the hook cwd authenticates
+    // the reviewed repo copy while Node executes the planted outside copy.
+    mkdirSync(path.join(outside, 'child', 'scripts'), { recursive: true });
+    writeFileSync(path.join(outside, 'child', 'scripts', 'check-traceability.mjs'), "process.exitCode = 1;\n");
+    assert.equal(evaluateCommand(`env -C ${repo} env -C child node scripts/check-traceability.mjs`, local).allow, true);
+    assert.equal(evaluateCommand(`env -S '-C ${repo} env -C child node scripts/check-traceability.mjs'`, local).allow, true);
+    writeFileSync(
+      path.join(repo, 'child', 'scripts', 'check-traceability.mjs'),
+      "require('node:child_process').execSync('npx vitest');\n",
+    );
+    assert.equal(evaluateCommand(`env -S '-C ${repo} env -C child node scripts/check-traceability.mjs'`, local).allow, false);
+    assert.equal(evaluateCommand(`env -C ${outside} env -C child node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env -S '-C ${outside} env -C child node scripts/check-traceability.mjs'`, local).allow, false);
+    mkdirSync(path.join(outsideWithSpaces, 'child path', 'scripts'), { recursive: true });
+    writeFileSync(path.join(outsideWithSpaces, 'child path', 'scripts', 'check-traceability.mjs'), "process.exitCode = 1;\n");
+    assert.equal(evaluateCommand(`env -C '${repo}' env -C 'child path' node scripts/check-traceability.mjs`, local).allow, true);
+    assert.equal(evaluateCommand(`env -C '${outsideWithSpaces}' env -C 'child path' node scripts/check-traceability.mjs`, local).allow, false);
+    // `env -C` does not retarget an absolute path: provenance follows the
+    // resolved file's checkout even when the child cwd is outside it.
+    assert.equal(evaluateCommand(`env -C '${outsideWithSpaces}' node ${path.join(repo, 'scripts', 'check-traceability.mjs')}`, local).allow, true);
+    // An absolute path cannot nominate some other repository's remote ref as
+    // the trust anchor for this checkout's reviewed-helper allowance.
+    const otherRepo = mkdtempSync(path.join(tmpdir(), 'agent-guard-other-repo-'));
+    roots.push(otherRepo);
+    const otherGit = (...args) =>
+      execFileSync('git', ['-C', otherRepo, '-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { stdio: 'ignore' });
+    otherGit('init', '--quiet');
+    mkdirSync(path.join(otherRepo, 'scripts'), { recursive: true });
+    writeFileSync(path.join(otherRepo, 'scripts', 'check-traceability.mjs'), 'process.exit(0);\n');
+    otherGit('add', '-A');
+    otherGit('commit', '--quiet', '-m', 'helper');
+    otherGit('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    assert.equal(evaluateCommand(`node ${path.join(otherRepo, 'scripts', 'check-traceability.mjs')}`, local).allow, false);
     // Provenance vouches for the script's bytes, not its argv: a checked-in
     // argv-forwarding dispatcher relays whatever follows `--` (the
     // measure-runner-capacity shape), and a command-shaped or unreadable
@@ -621,6 +815,9 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs -- npm run ci', local).allow, false);
     assert.equal(evaluateCommand("node scripts/check-traceability.mjs 'npx vitest'", local).allow, false);
     assert.equal(evaluateCommand('node scripts/check-traceability.mjs --shell bash', local).allow, false);
+    assert.equal(evaluateCommand('node scripts/option-dispatch.mjs --cmd=npx --arg=vitest', local).allow, false);
+    assert.equal(evaluateCommand('node scripts/option-dispatch.mjs --cmd=/usr/bin/npm --arg=ci', local).allow, false);
+    assert.equal(evaluateCommand('node scripts/option-dispatch.mjs --CMD=custom-runner --arg=ci', local).allow, false);
     // Provenance vouches only for a substitution-free first segment: an
     // earlier segment can cd away from the hook's cwd or rewrite the file,
     // and a substitution executes before the runtime does.
@@ -789,9 +986,59 @@ describe('hook helpers', () => {
     assert.equal(evaluateHookInput({ cwd: '/outside', command: '(cd /tmp); cd project && npm run ci' }, '/outside/project').allow, false);
     assert.deepEqual(resolveExecutionDirs('/outside', 'env -C /project npx vitest'), ['/outside', '/project']);
     assert.deepEqual(resolveExecutionDirs('/outside', 'env --chdir=/project npm run ci'), ['/outside', '/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'env --chd=/project npm run ci'), ['/outside', '/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'env --c /project npm run ci'), ['/outside', '/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'env -iC/project npm run ci'), ['/outside', '/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'env -ivC /project npm run ci'), ['/outside', '/project']);
+    assert.deepEqual(
+      resolveExecutionDirs('/outside', 'env --uns TOKEN --chd=/project npm run ci'),
+      ['/outside', '/project'],
+    );
     assert.deepEqual(resolveExecutionDirs('/outside', 'env --chdir "/project with spaces" npm run ci'), ['/outside', '/project with spaces']);
+    assert.deepEqual(
+      resolveExecutionDirs('/outside', "env -C '/project with spaces' env -C 'child path' npm run ci"),
+      ['/outside', '/project with spaces', '/project with spaces/child path']
+    );
     assert.deepEqual(resolveExecutionDirs('/outside', 'env -u TOKEN -C /project npm run ci'), ['/outside', '/project']);
     assert.deepEqual(resolveExecutionDirs('/outside', "env -S '-u TOKEN -C /project npm run ci'"), ['/outside', '/project']);
+    assert.deepEqual(
+      resolveExecutionDirs('/outside', "env -S '-C /project env -C child npm run ci'"),
+      ['/outside', '/project', '/project/child'],
+    );
+    for (const command of [
+      "env -S '-C /tmp npm -C /project run test:e2e'",
+      "env -S '-C /tmp pnpm -C /project run test:e2e'",
+      "env -S '-C /tmp yarn --cwd /project run test:e2e'",
+      "env -S '-C /tmp corepack pnpm -C /project run test:e2e'",
+      "env -S '-C /tmp corepack pnpm@9.15.0 -C /project run test:e2e'",
+      "env -S '-C /tmp corepack yarn@4.9.2 --cwd /project run test:e2e'",
+      "env -S '-C /tmp corepack npm@10.9.2 --prefix /project run test:e2e'",
+      "env -S '-C /tmp corepack pnpm@ -C /project run test:e2e'",
+      "env -S '-C /tmp corepack yarnpkg@4.9.2 --cwd /project run test:e2e'",
+    ]) {
+      assert.deepEqual(resolveExecutionDirs('/outside', command), ['/outside', '/tmp', '/project'], command);
+      assert.equal(evaluateHookInput({ cwd: '/outside', command }, '/project').allow, false, command);
+    }
+    for (const command of [
+      'corepack pnpm@9.15.0 -C /project run test:e2e',
+      'corepack yarn@4.9.2 --cwd /project run test:e2e',
+      'corepack npm@10.9.2 --prefix /project run test:e2e',
+      'corepack pnpm@ -C /project run test:e2e',
+      'corepack yarnpkg@4.9.2 --cwd /project run test:e2e',
+    ]) {
+      assert.deepEqual(resolveExecutionDirs('/outside', command), ['/outside', '/project'], command);
+      assert.equal(evaluateHookInput({ cwd: '/outside', command }, '/project').allow, false, command);
+    }
+    for (const command of [
+      'corepack npx@10.9.2 --prefix /project vitest',
+      'corepack pnpx@9.15.0 -C /project vitest',
+      "env -S '-C /tmp corepack npx@10.9.2 --prefix /project vitest'",
+      "env -S '-C /tmp corepack pnpx@9.15.0 -C /project vitest'",
+    ]) {
+      const expected = command.startsWith('env ') ? ['/outside', '/tmp', '/project'] : ['/outside', '/project'];
+      assert.deepEqual(resolveExecutionDirs('/outside', command), expected, command);
+      assert.equal(evaluateHookInput({ cwd: '/outside', command }, '/project').allow, false, command);
+    }
     assert.deepEqual(resolveExecutionDirs('/outside', 'env -C /project -C /elsewhere npm run ci'), ['/outside', '/elsewhere']);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'env -C /project npx vitest' }, '/project').allow, false);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'env --chdir=/project npm run ci' }, '/project').allow, false);
