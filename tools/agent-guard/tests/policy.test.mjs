@@ -625,6 +625,10 @@ describe('command hook', () => {
     writeFileSync(path.join(outside, 'scripts', 'check-traceability.mjs'), "require('node:child_process').execSync('npx vitest');\n");
     assert.equal(evaluateCommand(`env -C ${outside} node scripts/check-traceability.mjs`, local).allow, false);
     assert.equal(evaluateCommand(`env --chdir=${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env --chd=${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env --c ${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env --uns TOKEN --chd=${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand(`env --spl='--chd=${outside} node scripts/check-traceability.mjs'`, local).allow, false);
     assert.equal(evaluateCommand(`command env -C ${outside} node scripts/check-traceability.mjs`, local).allow, false);
     assert.equal(evaluateCommand(`env -S '-C ${outside} node scripts/check-traceability.mjs'`, local).allow, false);
     assert.equal(evaluateCommand(`env --split-string='--chdir=${outside} node scripts/check-traceability.mjs'`, local).allow, false);
@@ -839,6 +843,12 @@ describe('hook helpers', () => {
     assert.equal(evaluateHookInput({ cwd: '/outside', command: '(cd /tmp); cd project && npm run ci' }, '/outside/project').allow, false);
     assert.deepEqual(resolveExecutionDirs('/outside', 'env -C /project npx vitest'), ['/outside', '/project']);
     assert.deepEqual(resolveExecutionDirs('/outside', 'env --chdir=/project npm run ci'), ['/outside', '/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'env --chd=/project npm run ci'), ['/outside', '/project']);
+    assert.deepEqual(resolveExecutionDirs('/outside', 'env --c /project npm run ci'), ['/outside', '/project']);
+    assert.deepEqual(
+      resolveExecutionDirs('/outside', 'env --uns TOKEN --chd=/project npm run ci'),
+      ['/outside', '/project'],
+    );
     assert.deepEqual(resolveExecutionDirs('/outside', 'env --chdir "/project with spaces" npm run ci'), ['/outside', '/project with spaces']);
     assert.deepEqual(
       resolveExecutionDirs('/outside', "env -C '/project with spaces' env -C 'child path' npm run ci"),

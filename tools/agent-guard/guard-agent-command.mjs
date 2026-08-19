@@ -431,6 +431,42 @@ function prefixReaches(words, index) {
   return commandAfterPrefixes([...prefix, marker].join(' ')) === marker;
 }
 
+// GNU env accepts every unambiguous long-option abbreviation. Model the
+// documented option set rather than matching only the full spelling: a
+// shortened --chdir still changes the child cwd and must participate in
+// reviewed-script provenance. Ambiguous/unknown spellings return null; GNU
+// rejects the former, while callers below continue to treat the latter as an
+// option rather than accidentally consuming it as a command.
+const ENV_LONG_OPTIONS = [
+  '--argv0',
+  '--block-signal',
+  '--chdir',
+  '--debug',
+  '--default-signal',
+  '--help',
+  '--ignore-environment',
+  '--ignore-signal',
+  '--list-signal-handling',
+  '--null',
+  '--path',
+  '--split-string',
+  '--unset',
+  '--version',
+];
+const ENV_LONG_OPERAND_OPTIONS = new Set(['--argv0', '--chdir', '--path', '--split-string', '--unset']);
+
+function envLongOption(word) {
+  if (!word.startsWith('--') || word === '--') return null;
+  const equalsAt = word.indexOf('=');
+  const spelling = equalsAt === -1 ? word : word.slice(0, equalsAt);
+  const matches = ENV_LONG_OPTIONS.filter((option) => option.startsWith(spelling));
+  if (matches.length !== 1) return null;
+  return {
+    name: matches[0],
+    value: equalsAt === -1 ? null : word.slice(equalsAt + 1),
+  };
+}
+
 function directoryOptionTargets(segment) {
   const words = scopeWords(segment);
   const targets = [];
@@ -441,15 +477,19 @@ function directoryOptionTargets(segment) {
       let envTarget;
       for (let optionAt = index + 1; optionAt < words.length; optionAt += 1) {
         const option = words[optionAt].value;
-        if (option === '-C' || option === '--chdir') {
+        const longOption = envLongOption(option);
+        if (option === '-C' || (longOption?.name === '--chdir' && longOption.value === null)) {
           if (words[optionAt + 1]) envTarget = words[++optionAt].value;
-        } else if (option.startsWith('--chdir=')) {
-          envTarget = option.slice('--chdir='.length);
+        } else if (longOption?.name === '--chdir') {
+          envTarget = longOption.value;
         } else if (/^-C.+/u.test(option)) {
           envTarget = option.slice(2);
-        } else if (/^(?:-u|--unset|-P|--path)$/u.test(option)) {
+        } else if (
+          /^(?:-u|-P)$/u.test(option) ||
+          (['--argv0', '--path', '--unset'].includes(longOption?.name) && longOption.value === null)
+        ) {
           optionAt += 1;
-        } else if (option === '-S' || option === '--split-string') {
+        } else if (option === '-S' || (longOption?.name === '--split-string' && longOption.value === null)) {
           const operand = words[optionAt + 1];
           if (!operand) break;
           const splitWords = scopeWords(operand.value).map((part) => ({
@@ -458,7 +498,7 @@ function directoryOptionTargets(segment) {
           }));
           words.splice(optionAt, 2, ...splitWords);
           optionAt -= 1;
-        } else if (/^(?:-S|--split-string)=/u.test(option)) {
+        } else if (/^-S=/u.test(option) || (longOption?.name === '--split-string' && longOption.value !== null)) {
           const splitWords = scopeWords(option.slice(option.indexOf('=') + 1)).map((part) => ({
             index: words[optionAt].index + part.index / 100_000,
             value: part.value,
@@ -581,20 +621,24 @@ export function resolveExecutionDirs(cwd, command) {
     let chdirTarget;
     for (let index = 0; index < words.length; index += 1) {
       const word = words[index];
-      if (word === '-C' || word === '--chdir') {
+      const longOption = envLongOption(word);
+      if (word === '-C' || (longOption?.name === '--chdir' && longOption.value === null)) {
         chdirTarget = words[index + 1];
         index += 1;
-      } else if (word.startsWith('--chdir=')) {
-        chdirTarget = word.slice('--chdir='.length);
+      } else if (longOption?.name === '--chdir') {
+        chdirTarget = longOption.value;
       } else if (/^-C.+/u.test(word)) {
         chdirTarget = word.slice(2);
-      } else if (/^(?:-u|--unset|-P|--path)$/u.test(word)) {
+      } else if (
+        /^(?:-u|-P)$/u.test(word) ||
+        (['--argv0', '--path', '--unset'].includes(longOption?.name) && longOption.value === null)
+      ) {
         index += 1;
-      } else if (word === '-S' || word === '--split-string') {
+      } else if (word === '-S' || (longOption?.name === '--split-string' && longOption.value === null)) {
         const splitWords = scopeWords(words[index + 1] ?? '').map((part) => part.value);
         words.splice(index, 2, ...splitWords);
         index -= 1;
-      } else if (/^(?:-S|--split-string)=/u.test(word)) {
+      } else if (/^-S=/u.test(word) || (longOption?.name === '--split-string' && longOption.value !== null)) {
         const splitWords = scopeWords(word.slice(word.indexOf('=') + 1)).map((part) => part.value);
         words.splice(index, 1, ...splitWords);
         index -= 1;
@@ -863,7 +907,20 @@ function endsWithEnvSplitString(scanned) {
   const segment = scanned.split(/\|\||&&|[;\n|&]/u).at(-1).trim();
   const rawTokens = segment.split(/\s+/u).filter(Boolean);
   const envAt = rawTokens.findLastIndex((token) => token.split('/').at(-1) === 'env');
-  return envAt >= 0 && /^(?:-S|--split-string)=?$/u.test(rawTokens.at(-1) ?? '');
+  return envAt >= 0 && envSplitStringOption(rawTokens.at(-1) ?? '') !== null;
+}
+
+function envSplitStringOption(word) {
+  if (word === '-S') return { value: null };
+  if (word.startsWith('-S=')) return { value: word.slice(3) };
+  const option = envLongOption(word);
+  return option?.name === '--split-string' ? option : null;
+}
+
+function stripTrailingEnvSplitString(scanned) {
+  const lastToken = /\S+\s*$/u.exec(scanned);
+  if (!lastToken || envSplitStringOption(lastToken[0].trim()) === null) return scanned;
+  return scanned.slice(0, lastToken.index);
 }
 
 function endsWithExecutableString(scanned) {
@@ -945,12 +1002,13 @@ function commandStringPayloads(command) {
     const envAt = rawTokens.findIndex((token) => token.split('/').at(-1) === 'env');
     if (envAt >= 0) {
       for (let i = envAt + 1; i < rawTokens.length; i += 1) {
-        if (rawTokens[i] === '-S' || rawTokens[i] === '--split-string') {
+        const splitString = envSplitStringOption(rawTokens[i]);
+        if (splitString?.value === null) {
           if (rawTokens[i + 1] !== undefined) payloads.push(restore(rawTokens[i + 1]));
           break;
         }
-        if (/^(?:-S|--split-string)=/u.test(rawTokens[i])) {
-          payloads.push(restore(rawTokens[i].slice(rawTokens[i].indexOf('=') + 1)));
+        if (splitString !== null) {
+          payloads.push(restore(splitString.value));
           break;
         }
       }
@@ -1378,7 +1436,7 @@ export function stripInertText(command) {
       // preserve the `env` wrapper so directory options in that operand keep
       // governing provenance resolution. Shell `-c` and other command-string
       // consumers execute a nested payload and remain separate segments.
-      if (endsWithEnvSplitString(scanned)) scanned = scanned.replace(/(?:-S|--split-string)=?\s*$/u, '');
+      if (endsWithEnvSplitString(scanned)) scanned = stripTrailingEnvSplitString(scanned);
       else scanned += '\n';
     } else {
       const substitutions = quoted.startsWith('"') ? commandSubstitutionBodies(quoted.slice(1, -1)) : [];
@@ -2115,7 +2173,12 @@ function commandAfterPrefixes(segment) {
         }
         if (token.startsWith('-')) {
           index += 1;
-          if (/^(?:-u|--unset|--chdir|-C|-S|--split-string)$/u.test(token) && index < tokens.length) index += 1;
+          const longOption = envLongOption(token);
+          if (
+            (/^(?:-u|-C|-S)$/u.test(token) ||
+              (ENV_LONG_OPERAND_OPTIONS.has(longOption?.name) && longOption.value === null)) &&
+            index < tokens.length
+          ) index += 1;
           continue;
         }
         break;
@@ -2224,7 +2287,11 @@ export function hasProtectedEnvironmentAssignment(command) {
         while (tokens[index]?.startsWith('-')) {
           const option = tokens[index];
           index += 1;
-          if (operandOptions.has(option)) index += 1;
+          const envOption = name === 'env' ? envLongOption(option) : null;
+          if (
+            operandOptions.has(option) ||
+            (ENV_LONG_OPERAND_OPTIONS.has(envOption?.name) && envOption.value === null)
+          ) index += 1;
         }
         if ((name === 'timeout' || name === 'nice') && /^\d/u.test(tokens[index] ?? '')) index += 1;
         continue;
