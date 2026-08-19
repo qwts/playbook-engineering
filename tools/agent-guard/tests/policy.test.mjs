@@ -779,6 +779,12 @@ describe('command hook', () => {
     mkdirSync(path.join(outside, 'child', 'scripts'), { recursive: true });
     writeFileSync(path.join(outside, 'child', 'scripts', 'check-traceability.mjs'), "process.exitCode = 1;\n");
     assert.equal(evaluateCommand(`env -C ${repo} env -C child node scripts/check-traceability.mjs`, local).allow, true);
+    assert.equal(evaluateCommand(`env -S '-C ${repo} env -C child node scripts/check-traceability.mjs'`, local).allow, true);
+    writeFileSync(
+      path.join(repo, 'child', 'scripts', 'check-traceability.mjs'),
+      "require('node:child_process').execSync('npx vitest');\n",
+    );
+    assert.equal(evaluateCommand(`env -S '-C ${repo} env -C child node scripts/check-traceability.mjs'`, local).allow, false);
     assert.equal(evaluateCommand(`env -C ${outside} env -C child node scripts/check-traceability.mjs`, local).allow, false);
     assert.equal(evaluateCommand(`env -S '-C ${outside} env -C child node scripts/check-traceability.mjs'`, local).allow, false);
     mkdirSync(path.join(outsideWithSpaces, 'child path', 'scripts'), { recursive: true });
@@ -995,6 +1001,44 @@ describe('hook helpers', () => {
     );
     assert.deepEqual(resolveExecutionDirs('/outside', 'env -u TOKEN -C /project npm run ci'), ['/outside', '/project']);
     assert.deepEqual(resolveExecutionDirs('/outside', "env -S '-u TOKEN -C /project npm run ci'"), ['/outside', '/project']);
+    assert.deepEqual(
+      resolveExecutionDirs('/outside', "env -S '-C /project env -C child npm run ci'"),
+      ['/outside', '/project', '/project/child'],
+    );
+    for (const command of [
+      "env -S '-C /tmp npm -C /project run test:e2e'",
+      "env -S '-C /tmp pnpm -C /project run test:e2e'",
+      "env -S '-C /tmp yarn --cwd /project run test:e2e'",
+      "env -S '-C /tmp corepack pnpm -C /project run test:e2e'",
+      "env -S '-C /tmp corepack pnpm@9.15.0 -C /project run test:e2e'",
+      "env -S '-C /tmp corepack yarn@4.9.2 --cwd /project run test:e2e'",
+      "env -S '-C /tmp corepack npm@10.9.2 --prefix /project run test:e2e'",
+      "env -S '-C /tmp corepack pnpm@ -C /project run test:e2e'",
+      "env -S '-C /tmp corepack yarnpkg@4.9.2 --cwd /project run test:e2e'",
+    ]) {
+      assert.deepEqual(resolveExecutionDirs('/outside', command), ['/outside', '/tmp', '/project'], command);
+      assert.equal(evaluateHookInput({ cwd: '/outside', command }, '/project').allow, false, command);
+    }
+    for (const command of [
+      'corepack pnpm@9.15.0 -C /project run test:e2e',
+      'corepack yarn@4.9.2 --cwd /project run test:e2e',
+      'corepack npm@10.9.2 --prefix /project run test:e2e',
+      'corepack pnpm@ -C /project run test:e2e',
+      'corepack yarnpkg@4.9.2 --cwd /project run test:e2e',
+    ]) {
+      assert.deepEqual(resolveExecutionDirs('/outside', command), ['/outside', '/project'], command);
+      assert.equal(evaluateHookInput({ cwd: '/outside', command }, '/project').allow, false, command);
+    }
+    for (const command of [
+      'corepack npx@10.9.2 --prefix /project vitest',
+      'corepack pnpx@9.15.0 -C /project vitest',
+      "env -S '-C /tmp corepack npx@10.9.2 --prefix /project vitest'",
+      "env -S '-C /tmp corepack pnpx@9.15.0 -C /project vitest'",
+    ]) {
+      const expected = command.startsWith('env ') ? ['/outside', '/tmp', '/project'] : ['/outside', '/project'];
+      assert.deepEqual(resolveExecutionDirs('/outside', command), expected, command);
+      assert.equal(evaluateHookInput({ cwd: '/outside', command }, '/project').allow, false, command);
+    }
     assert.deepEqual(resolveExecutionDirs('/outside', 'env -C /project -C /elsewhere npm run ci'), ['/outside', '/elsewhere']);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'env -C /project npx vitest' }, '/project').allow, false);
     assert.equal(evaluateHookInput({ cwd: '/outside', command: 'env --chdir=/project npm run ci' }, '/project').allow, false);
