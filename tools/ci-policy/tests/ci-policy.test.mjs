@@ -358,7 +358,7 @@ test('harness changed-file evidence comes from the complete GitHub pull-request 
   const firstPage = Array.from({ length: 100 }, (_, index) => ({ filename: `path-${index}` }));
   const changedFiles = await harnessProjectionChangedFiles(releaseRun({
     pullRequests: [harnessPullRequest()],
-    apiUrl: 'https://api.github.example',
+    apiUrl: 'https://github.example/api/v3',
     token: 'test-token',
     fetchImpl: async (url) => {
       requested.push(String(url));
@@ -367,8 +367,8 @@ test('harness changed-file evidence comes from the complete GitHub pull-request 
   }));
   assert.deepEqual(changedFiles, [...firstPage, ...managedHarnessFiles]);
   assert.deepEqual(requested, [
-    'https://api.github.example/repos/qwts/overlook/pulls/27/files?per_page=100&page=1',
-    'https://api.github.example/repos/qwts/overlook/pulls/27/files?per_page=100&page=2',
+    'https://github.example/api/v3/repos/qwts/overlook/pulls/27/files?per_page=100&page=1',
+    'https://github.example/api/v3/repos/qwts/overlook/pulls/27/files?per_page=100&page=2',
   ]);
 });
 

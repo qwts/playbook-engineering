@@ -69,7 +69,8 @@ export async function listPullRequestFiles({
   // much smaller, but exhausting every available page keeps the trust decision
   // bound to the complete API diff rather than a caller-controlled prefix.
   for (let page = 1; page <= 30; page += 1) {
-    const url = new URL(`/repos/${repository}/pulls/${number}/files?per_page=100&page=${page}`, apiUrl);
+    const apiBase = apiUrl.endsWith('/') ? apiUrl : `${apiUrl}/`;
+    const url = new URL(`repos/${repository}/pulls/${number}/files?per_page=100&page=${page}`, apiBase);
     const batch = await githubJson({ url, token, fetchImpl });
     if (!Array.isArray(batch)) throw new Error('release-origin file lookup returned malformed data');
     for (const file of batch) {
