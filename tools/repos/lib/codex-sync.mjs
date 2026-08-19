@@ -173,7 +173,8 @@ function parseJsonObject(path, content, owner) {
 
 function decodeText(path, content, owner) {
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(content);
+    // `ignoreBOM` keeps a downstream BOM in the decoded text for byte-for-byte composition.
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(content);
   } catch (error) {
     throw new Error(`${path}: invalid UTF-8 in ${owner} text (${error.message})`);
   }
@@ -211,6 +212,17 @@ function managedTextBlock(path, source, owner) {
   };
 }
 
+function appendManagedTextBlock(repositoryText, block) {
+  const separator = repositoryText.length === 0
+    ? ''
+    : repositoryText.endsWith('\n\n')
+      ? ''
+      : repositoryText.endsWith('\n')
+        ? '\n'
+        : '\n\n';
+  return `${repositoryText}${separator}${block}`;
+}
+
 function mergeManagedTextFile(canonicalFile, targetContent, formatExemptFiles) {
   const canonicalText = decodeText(canonicalFile.path, canonicalFile.content, 'managed');
   const fullBlock = managedTextBlock(canonicalFile.path, canonicalText, 'managed');
@@ -238,22 +250,12 @@ function mergeManagedTextFile(canonicalFile, targetContent, formatExemptFiles) {
   const markers = MANAGED_TEXT_BLOCKS.get(canonicalFile.path);
   const begins = markerLineRanges(target, markers.begin);
   const ends = markerLineRanges(target, markers.end);
-  let content;
-  if (begins.length === 0 && ends.length === 0) {
-    const separator = target.length === 0
-      ? ''
-      : target.endsWith('\n\n')
-        ? ''
-        : target.endsWith('\n')
-          ? '\n'
-          : '\n\n';
-    content = Buffer.from(`${target}${separator}${canonicalBlock.content}`);
-  } else {
+  let repositoryText = target;
+  if (begins.length !== 0 || ends.length !== 0) {
     const downstreamBlock = managedTextBlock(canonicalFile.path, target, 'downstream');
-    content = Buffer.from(
-      `${target.slice(0, downstreamBlock.begin.start)}${canonicalBlock.content}${target.slice(downstreamBlock.end.end)}`,
-    );
+    repositoryText = `${target.slice(0, downstreamBlock.begin.start)}${target.slice(downstreamBlock.end.end)}`;
   }
+  const content = Buffer.from(appendManagedTextBlock(repositoryText, canonicalBlock.content));
   return {
     ...canonicalFile,
     content,
