@@ -368,6 +368,15 @@ test('repository and command-scoped Git config resolve with Git precedence', () 
   const unmanaged = identityRepository('ai9d', 'ai9d@example.test');
   const human = identityRepository('Human User', 'human@example.test');
   try {
+    runGit(unmanaged, [
+      '-c', 'advice.detachedHead', 'commit', '--allow-empty', '-m', 'valueless config',
+    ], withoutGitIdentity);
+    assert.deepEqual(headIdentity(unmanaged), {
+      authorEmail: 'ai9d@example.test',
+      authorName: 'ai9d',
+      committerEmail: 'ai9d@example.test',
+      committerName: 'ai9d',
+    }, 'real Git consumes one valueless -c operand before commit');
     for (const adapter of managedAdapters) {
       adapterAllowed(adapter, 'git commit -m x', 'human', {
         cwd: unmanaged,
@@ -419,27 +428,9 @@ test('repository and command-scoped Git config resolve with Git precedence', () 
       ), true);
       adapterAllowed(
         adapter,
-        'git -c user.name ai9d -c user.email ai9d@example.test commit -m x',
-        'human',
-        { cwd: human, env: withoutGitIdentity },
-      );
-      adapterAllowed(
-        adapter,
-        'git -c user.name Someone -c user.email else@example.test -c user.name ai9d -c user.email ai9d@example.test commit -m x',
-        'human',
-        { cwd: human, env: withoutGitIdentity },
-      );
-      assert.equal(adapterDenied(
-        adapter,
-        'git -c user.name ai9d -c user.email ai9d@example.test -c user.name Someone -c user.email else@example.test commit -m x',
+        'git -c advice.detachedHead commit --allow-empty -m x',
         'human',
         { cwd: unmanaged, env: withoutGitIdentity },
-      ), true, `${adapter.path} must preserve final-value precedence for split -c`);
-      adapterAllowed(
-        adapter,
-        'git -c user.name=Someone -c user.email else@example.test -c user.name ai9d -c user.email=ai9d@example.test commit -m x',
-        'human',
-        { cwd: human, env: withoutGitIdentity },
       );
       assert.equal(adapterDenied(adapter, 'git -c commit -m x', 'human', {
         cwd: unmanaged,
@@ -448,17 +439,81 @@ test('repository and command-scoped Git config resolve with Git precedence', () 
       for (const malformed of [
         'git -c user.name',
         'git -c user.name ai9d',
-        'git -c user.name commit -m x',
+        'git -c user.name ai9d -c user.email ai9d@example.test commit -m x',
+        'git -c user.name=Someone -c user.email else@example.test commit -m x',
       ]) {
         assert.equal(adapterDenied(adapter, malformed, 'human', {
           cwd: unmanaged,
           env: withoutGitIdentity,
-        }), true, `${adapter.path} must fail closed on malformed split config ${malformed}`);
+        }), true, `${adapter.path} must fail closed when a second token is mistaken for a -c value: ${malformed}`);
       }
+      assert.equal(adapterDenied(adapter, 'git -c user.name commit -m x', 'human', {
+        cwd: unmanaged,
+        env: withoutGitIdentity,
+      }), true, `${adapter.path} must apply a valueless identity override before checking the commit`);
     }
   } finally {
     rmSync(unmanaged, { recursive: true, force: true });
     rmSync(human, { recursive: true, force: true });
+  }
+});
+
+test('documented commit untracked-file options preserve determinable identity', () => {
+  const unmanaged = identityRepository('ai9d', 'ai9d@example.test');
+  const valid = [
+    { args: ['-u'], shell: '-u' },
+    { args: ['-uno'], shell: '-uno' },
+    { args: ['-unormal'], shell: '-unormal' },
+    { args: ['-uall'], shell: '-uall' },
+    { args: ['--untracked-files'], shell: '--untracked-files' },
+    { args: ['--untracked-files=no'], shell: '--untracked-files=no' },
+    { args: ['--untracked-files=normal'], shell: '--untracked-files=normal' },
+    { args: ['--untracked-files=all'], shell: '--untracked-files=all' },
+    { args: ['--no-untracked-files'], shell: '--no-untracked-files' },
+  ];
+  try {
+    for (const [index, option] of valid.entries()) {
+      runGit(unmanaged, [
+        'commit', '--allow-empty', ...option.args, '-m', `untracked option ${index}`,
+      ], withoutGitIdentity);
+      assert.deepEqual(headIdentity(unmanaged), {
+        authorEmail: 'ai9d@example.test',
+        authorName: 'ai9d',
+        committerEmail: 'ai9d@example.test',
+        committerName: 'ai9d',
+      }, `real Git must retain bot identity for ${option.shell}`);
+      for (const adapter of managedAdapters) {
+        adapterAllowed(
+          adapter,
+          `git commit --allow-empty ${option.shell} -m x`,
+          'human',
+          { cwd: unmanaged, env: withoutGitIdentity },
+        );
+      }
+    }
+    for (const adapter of managedAdapters) {
+      for (const command of [
+        'git commit --allow-empty -u no -m x',
+        'git commit --allow-empty --untracked-files normal -m x',
+      ]) {
+        adapterAllowed(adapter, command, 'human', {
+          cwd: unmanaged,
+          env: withoutGitIdentity,
+        });
+      }
+      for (const malformed of [
+        'git commit --allow-empty -ubogus -m x',
+        'git commit --allow-empty --untracked-files=bogus -m x',
+        'git commit --allow-empty --no-untracked-files=no -m x',
+      ]) {
+        assert.equal(adapterDenied(adapter, malformed, 'human', {
+          cwd: unmanaged,
+          env: withoutGitIdentity,
+        }), true, `${adapter.path} must fail closed on invalid untracked-file mode`);
+      }
+    }
+  } finally {
+    rmSync(unmanaged, { recursive: true, force: true });
   }
 });
 

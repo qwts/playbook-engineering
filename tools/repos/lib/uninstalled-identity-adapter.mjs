@@ -807,17 +807,10 @@ function parseGit(words, context) {
       break;
     }
     if (option.value === '-c') {
-      const name = words[i + 1];
-      if (!name || name.dynamic || !name.value) return unsafeScan();
-      if (name.value.includes('=')) {
-        globalArgs.push('-c', name.value);
-        i += 2;
-        continue;
-      }
-      const value = words[i + 2];
-      if (!value || value.dynamic) return unsafeScan();
-      globalArgs.push('-c', `${name.value}=${value.value}`);
-      i += 3;
+      const config = words[i + 1];
+      if (!config || config.dynamic || !config.value) return unsafeScan();
+      globalArgs.push('-c', config.value);
+      i += 2;
       continue;
     }
     if (takesValue.has(option.value)) {
@@ -1077,6 +1070,7 @@ function commitOptionSummary(operation) {
   const reuseOptions = new Set([
     '--reedit-message', '--reuse-message', '-C', '-c',
   ]);
+  const untrackedModes = new Set(['all', 'no', 'normal']);
   const shortFlags = new Set(['a', 'e', 'i', 'n', 'o', 'p', 'q', 's', 'v', 'z']);
   const shortValues = new Set(['C', 'F', 'c', 'm', 't']);
   let author = '';
@@ -1111,6 +1105,16 @@ function commitOptionSummary(operation) {
       continue;
     }
     if (argument === '--gpg-sign' || argument.startsWith('--gpg-sign=')) continue;
+    if (argument === '--no-untracked-files') continue;
+    if (argument === '--untracked-files') {
+      const operand = operation.words[i + 1];
+      if (operand && !operand.dynamic && untrackedModes.has(operand.value)) i += 1;
+      continue;
+    }
+    if (argument.startsWith('--untracked-files=')) {
+      if (!untrackedModes.has(argument.slice('--untracked-files='.length))) return null;
+      continue;
+    }
     if (flags.has(argument)) continue;
 
     const equals = argument.indexOf('=');
@@ -1137,6 +1141,15 @@ function commitOptionSummary(operation) {
     for (let offset = 1; offset < argument.length; offset += 1) {
       const short = argument[offset];
       if (shortFlags.has(short)) continue;
+      if (short === 'u') {
+        const attached = argument.slice(offset + 1);
+        if (attached && !untrackedModes.has(attached)) return null;
+        if (!attached) {
+          const operand = operation.words[i + 1];
+          if (operand && !operand.dynamic && untrackedModes.has(operand.value)) i += 1;
+        }
+        break;
+      }
       if (short === 'S') break;
       if (!shortValues.has(short)) return null;
       let value = argument.slice(offset + 1);
