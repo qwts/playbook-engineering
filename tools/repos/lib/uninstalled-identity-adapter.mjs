@@ -22,6 +22,23 @@ const GIT_COMMIT_SUBCOMMANDS = new Set([
   'revert',
   'stash',
 ]);
+const GIT_RECOVERY_SUBCOMMANDS = new Set([
+  'am',
+  'cherry-pick',
+  'merge',
+  'rebase',
+  'revert',
+]);
+const GIT_GLOBAL_QUERY_OPTIONS = new Set([
+  '-h',
+  '--help',
+  '-v',
+  '--version',
+  '--exec-path',
+  '--html-path',
+  '--info-path',
+  '--man-path',
+]);
 const GIT_NON_PUBLISH_SUBCOMMANDS = new Set([
   'add',
   'annotate',
@@ -593,9 +610,11 @@ function stripRedirections(tokens) {
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (token.type === 'operator' && REDIRECTION_OPERATORS.has(token.value)) {
-      if (token.value === '<<<') return { safe: false, words: [] };
       const target = tokens[i + 1];
-      if (!target || target.type !== 'word' || target.dynamic) return { safe: false, words: [] };
+      // Redirection expansion produces a filename, descriptor, or input data,
+      // not another command. shellLex has already extracted every command
+      // substitution from dynamic operands for recursive classification.
+      if (!target || target.type !== 'word') return { safe: false, words: [] };
       i += 1;
       continue;
     }
@@ -774,6 +793,11 @@ function parseGit(words, context) {
       i += 1;
       break;
     }
+    if (GIT_GLOBAL_QUERY_OPTIONS.has(option.value)) {
+      return i === words.length - 1
+        ? { operations: [], safe: true }
+        : unsafeScan();
+    }
     if (takesValue.has(option.value)) {
       const argument = words[i + 1];
       if (!argument || argument.dynamic) return unsafeScan();
@@ -815,6 +839,17 @@ function parseGit(words, context) {
   if (value === 'notes') {
     const action = words[i + 1];
     if (action && !action.dynamic && ['get-ref', 'list', 'show'].includes(action.value)) {
+      return { operations: [], safe: true };
+    }
+  }
+  if (GIT_RECOVERY_SUBCOMMANDS.has(value)) {
+    const action = words[i + 1];
+    if (
+      words.length === i + 2
+      && action
+      && !action.dynamic
+      && ['--abort', '--quit'].includes(action.value)
+    ) {
       return { operations: [], safe: true };
     }
   }
@@ -1032,19 +1067,20 @@ function gitAuthorOverride(operation) {
   return '';
 }
 
-function resolveGitAuthor(env = {}) {
+function resolveGitAuthor(env = {}, operation = {}) {
   const name = env.GIT_AUTHOR_NAME || env.GIT_COMMITTER_NAME || '';
   const email = env.GIT_AUTHOR_EMAIL || env.GIT_COMMITTER_EMAIL || '';
   if (name || email) return { email, name };
   try {
-    const nameRun = spawnSync('git', ['config', '--get', 'user.name'], {
+    const globalArgs = Array.isArray(operation.globalArgs) ? operation.globalArgs : [];
+    const options = {
       encoding: 'utf8',
+      env,
       timeout: 2000,
-    });
-    const emailRun = spawnSync('git', ['config', '--get', 'user.email'], {
-      encoding: 'utf8',
-      timeout: 2000,
-    });
+    };
+    if (operation.context?.cwd) options.cwd = operation.context.cwd;
+    const nameRun = spawnSync('git', [...globalArgs, 'config', '--get', 'user.name'], options);
+    const emailRun = spawnSync('git', [...globalArgs, 'config', '--get', 'user.email'], options);
     if (nameRun.status !== 0 || emailRun.status !== 0) return { email: '', name: '' };
     return {
       email: (emailRun.stdout || '').trim(),
@@ -1073,7 +1109,7 @@ function isUnmanagedGitAuthor(env, authors, operation) {
   if (!effectiveEnv) return false;
   const override = gitAuthorOverride(operation);
   if (override === null) return false;
-  const ident = override ? parseAuthorIdent(override) : resolveGitAuthor(effectiveEnv);
+  const ident = override ? parseAuthorIdent(override) : resolveGitAuthor(effectiveEnv, operation);
   return identMatches(ident.name, authors) || identMatches(ident.email, authors);
 }
 
@@ -1208,6 +1244,8 @@ export function renderUninstalledIdentitySource(dialect) {
     `const CONTROL_OPERATORS = new Set(${JSON.stringify([...CONTROL_OPERATORS])});`,
     `const REDIRECTION_OPERATORS = new Set(${JSON.stringify([...REDIRECTION_OPERATORS])});`,
     `const GIT_COMMIT_SUBCOMMANDS = new Set(${JSON.stringify([...GIT_COMMIT_SUBCOMMANDS])});`,
+    `const GIT_RECOVERY_SUBCOMMANDS = new Set(${JSON.stringify([...GIT_RECOVERY_SUBCOMMANDS])});`,
+    `const GIT_GLOBAL_QUERY_OPTIONS = new Set(${JSON.stringify([...GIT_GLOBAL_QUERY_OPTIONS])});`,
     `const GIT_NON_PUBLISH_SUBCOMMANDS = new Set(${JSON.stringify([...GIT_NON_PUBLISH_SUBCOMMANDS])});`,
     `const SHELLS = new Set(${JSON.stringify([...SHELLS])});`,
     `const INDIRECT_EXECUTORS = new Set(${JSON.stringify([...INDIRECT_EXECUTORS])});`,

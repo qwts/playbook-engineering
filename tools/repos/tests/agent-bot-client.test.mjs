@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,29 +40,36 @@ function managedPreCommand(path) {
   return matches[0];
 }
 
-function runUninstalledAdapter(adapter, command, identity = 'human') {
+function runUninstalledAdapter(adapter, command, identity = 'human', options = {}) {
   const author = identity === 'unmanaged' ? 'ai9d' : 'Human User';
   const login = identity === 'unmanaged' ? 'ai9d' : 'qwts';
+  const env = {
+    ...process.env,
+    AGENT_BOT_HOOK_BIN: join(ROOT, '.missing-agent-hook'),
+    AGENT_BOT_UNMANAGED_AUTHORS: 'ai9d',
+    GH_USER: login,
+    GIT_AUTHOR_EMAIL: `${login}@example.test`,
+    GIT_AUTHOR_NAME: author,
+    GIT_COMMITTER_EMAIL: `${login}@example.test`,
+    GIT_COMMITTER_NAME: author,
+    ...(options.env || {}),
+  };
+  if (identity === 'configured') {
+    for (const name of ['GIT_AUTHOR_EMAIL', 'GIT_AUTHOR_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_COMMITTER_NAME']) {
+      delete env[name];
+    }
+  }
   return spawnSync('sh', ['-c', managedPreCommand(adapter.path)], {
-    cwd: ROOT,
+    cwd: options.cwd || ROOT,
     encoding: 'utf8',
-    env: {
-      ...process.env,
-      AGENT_BOT_HOOK_BIN: join(ROOT, '.missing-agent-hook'),
-      AGENT_BOT_UNMANAGED_AUTHORS: 'ai9d',
-      GH_USER: login,
-      GIT_AUTHOR_EMAIL: `${login}@example.test`,
-      GIT_AUTHOR_NAME: author,
-      GIT_COMMITTER_EMAIL: `${login}@example.test`,
-      GIT_COMMITTER_NAME: author,
-    },
+    env,
     input: JSON.stringify({ command }),
     timeout: 5000,
   });
 }
 
-function adapterDenied(adapter, command, identity = 'human') {
-  const run = runUninstalledAdapter(adapter, command, identity);
+function adapterDenied(adapter, command, identity = 'human', options = {}) {
+  const run = runUninstalledAdapter(adapter, command, identity, options);
   assert.equal(run.status, 0, `${adapter.path} failed for ${JSON.stringify(command)}: ${run.stderr}`);
   const payload = JSON.parse(run.stdout);
   return adapter.dialect === 'cursor'
@@ -69,8 +77,8 @@ function adapterDenied(adapter, command, identity = 'human') {
     : payload.hookSpecificOutput?.permissionDecision === 'deny';
 }
 
-function adapterAllowed(adapter, command, identity = 'human') {
-  const run = runUninstalledAdapter(adapter, command, identity);
+function adapterAllowed(adapter, command, identity = 'human', options = {}) {
+  const run = runUninstalledAdapter(adapter, command, identity, options);
   assert.equal(run.status, 0, `${adapter.path} failed for ${JSON.stringify(command)}: ${run.stderr}`);
   if (adapter.dialect === 'cursor') assert.deepEqual(JSON.parse(run.stdout), {});
   else assert.equal(run.stdout, '');
@@ -213,6 +221,9 @@ test('every managed adapter denies shell spelling and wrapper bypasses', () => {
     'echo "${OUTER:-${INNER:-$(git commit -m x)}}"',
     'echo "$(( $(git commit -m x) ))"',
     'echo "$(( 1 + $(( $(git commit -m x) )) ))"',
+    'printf x > "$(git commit -m x)"',
+    'grep x <<< "$(git commit -m x)"',
+    'printf x >',
     'printf "git commit -m x\\n" | sh',
     'if ! git commit -m x; then :; fi',
     'nohup git commit -m x',
@@ -223,6 +234,7 @@ test('every managed adapter denies shell spelling and wrapper bypasses', () => {
     "cat <<'EOF'\nbody without terminator",
     "cat <<'EOF'\ninert\nEOF\ngit commit -m x",
     'git status \\',
+    'git --exec-path=/tmp',
     'gh pr create --title x --body y',
     'gh api -XDELETE repos/qwts/example/issues/1',
     'gh api --method DELETE repos/qwts/example/issues/1',
@@ -252,6 +264,13 @@ test('every managed adapter protects commit-producing Git operations', () => {
     'git stash drop',
     'git stash pop',
     'git stash push',
+    'git am --continue',
+    'git cherry-pick --continue',
+    'git merge --continue',
+    'git rebase --continue',
+    'git rebase --skip',
+    'git revert --continue',
+    'git merge --abort topic',
   ];
   for (const adapter of managedAdapters) {
     for (const command of operations) {
@@ -275,6 +294,25 @@ test('unambiguous reads and edits remain allowed in every managed adapter', () =
     'git notes show deadbeef',
     'git reset HEAD~1',
     'git reset --hard',
+    'git am --abort',
+    'git am --quit',
+    'git cherry-pick --abort',
+    'git cherry-pick --quit',
+    'git merge --abort',
+    'git merge --quit',
+    'git rebase --abort',
+    'git rebase --quit',
+    'git revert --abort',
+    'git revert --quit',
+    'git -h',
+    'git --help',
+    'git -v',
+    'git --version',
+    'git --exec-path',
+    'git --html-path',
+    'git --info-path',
+    'git --man-path',
+    'git --no-pager --version',
     'gh pr view 1',
     'gh api --method GET repos/qwts/example',
     "echo 'git commit'",
@@ -283,9 +321,67 @@ test('unambiguous reads and edits remain allowed in every managed adapter', () =
     "python3 - <<'PY'\nprint('ok')\nPY",
     "cat <<-'EOF'\n\tbody\n\tEOF",
     "cat <<'EOF' # inert body follows\ntext\nEOF",
+    `printf '%s' "$value" > "$file"`,
+    `cat < "$file"`,
+    `grep x <<< "$text"`,
   ];
   for (const adapter of managedAdapters) {
     for (const command of benign) adapterAllowed(adapter, command);
+  }
+});
+
+test('Git identity lookup follows the operation global context in every adapter', () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'uninstalled-identity-context-'));
+  const unmanaged = join(scratch, 'unmanaged');
+  const human = join(scratch, 'human');
+  const configure = (repo, name, email) => {
+    execFileSync('git', ['init', '--quiet', repo]);
+    execFileSync('git', ['-C', repo, 'config', 'user.name', name]);
+    execFileSync('git', ['-C', repo, 'config', 'user.email', email]);
+  };
+  configure(unmanaged, 'ai9d', 'ai9d@example.test');
+  configure(human, 'Human User', 'human@example.test');
+  try {
+    for (const adapter of managedAdapters) {
+      assert.equal(adapterDenied(
+        adapter,
+        `git -c user.name='Human User' -c user.email=human@example.test merge --no-ff topic`,
+        'configured',
+        { cwd: unmanaged },
+      ), true, `${adapter.path} must honor human -c identity overrides`);
+      adapterAllowed(
+        adapter,
+        `git -c user.name=ai9d -c user.email=ai9d@example.test merge --no-ff topic`,
+        'configured',
+        { cwd: human },
+      );
+      assert.equal(adapterDenied(
+        adapter,
+        `git -C '${human}' merge --no-ff topic`,
+        'configured',
+        { cwd: unmanaged },
+      ), true, `${adapter.path} must resolve identity in Git's -C repository`);
+      adapterAllowed(
+        adapter,
+        `git -C '${unmanaged}' merge --no-ff topic`,
+        'configured',
+        { cwd: human },
+      );
+      assert.equal(adapterDenied(
+        adapter,
+        `env -C '${human}' git merge --no-ff topic`,
+        'configured',
+        { cwd: unmanaged },
+      ), true, `${adapter.path} must resolve identity in the wrapper cwd`);
+      adapterAllowed(
+        adapter,
+        `NAME=ai9d EMAIL=ai9d@example.test git --config-env=user.name=NAME --config-env=user.email=EMAIL merge --no-ff topic`,
+        'configured',
+        { cwd: human },
+      );
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 });
 
