@@ -13,7 +13,7 @@
 // needed memory to run would be self-defeating.
 
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -22,8 +22,10 @@ import { fileURLToPath } from 'node:url';
 
 import { evaluateCommand, evaluateHookInput } from '../guard-agent-command.mjs';
 import { clampCeiling, decideAdmission, deriveBudget } from '../lib/budget.mjs';
+import { acquireLease, releaseLease, retargetLease } from '../lib/leases.mjs';
 import { isCi } from '../lib/policy.mjs';
 import { readMemoryStatus } from '../lib/system-memory.mjs';
+import { resolveInvocation } from '../run-guarded.mjs';
 
 // <repo>/tools/agent-guard/tests/this-file → <repo>
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -303,6 +305,48 @@ describe('agent-guard conformance (ENG-0138)', () => {
     });
     assert.equal(run.status, 1);
     assert.match(run.stderr, /legacy grant minting is disabled/u);
+  });
+
+  test('a valid nested lease skips duplicate admission only after lane policy (#235)', () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 10_000)'], { detached: true, stdio: 'ignore' });
+    child.unref();
+    const lease = acquireLease({ env, label: 'outer ordinary lane', estimatedMb: 128 });
+    try {
+      assert.equal(retargetLease(lease, { pid: child.pid, processGroupId: child.pid }), true);
+      const nested = { ...env, AGENT_GUARDED: lease.id };
+
+      const heavy = resolveInvocation({
+        options: { label: 'innocuous-wrapper' },
+        command: ['npm', 'run', 'test:e2e:inner'],
+        env: nested,
+        processGroupId: child.pid,
+      });
+      assert.equal(heavy.action, 'refuse', 'a parent lease is not heavy-lane authorization');
+      assert.match(heavy.policy.message, /agents do not run it on this machine/u);
+
+      const ordinary = resolveInvocation({
+        options: { label: 'test:dom' },
+        command: ['npm', 'run', 'test:dom:inner'],
+        env: nested,
+        processGroupId: child.pid,
+      });
+      assert.equal(ordinary.action, 'passthrough', 'an allowed nested lane must not duplicate admission');
+    } finally {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // The child may have exited independently.
+      }
+      releaseLease(lease);
+    }
+
+    const staleMarker = resolveInvocation({
+      options: { label: 'test:dom' },
+      command: ['npm', 'run', 'test:dom:inner'],
+      env: { ...env, AGENT_GUARDED: lease.id },
+      processGroupId: child.pid,
+    });
+    assert.equal(staleMarker.action, 'admit', 'a stale marker must not skip admission');
   });
 
   test('ordinary work is untouched', () => {
