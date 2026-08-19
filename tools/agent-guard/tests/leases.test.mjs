@@ -355,29 +355,33 @@ describe('lane peak store (#180)', () => {
     );
 
     const peakEnv = scratchEnv();
-    await recordLanePeak({ env: peakEnv, repo: firstIdentity, label: 'test', peakRssMb: 900 });
-    assert.equal(readLanePeakMb({ env: peakEnv, repo: repositoryIdentity(sibling), label: 'test' }), 900);
-    assert.equal(readLanePeakMb({ env: peakEnv, repo: repositoryIdentity(second), label: 'test' }), null);
+    const command = ['npm', 'test'];
+    await recordLanePeak({ env: peakEnv, repo: firstIdentity, label: 'test', command, peakRssMb: 900 });
+    assert.equal(readLanePeakMb({ env: peakEnv, repo: repositoryIdentity(sibling), label: 'test', command }), 900);
+    assert.equal(readLanePeakMb({ env: peakEnv, repo: repositoryIdentity(second), label: 'test', command }), null);
   });
 
   test('peaks round-trip through the protected store and keep the max of a rolling window', async () => {
     const env = { AGENT_GUARD_STATE_DIR: mkdtempSync(path.join(tmpdir(), 'agent-guard-peaks-')) };
-    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test' }), null);
-    await recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 900 });
-    await recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 1100 });
-    await recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 700 });
-    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test' }), 1100);
+    const command = ['npm', 'test'];
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test', command }), null);
+    await recordLanePeak({ env, repo: 'overlook', label: 'test', command, peakRssMb: 900 });
+    await recordLanePeak({ env, repo: 'overlook', label: 'test', command, peakRssMb: 1100 });
+    await recordLanePeak({ env, repo: 'overlook', label: 'test', command, peakRssMb: 700 });
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test', command }), 1100);
     // Other lanes and repos do not bleed together.
-    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'other' }), null);
-    assert.equal(readLanePeakMb({ env, repo: 'cartograph', label: 'test' }), null);
-    await recordLanePeak({ env, repo: '/repos/a::b', label: 'test', peakRssMb: 400 });
-    await recordLanePeak({ env, repo: '/repos/a', label: 'b::test', peakRssMb: 800 });
-    assert.equal(readLanePeakMb({ env, repo: '/repos/a::b', label: 'test' }), 400);
-    assert.equal(readLanePeakMb({ env, repo: '/repos/a', label: 'b::test' }), 800);
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'other', command }), null);
+    assert.equal(readLanePeakMb({ env, repo: 'cartograph', label: 'test', command }), null);
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test', command: ['npm', 'run', 'other'] }), null);
+    await recordLanePeak({ env, repo: '/repos/a::b', label: 'test', command, peakRssMb: 400 });
+    await recordLanePeak({ env, repo: '/repos/a', label: 'b::test', command, peakRssMb: 800 });
+    assert.equal(readLanePeakMb({ env, repo: '/repos/a::b', label: 'test', command }), 400);
+    assert.equal(readLanePeakMb({ env, repo: '/repos/a', label: 'b::test', command }), 800);
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test' }), null, 'history without an exact command identity fails closed');
     // Junk values are never recorded or returned.
-    await recordLanePeak({ env, repo: 'overlook', label: 'junk', peakRssMb: Number.NaN });
-    await recordLanePeak({ env, repo: 'overlook', label: 'junk', peakRssMb: -5 });
-    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'junk' }), null);
+    await recordLanePeak({ env, repo: 'overlook', label: 'junk', command, peakRssMb: Number.NaN });
+    await recordLanePeak({ env, repo: 'overlook', label: 'junk', command, peakRssMb: -5 });
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'junk', command }), null);
     rmSync(env.AGENT_GUARD_STATE_DIR, { recursive: true, force: true });
   });
 
@@ -411,6 +415,7 @@ describe('lane peak store (#180)', () => {
               env: { AGENT_GUARD_STATE_DIR: env.AGENT_GUARD_STATE_DIR },
               repo: 'shared-checkout',
               label: `concurrent-${lane}`,
+              command: ['npm', 'test'],
               peakRssMb,
             },
           },
@@ -449,7 +454,7 @@ describe('lane peak store (#180)', () => {
     }
     for (let lane = 0; lane < laneCount; lane += 1) {
       assert.equal(
-        readLanePeakMb({ env, repo: 'shared-checkout', label: `concurrent-${lane}` }),
+        readLanePeakMb({ env, repo: 'shared-checkout', label: `concurrent-${lane}`, command: ['npm', 'test'] }),
         Math.max(...samples),
         `lane ${lane} lost its larger concurrent sample`,
       );

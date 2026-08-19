@@ -179,7 +179,13 @@ async function admit({ env, request, budget, leaseFields }) {
     const attempt = await withAdmissionLock(env, () => {
       const memory = readMemoryStatus();
       const leases = readLeases(env);
-      const decision = decideAdmission({ budget, memory, leases, requestMb: request.reserveMb ?? request.ceilingMb });
+      const decision = decideAdmission({
+        budget,
+        memory,
+        leases,
+        requestMb: request.reserveMb ?? request.ceilingMb,
+        lanePeakMb: request.lanePeakMb,
+      });
       if (!decision.granted && env.AGENT_GUARD_FORCE !== '1') return { decision, memory };
       const lease = acquireLease({ env, estimatedMb: request.reserveMb ?? request.ceilingMb, ...leaseFields });
       return { decision, memory, lease };
@@ -242,7 +248,8 @@ async function main() {
   // RSS it measured, never from worktree files an agent can edit (#203
   // review) — so a trustworthy recent peak lowers the reservation while the
   // kill at the ceiling is unchanged by history.
-  const lanePeakMb = readLanePeakMb({ env: process.env, repo: repoIdentity, label: options.label });
+  const lanePeakMb = readLanePeakMb({ env: process.env, repo: repoIdentity, label: options.label, command });
+  request.lanePeakMb = lanePeakMb;
   request.reserveMb = laneReservationMb(request.ceilingMb, lanePeakMb);
   if (request.reserveMb < request.ceilingMb) {
     note(`reserving ${request.reserveMb} MB from the lane's recent measured peak (${lanePeakMb} MB); the enforced ceiling stays ${request.ceilingMb} MB.`);
@@ -391,6 +398,7 @@ async function main() {
         env: process.env,
         repo: repoIdentity,
         label: options.label,
+        command,
         peakRssMb: state.peakRssMb,
       });
     }
