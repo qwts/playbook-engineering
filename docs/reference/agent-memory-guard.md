@@ -35,6 +35,18 @@ sanctioned local lane needs more. The cap is enforced on the running process
 tree, and what admission *reserves* is smaller still when the lane has a
 recent measured peak: peak plus a conservative margin, so a lane that
 measures well under the cap no longer books the full cap against admission.
+Peak history is keyed by the checkout's canonical Git common directory, lane
+label, exact command arguments, and a versioned command-behavior identity. That
+identity requires a clean exact Git revision and binds the resolved executable
+plus the complete effective child environment; environment values are
+authenticated with the machine token and are never stored. The structural
+`PWD`, `INIT_CWD`, and `PATH` entries rooted in the checkout are represented
+relative to it so linked worktrees at the same revision can share when all
+other evidence matches; every other environment value remains exact. A staged,
+dirty, untracked, non-Git, or otherwise unprovable state is a cold start.
+Unrelated clones remain isolated, and a cheap command, older revision,
+different top-level runtime, or different environment cannot lend its
+measurement to a heavier behavior under the same label.
 
 ## Admission
 
@@ -45,8 +57,10 @@ A run is granted only if all three hold:
    run outright, and normal (green) pressure retires committed-but-idle swap as
    evidence — macOS keeps swap allocated after pressure subsides. Without
    pressure evidence, refused when swap is at least 50% committed. Either gate
-   spares runs no larger than the light-run size. A machine already trading
-   pages for progress is one more Electron worker away from a freeze.
+   spares only lanes whose recent measured peak is no larger than the light-run
+   size. An unmeasured lane is not light, and lowering a caller-declared ceiling
+   cannot claim the exemption. A machine already trading pages for progress is
+   one more Electron worker away from a freeze.
 2. **Headroom.** `available − (what running leases have not yet materialized) −
    this request` must stay above the availability floor. Availability comes from
    `vm_stat` and `sysctl vm.swapusage` on macOS, `/proc/meminfo` on Linux.

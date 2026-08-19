@@ -21,7 +21,7 @@ import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { evaluateCommand, evaluateHookInput } from '../guard-agent-command.mjs';
-import { clampCeiling, deriveBudget } from '../lib/budget.mjs';
+import { clampCeiling, decideAdmission, deriveBudget } from '../lib/budget.mjs';
 import { isCi } from '../lib/policy.mjs';
 import { readMemoryStatus } from '../lib/system-memory.mjs';
 
@@ -350,6 +350,13 @@ describe('agent-guard conformance (ENG-0138)', () => {
       assert.ok(budget.maxRunMb < totalMb, `a ${totalMb} MB machine must cap a run below its own RAM`);
       assert.equal(clampCeiling(totalMb * 4, budget).ceilingMb, budget.maxRunMb, 'an oversized request must clamp to the cap');
     }
+  });
+
+  test('pressure exemptions require measured lane history, not a caller-declared ceiling (#223)', () => {
+    const budget = deriveBudget(16384);
+    const memory = { totalMb: 16384, availableMb: 8000, swapTotalMb: 2048, swapUsedMb: 1200, pressureLevel: 2 };
+    assert.equal(decideAdmission({ budget, memory, requestMb: 256 }).reason, 'memory-pressure');
+    assert.equal(decideAdmission({ budget, memory, requestMb: 1280, lanePeakMb: 996 }).granted, true);
   });
 
   test('Linux admission uses the container limit rather than host memory', () => {
