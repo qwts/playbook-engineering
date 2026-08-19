@@ -32,9 +32,15 @@ turns an inherited `--rss-mb 8192` from an unreachable ceiling into an
 enforceable one. The 2048 MB lane cap is absolute: the incident this guard
 exists for was one test lane ballooning to ~100 GB of committed memory, and no
 sanctioned local lane needs more. The cap is enforced on the running process
-tree, and what admission *reserves* is smaller still when the lane has a
-recent measured peak: peak plus a conservative margin, so a lane that
-measures well under the cap no longer books the full cap against admission.
+tree. Admission currently reserves that full ceiling for every automatic run.
+`run-guarded` neither reads nor records lane peak history: 250 ms polling cannot
+prove a process-tree high-water mark, and arbitrary commands can consume
+inherited stdin or mutable transitive inputs. Existing protected-store entries
+are ignored. Lower-level peak and behavior-identity APIs remain dormant for a
+future design backed by OS high-water evidence and immutable, path-invariant
+input provenance. Thus #223 Finding 2 is fixed — a declared ceiling cannot buy
+the light-run exemption — while automatic measured-light reuse from Finding 1
+remains open.
 
 ## Admission
 
@@ -45,8 +51,11 @@ A run is granted only if all three hold:
    run outright, and normal (green) pressure retires committed-but-idle swap as
    evidence — macOS keeps swap allocated after pressure subsides. Without
    pressure evidence, refused when swap is at least 50% committed. Either gate
-   spares runs no larger than the light-run size. A machine already trading
-   pages for progress is one more Electron worker away from a freeze.
+   can spare only a lane with separately proven evidence no larger than the
+   light-run size. The production wrapper supplies no such evidence, so every
+   automatic run is cold; lowering a caller-declared ceiling cannot claim the
+   exemption. A machine already trading pages for progress is one more Electron
+   worker away from a freeze.
 2. **Headroom.** `available − (what running leases have not yet materialized) −
    this request` must stay above the availability floor. Availability comes from
    `vm_stat` and `sysctl vm.swapusage` on macOS, `/proc/meminfo` on Linux.
@@ -111,13 +120,13 @@ Wrapping a command:
 node tools/agent-guard/run-guarded.mjs --label test:dom -- npm run test:dom:inner
 ```
 
-The wrapper puts the command in its own process group, polls the whole
-descendant tree's RSS every 250 ms, and terminates the group on breach
-(`SIGTERM`, then `SIGKILL` after 2 s, or immediately past 1.25× the ceiling,
-because a fast runaway outruns a polite shutdown). Every run writes
-`.guard/last-run.json` and appends to `.guard/history.jsonl`; a run killed for
-`rss-limit` or `timeout` exits non-zero, so a test that "passes" while eating
-the machine is a failed test.
+The wrapper directly spawns exact argv in its own process group and starts an
+asynchronous RSS sample before the 250 ms polling interval. Samples enforce the
+ceiling, heartbeat leases, and populate per-run diagnostics only; they never
+seed admission history. Breaches get `SIGTERM`, then `SIGKILL` after 2 s or
+immediately past 1.25× the ceiling. Diagnostics use `.guard/last-run.json` and
+`.guard/history.jsonl` at the worktree root (or cwd outside Git); `rss-limit`
+and `timeout` exit non-zero.
 
 ## Environment
 
