@@ -6,14 +6,16 @@
 // a different hat.
 
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
+import { Worker } from 'node:worker_threads';
 
 import {
   acquireLease,
+  commandBehaviorIdentity,
   heartbeatLease,
   isProcessAlive,
   isProcessGroupAlive,
@@ -21,6 +23,7 @@ import {
   psExecutable,
   readLeases,
   releaseLease,
+  repositoryIdentity,
   retargetLease,
   readLanePeakMb,
   recordLanePeak,
@@ -319,20 +322,294 @@ describe('liveness probe', () => {
 });
 
 describe('lane peak store (#180)', () => {
-  test('peaks round-trip through the protected store and keep the max of a rolling window', () => {
+  test('linked worktrees share only matching command behavior (#223, #236)', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'agent-guard-repos-'));
+    roots.push(root);
+    const first = path.join(root, 'first', 'app');
+    const second = path.join(root, 'second', 'app');
+    const sibling = path.join(root, 'linked-worktree');
+    mkdirSync(first, { recursive: true });
+    mkdirSync(second, { recursive: true });
+
+    const git = ['/usr/bin/git', '/bin/git'].find((candidate) => {
+      try {
+        execFileSync(candidate, ['--version'], { stdio: 'ignore' });
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(git, 'a system Git binary is required to resolve common-checkout identity');
+    for (const checkout of [first, second]) {
+      execFileSync(git, ['-C', checkout, 'init', '--quiet'], { stdio: 'ignore' });
+      writeFileSync(path.join(checkout, 'package.json'), `${JSON.stringify({ scripts: { test: 'node light.mjs' } }, null, 2)}\n`);
+      writeFileSync(path.join(checkout, 'light.mjs'), 'setTimeout(() => {}, 1);\n');
+      execFileSync(git, ['-C', checkout, 'add', 'package.json', 'light.mjs'], { stdio: 'ignore' });
+      execFileSync(git, ['-C', checkout, '-c', 'user.name=Agent Guard Test', '-c', 'user.email=guard@example.invalid', 'commit', '--quiet', '-m', 'fixture'], { stdio: 'ignore' });
+    }
+    execFileSync(git, ['-C', first, 'worktree', 'add', '--quiet', '--detach', sibling], { stdio: 'ignore' });
+
+    const firstIdentity = repositoryIdentity(first);
+    assert.equal(repositoryIdentity(sibling), firstIdentity, 'sibling worktrees must share measured peaks');
+    assert.notEqual(repositoryIdentity(second), firstIdentity, 'same-basename independent repositories must not share peaks');
+    assert.equal(
+      repositoryIdentity(sibling, { env: { ...process.env, GIT_DIR: path.join(second, '.git'), GIT_WORK_TREE: second } }),
+      firstIdentity,
+      'caller-controlled Git identity variables must not redirect peak history',
+    );
+
+    const peakEnv = scratchEnv();
+    const command = ['npm', 'test'];
+    const environmentFor = (cwd, overrides = {}) => ({
+      ...peakEnv,
+      PWD: cwd,
+      INIT_CWD: cwd,
+      AGENT_GUARDED: '<guard-lease>',
+      NODE_ENV: 'test',
+      ...overrides,
+    });
+    const firstBehavior = commandBehaviorIdentity(first, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(first),
+    });
+    const siblingBehavior = commandBehaviorIdentity(sibling, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(sibling),
+    });
+    assert.match(firstBehavior, /^[0-9a-f]{64}$/u);
+    assert.equal(siblingBehavior, firstBehavior, 'same revision and effective environment may share across worktrees');
+    assert.notEqual(
+      commandBehaviorIdentity(first, command, {
+        env: peakEnv,
+        behaviorEnv: environmentFor(first, { BEHAVIOR_ROOT: first }),
+      }),
+      commandBehaviorIdentity(sibling, command, {
+        env: peakEnv,
+        behaviorEnv: environmentFor(sibling, { BEHAVIOR_ROOT: sibling }),
+      }),
+      'caller-defined path-valued environment remains exact across worktrees',
+    );
+
+    await recordLanePeak({
+      env: peakEnv,
+      repo: firstIdentity,
+      label: 'test',
+      command,
+      behaviorIdentity: firstBehavior,
+      peakRssMb: 900,
+    });
+    assert.equal(
+      readLanePeakMb({
+        env: peakEnv,
+        repo: repositoryIdentity(sibling),
+        label: 'test',
+        command,
+        behaviorIdentity: siblingBehavior,
+      }),
+      900,
+    );
+    assert.equal(
+      readLanePeakMb({
+        env: peakEnv,
+        repo: repositoryIdentity(second),
+        label: 'test',
+        command,
+        behaviorIdentity: commandBehaviorIdentity(second, command, {
+          env: peakEnv,
+          behaviorEnv: environmentFor(second),
+        }),
+      }),
+      null,
+    );
+
+    // The argv did not change, but the npm script did. Both unstaged and
+    // staged edits are untrusted; after commit, the new revision gets a fresh
+    // identity rather than borrowing the old light peak.
+    writeFileSync(path.join(sibling, 'package.json'), `${JSON.stringify({ scripts: { test: 'node heavy.mjs' } }, null, 2)}\n`);
+    assert.equal(
+      commandBehaviorIdentity(sibling, command, { env: peakEnv, behaviorEnv: environmentFor(sibling) }),
+      null,
+      'dirty script content must fail closed',
+    );
+    execFileSync(git, ['-C', sibling, 'add', 'package.json'], { stdio: 'ignore' });
+    assert.equal(
+      commandBehaviorIdentity(sibling, command, { env: peakEnv, behaviorEnv: environmentFor(sibling) }),
+      null,
+      'staged script content must fail closed',
+    );
+    execFileSync(git, ['-C', sibling, '-c', 'user.name=Agent Guard Test', '-c', 'user.email=guard@example.invalid', 'commit', '--quiet', '-m', 'heavier test script'], { stdio: 'ignore' });
+    const revisedBehavior = commandBehaviorIdentity(sibling, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(sibling),
+    });
+    assert.notEqual(revisedBehavior, firstBehavior, 'a changed revision must invalidate same-argv history');
+    assert.equal(
+      readLanePeakMb({
+        env: peakEnv,
+        repo: firstIdentity,
+        label: 'test',
+        command,
+        behaviorIdentity: revisedBehavior,
+      }),
+      null,
+    );
+
+    for (const overrides of [
+      { NODE_ENV: 'production' },
+      { NODE_OPTIONS: '--conditions=memory-heavy' },
+      { FEATURE_FLAG: 'memory-heavy' },
+    ]) {
+      const changedEnvironment = commandBehaviorIdentity(first, command, {
+        env: peakEnv,
+        behaviorEnv: environmentFor(first, overrides),
+      });
+      assert.notEqual(changedEnvironment, firstBehavior);
+      assert.equal(
+        readLanePeakMb({
+          env: peakEnv,
+          repo: firstIdentity,
+          label: 'test',
+          command,
+          behaviorIdentity: changedEnvironment,
+        }),
+        null,
+      );
+    }
+
+    const untracked = path.join(first, 'untracked-runner.mjs');
+    writeFileSync(untracked, 'process.exit(0);\n');
+    assert.equal(
+      commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      null,
+      'untracked executable content must fail closed',
+    );
+    rmSync(untracked, { force: true });
+
+    const external = path.join(root, 'external-runner');
+    writeFileSync(external, '#!/bin/sh\nexit 0\n');
+    chmodSync(external, 0o755);
+    const externalBefore = commandBehaviorIdentity(first, [external], {
+      env: peakEnv,
+      behaviorEnv: environmentFor(first),
+    });
+    writeFileSync(external, '#!/bin/sh\necho changed\nexit 0\n');
+    const externalAfter = commandBehaviorIdentity(first, [external], {
+      env: peakEnv,
+      behaviorEnv: environmentFor(first),
+    });
+    assert.notEqual(externalAfter, externalBefore, 'changed executable contents must invalidate history');
+  });
+
+  test('peaks round-trip through the protected store and keep the max of a rolling window', async () => {
     const env = { AGENT_GUARD_STATE_DIR: mkdtempSync(path.join(tmpdir(), 'agent-guard-peaks-')) };
-    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test' }), null);
-    recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 900 });
-    recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 1100 });
-    recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 700 });
-    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test' }), 1100);
+    const command = ['npm', 'test'];
+    const behaviorIdentity = 'behavior-a';
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test', command, behaviorIdentity }), null);
+    await recordLanePeak({ env, repo: 'overlook', label: 'test', command, behaviorIdentity, peakRssMb: 900 });
+    await recordLanePeak({ env, repo: 'overlook', label: 'test', command, behaviorIdentity, peakRssMb: 1100 });
+    await recordLanePeak({ env, repo: 'overlook', label: 'test', command, behaviorIdentity, peakRssMb: 700 });
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test', command, behaviorIdentity }), 1100);
     // Other lanes and repos do not bleed together.
-    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'other' }), null);
-    assert.equal(readLanePeakMb({ env, repo: 'cartograph', label: 'test' }), null);
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'other', command, behaviorIdentity }), null);
+    assert.equal(readLanePeakMb({ env, repo: 'cartograph', label: 'test', command, behaviorIdentity }), null);
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test', command: ['npm', 'run', 'other'], behaviorIdentity }), null);
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test', command, behaviorIdentity: 'behavior-b' }), null);
+    await recordLanePeak({ env, repo: '/repos/a::b', label: 'test', command, behaviorIdentity, peakRssMb: 400 });
+    await recordLanePeak({ env, repo: '/repos/a', label: 'b::test', command, behaviorIdentity, peakRssMb: 800 });
+    assert.equal(readLanePeakMb({ env, repo: '/repos/a::b', label: 'test', command, behaviorIdentity }), 400);
+    assert.equal(readLanePeakMb({ env, repo: '/repos/a', label: 'b::test', command, behaviorIdentity }), 800);
+    assert.equal(
+      readLanePeakMb({ env, repo: 'overlook', label: 'test', command }),
+      null,
+      'history without a verified behavior identity fails closed',
+    );
     // Junk values are never recorded or returned.
-    recordLanePeak({ env, repo: 'overlook', label: 'junk', peakRssMb: Number.NaN });
-    recordLanePeak({ env, repo: 'overlook', label: 'junk', peakRssMb: -5 });
-    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'junk' }), null);
+    await recordLanePeak({ env, repo: 'overlook', label: 'junk', command, behaviorIdentity, peakRssMb: Number.NaN });
+    await recordLanePeak({ env, repo: 'overlook', label: 'junk', command, behaviorIdentity, peakRssMb: -5 });
+    assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'junk', command, behaviorIdentity }), null);
     rmSync(env.AGENT_GUARD_STATE_DIR, { recursive: true, force: true });
+  });
+
+  test('concurrent writers retain the larger measured sample', async () => {
+    const laneCount = 4;
+    const samples = [320, 640, 960, 1440];
+    const writerCount = laneCount * samples.length;
+    const gateBuffer = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 2);
+    const gate = new Int32Array(gateBuffer);
+    const moduleUrl = new URL('../lib/leases.mjs', import.meta.url).href;
+    const workerUrl = new URL(`data:text/javascript,${encodeURIComponent(`
+      import { parentPort, workerData } from 'node:worker_threads';
+      const { recordLanePeak } = await import(workerData.moduleUrl);
+      const gate = new Int32Array(workerData.gateBuffer);
+      Atomics.add(gate, 0, 1);
+      Atomics.notify(gate, 0);
+      Atomics.wait(gate, 1, 0);
+      const recorded = await recordLanePeak(workerData.peak);
+      parentPort.postMessage(recorded);
+    `)}`);
+    const workers = [];
+    const completions = [];
+
+    for (let lane = 0; lane < laneCount; lane += 1) {
+      for (const peakRssMb of samples) {
+        const worker = new Worker(workerUrl, {
+          workerData: {
+            moduleUrl,
+            gateBuffer,
+            peak: {
+              env: { AGENT_GUARD_STATE_DIR: env.AGENT_GUARD_STATE_DIR },
+              repo: 'shared-checkout',
+              label: `concurrent-${lane}`,
+              command: ['npm', 'test'],
+              behaviorIdentity: 'concurrent-behavior',
+              peakRssMb,
+            },
+          },
+        });
+        workers.push(worker);
+        completions.push(new Promise((resolve, reject) => {
+          let recorded = false;
+          worker.once('message', (value) => {
+            recorded = value;
+          });
+          worker.once('error', reject);
+          worker.once('exit', (code) => {
+            if (code !== 0) reject(new Error(`lane-peak writer exited ${code}`));
+            else if (!recorded) reject(new Error('lane-peak writer did not record its sample'));
+            else resolve();
+          });
+        }));
+      }
+    }
+
+    try {
+      const readyDeadline = Date.now() + 10_000;
+      while (Atomics.load(gate, 0) < writerCount && Date.now() < readyDeadline) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 5);
+        });
+      }
+      assert.equal(Atomics.load(gate, 0), writerCount, 'every writer must reach the shared start gate');
+      Atomics.store(gate, 1, 1);
+      Atomics.notify(gate, 1, writerCount);
+      await Promise.all(completions);
+    } finally {
+      Atomics.store(gate, 1, 1);
+      Atomics.notify(gate, 1, writerCount);
+      await Promise.all(workers.map((worker) => worker.terminate()));
+    }
+    for (let lane = 0; lane < laneCount; lane += 1) {
+      assert.equal(
+        readLanePeakMb({
+          env,
+          repo: 'shared-checkout',
+          label: `concurrent-${lane}`,
+          command: ['npm', 'test'],
+          behaviorIdentity: 'concurrent-behavior',
+        }),
+        Math.max(...samples),
+        `lane ${lane} lost its larger concurrent sample`,
+      );
+    }
   });
 });

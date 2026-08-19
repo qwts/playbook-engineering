@@ -12,6 +12,7 @@ on:
     # guard fixes #197–#205 sat on main unsynced because tools/agent-guard/**
     # was absent from this list).
     paths:
+      - '.prettierignore'
       - '.codex/**'
       - '.claude/settings.json'
       - '.cursor/hooks.json'
