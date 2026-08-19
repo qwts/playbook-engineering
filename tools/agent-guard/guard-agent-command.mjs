@@ -2368,7 +2368,8 @@ export function evaluateCommand(command, { cwd = process.cwd() } = {}) {
       reason:
         `Blocked the "${lane.id}" lane: ${lane.why}, and on a small machine several of these in parallel across repos and ` +
         `agents is what exhausts memory. Agents do not run it locally by default. ${GUIDANCE} ` +
-        'If a local run is genuinely required, the owner can run it directly from their own terminal; agent sessions cannot receive forgeable local grants.',
+        'If a local run is genuinely required, the owner may make an exceptional direct run from their own terminal. ' +
+        'That run is outside agent-guard protection and is never delegated to an agent.',
     };
   }
 
