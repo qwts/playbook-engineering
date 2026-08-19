@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const UNINSTALLED_REASON = 'uninstalled identity: refuse human-attributed commit or GitHub write; finish durable bootstrap to publish as the bot';
 
@@ -567,6 +569,13 @@ function shellLex(command) {
     else if (ch === '{' && !wordStarted && /(?:\s|$)/u.test(text[i + 1] || '')) operator = ch;
     else if (ch === '}' && !wordStarted && /(?:\s|;|&|\||$)/u.test(text[i + 1] || '')) operator = ch;
     if (operator) {
+      // In zsh an adjacent parenthesis can be part of executable syntax such
+      // as a glob qualifier (`*(e:'command':)`). Splitting it into a benign
+      // word plus a shell group would hide the qualifier's command from the
+      // recursive scan. A separated `(` remains an ordinary control operator.
+      if (operator === '(' && wordStarted) {
+        return { safe: false, substitutions, tokens };
+      }
       if (REDIRECTION_OPERATORS.has(operator) && wordStarted && /^\d+$/u.test(value) && !dynamic) {
         value = '';
         wordStarted = false;
@@ -659,6 +668,19 @@ function basename(word) {
   return String(word || '').split('/').pop();
 }
 
+function withWorkingDirectory(context, directory, baseDirectory = context.cwd) {
+  const next = cloneContext(context);
+  try {
+    // `env -C` resolves each relative operand from the cwd established by the
+    // preceding wrapper. Canonicalizing at each hop also matches kernel chdir
+    // behavior through symlinks instead of composing a misleading text path.
+    next.cwd = realpathSync(resolve(baseDirectory || process.cwd(), directory));
+    return next;
+  } catch {
+    return null;
+  }
+}
+
 function unwrapPrefixes(input, inheritedContext) {
   let words = [...input];
   let context = cloneContext(inheritedContext);
@@ -702,6 +724,8 @@ function unwrapPrefixes(input, inheritedContext) {
     }
     if (name !== 'env') break;
 
+    const entryDirectory = context.cwd;
+    let requestedDirectory = '';
     words.shift();
     while (words.length) {
       const item = words[0];
@@ -746,18 +770,18 @@ function unwrapPrefixes(input, inheritedContext) {
         words.shift();
         const directory = words.shift();
         if (!directory || directory.dynamic || !directory.value) return { context, safe: false, words: [] };
-        context.cwd = directory.value;
+        requestedDirectory = directory.value;
         continue;
       }
       if (option.startsWith('-C') && option.length > 2) {
-        context.cwd = option.slice(2);
+        requestedDirectory = option.slice(2);
         words.shift();
         continue;
       }
       if (option.startsWith('--chdir=')) {
         const directory = option.slice('--chdir='.length);
         if (!directory) return { context, safe: false, words: [] };
-        context.cwd = directory;
+        requestedDirectory = directory;
         words.shift();
         continue;
       }
@@ -776,6 +800,13 @@ function unwrapPrefixes(input, inheritedContext) {
       }
       if (option.startsWith('-')) return { context, safe: false, words: [] };
       break;
+    }
+    if (requestedDirectory) {
+      // One `env` invocation applies only its final -C/--chdir, relative to
+      // the cwd where that wrapper started. A nested `env` starts a new hop.
+      const changed = withWorkingDirectory(context, requestedDirectory, entryDirectory);
+      if (!changed) return { context, safe: false, words: [] };
+      context = changed;
     }
   }
   return { context, safe: true, words };
@@ -1178,6 +1209,7 @@ const RUNTIME_FUNCTIONS = [
   assignment,
   withAssignment,
   basename,
+  withWorkingDirectory,
   unwrapPrefixes,
   parseGit,
   ghApiWrites,
@@ -1238,8 +1270,9 @@ function shellQuote(value) {
 export function renderUninstalledIdentitySource(dialect) {
   const response = responseFor(dialect);
   return [
-    'import { readFileSync } from "node:fs";',
+    'import { readFileSync, realpathSync } from "node:fs";',
     'import { spawnSync } from "node:child_process";',
+    'import { resolve } from "node:path";',
     `const UNINSTALLED_REASON = ${JSON.stringify(UNINSTALLED_REASON)};`,
     `const CONTROL_OPERATORS = new Set(${JSON.stringify([...CONTROL_OPERATORS])});`,
     `const REDIRECTION_OPERATORS = new Set(${JSON.stringify([...REDIRECTION_OPERATORS])});`,

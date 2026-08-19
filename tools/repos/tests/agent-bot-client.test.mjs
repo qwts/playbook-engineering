@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -82,6 +82,50 @@ function adapterAllowed(adapter, command, identity = 'human', options = {}) {
   assert.equal(run.status, 0, `${adapter.path} failed for ${JSON.stringify(command)}: ${run.stderr}`);
   if (adapter.dialect === 'cursor') assert.deepEqual(JSON.parse(run.stdout), {});
   else assert.equal(run.stdout, '');
+}
+
+const GIT_IDENTITY_VARIABLES = [
+  'GIT_AUTHOR_EMAIL',
+  'GIT_AUTHOR_NAME',
+  'GIT_COMMITTER_EMAIL',
+  'GIT_COMMITTER_NAME',
+];
+
+function configureIdentityRepository(cwd, name, email) {
+  mkdirSync(cwd, { recursive: true });
+  for (const args of [
+    ['init', '--quiet'],
+    ['config', 'user.name', name],
+    ['config', 'user.email', email],
+    ['config', 'commit.gpgsign', 'false'],
+  ]) {
+    execFileSync('git', args, { cwd, stdio: 'ignore' });
+  }
+  return cwd;
+}
+
+function realGitIdentity(cwd, executable, args) {
+  const env = { ...process.env };
+  for (const name of GIT_IDENTITY_VARIABLES) delete env[name];
+  const run = spawnSync(executable, [...args, 'git', 'var', 'GIT_AUTHOR_IDENT'], {
+    cwd,
+    encoding: 'utf8',
+    env,
+  });
+  assert.equal(run.status, 0, `${executable} ${args.join(' ')} failed: ${run.stderr}`);
+  return run.stdout.trim();
+}
+
+function realGitChdirIdentity(cwd, args) {
+  const env = { ...process.env };
+  for (const name of GIT_IDENTITY_VARIABLES) delete env[name];
+  const run = spawnSync('git', [...args, 'var', 'GIT_AUTHOR_IDENT'], {
+    cwd,
+    encoding: 'utf8',
+    env,
+  });
+  assert.equal(run.status, 0, `git ${args.join(' ')} failed: ${run.stderr}`);
+  return run.stdout.trim();
 }
 
 const grant = (token = 'secret-token') => JSON.stringify({
@@ -224,6 +268,7 @@ test('every managed adapter denies shell spelling and wrapper bypasses', () => {
     'printf x > "$(git commit -m x)"',
     'grep x <<< "$(git commit -m x)"',
     'printf x >',
+    "print -r -- *(e:'git commit -m x':)",
     'printf "git commit -m x\\n" | sh',
     'if ! git commit -m x; then :; fi',
     'nohup git commit -m x',
@@ -324,6 +369,7 @@ test('unambiguous reads and edits remain allowed in every managed adapter', () =
     `printf '%s' "$value" > "$file"`,
     `cat < "$file"`,
     `grep x <<< "$text"`,
+    '( printf ok )',
   ];
   for (const adapter of managedAdapters) {
     for (const command of benign) adapterAllowed(adapter, command);
@@ -382,6 +428,82 @@ test('Git identity lookup follows the operation global context in every adapter'
     }
   } finally {
     rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test('env wrapper and Git chdir composition matches the real runtime in every adapter', () => {
+  const root = mkdtempSync(join(tmpdir(), 'uninstalled-wrapper-cwd-'));
+  const outside = join(root, 'outside');
+  configureIdentityRepository(root, 'ai9d', 'ai9d@example.test');
+  configureIdentityRepository(outside, 'Human User', 'human@example.test');
+  try {
+    assert.match(
+      realGitIdentity(root, 'env', ['-C', 'outside', 'env', '-C', '.']),
+      /^Human User </u,
+      'a nested env resolves its relative chdir from the preceding wrapper cwd',
+    );
+    assert.match(
+      realGitIdentity(root, 'env', ['-C', 'outside', '-C', '.']),
+      /^ai9d </u,
+      'one env applies only its final chdir from that wrapper entry cwd',
+    );
+    assert.match(
+      realGitChdirIdentity(root, ['-C', 'outside', '-C', '.']),
+      /^Human User </u,
+      'Git composes each relative -C from the preceding Git cwd',
+    );
+
+    for (const adapter of managedAdapters) {
+      assert.equal(adapterDenied(
+        adapter,
+        'env -C outside env -C . git merge --no-ff topic',
+        'configured',
+        { cwd: root },
+      ), true, `${adapter.path} must compose nested env cwd hops`);
+      adapterAllowed(
+        adapter,
+        'env -C outside -C . git merge --no-ff topic',
+        'configured',
+        { cwd: root },
+      );
+      assert.equal(adapterDenied(
+        adapter,
+        'git -C outside -C . merge --no-ff topic',
+        'configured',
+        { cwd: root },
+      ), true, `${adapter.path} must retain Git's sequential -C semantics`);
+    }
+
+    execFileSync('git', ['config', 'user.name', 'Human User'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'human@example.test'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'ai9d'], { cwd: outside });
+    execFileSync('git', ['config', 'user.email', 'ai9d@example.test'], { cwd: outside });
+
+    assert.match(realGitIdentity(root, 'env', ['-C', 'outside', 'env', '-C', '.']), /^ai9d </u);
+    assert.match(realGitIdentity(root, 'env', ['-C', 'outside', '-C', '.']), /^Human User </u);
+    assert.match(realGitChdirIdentity(root, ['-C', 'outside', '-C', '.']), /^ai9d </u);
+    for (const adapter of managedAdapters) {
+      adapterAllowed(
+        adapter,
+        'env -C outside env -C . git merge --no-ff topic',
+        'configured',
+        { cwd: root },
+      );
+      assert.equal(adapterDenied(
+        adapter,
+        'env -C outside -C . git merge --no-ff topic',
+        'configured',
+        { cwd: root },
+      ), true, `${adapter.path} must keep one env's final -C relative to its entry cwd`);
+      adapterAllowed(
+        adapter,
+        'git -C outside -C . merge --no-ff topic',
+        'configured',
+        { cwd: root },
+      );
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
