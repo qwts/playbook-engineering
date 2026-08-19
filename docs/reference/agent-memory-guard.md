@@ -47,6 +47,9 @@ dirty, untracked, non-Git, or otherwise unprovable state is a cold start.
 Unrelated clones remain isolated, and a cheap command, older revision,
 different top-level runtime, or different environment cannot lend its
 measurement to a heavier behavior under the same label.
+Assume-unchanged or skip-worktree index hints force a cold start too. Only the
+wrapper's exact untracked `.guard/last-run.json` and `.guard/history.jsonl`
+diagnostics are excluded from cleanliness; any other untracked path stays cold.
 
 ## Admission
 

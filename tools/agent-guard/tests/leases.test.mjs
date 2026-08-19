@@ -485,6 +485,46 @@ describe('lane peak store (#180)', () => {
     );
     rmSync(untracked, { force: true });
 
+    // The wrapper's own two untracked diagnostics must not make a successful
+    // clean run permanently cold, but no broader .guard exemption exists.
+    const diagnostics = path.join(first, '.guard');
+    mkdirSync(diagnostics);
+    writeFileSync(path.join(diagnostics, 'last-run.json'), '{}\n');
+    writeFileSync(path.join(diagnostics, 'history.jsonl'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      firstBehavior,
+      'guard-owned untracked diagnostics do not invalidate otherwise clean evidence',
+    );
+    writeFileSync(path.join(diagnostics, 'caller-owned.json'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      null,
+      'other untracked guard files still fail closed',
+    );
+    rmSync(path.join(diagnostics, 'caller-owned.json'));
+
+    const originalPackage = `${JSON.stringify({ scripts: { test: 'node light.mjs' } }, null, 2)}\n`;
+    const hiddenPackage = `${JSON.stringify({ scripts: { test: 'node hidden-heavy.mjs' } }, null, 2)}\n`;
+    for (const [hide, reveal, label] of [
+      ['--assume-unchanged', '--no-assume-unchanged', 'assume-unchanged'],
+      ['--skip-worktree', '--no-skip-worktree', 'skip-worktree'],
+    ]) {
+      execFileSync(git, ['-C', first, 'update-index', hide, 'package.json'], { stdio: 'ignore' });
+      writeFileSync(path.join(first, 'package.json'), hiddenPackage);
+      assert.equal(
+        commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+        null,
+        `${label} index state cannot hide changed command behavior`,
+      );
+      execFileSync(git, ['-C', first, 'update-index', reveal, 'package.json'], { stdio: 'ignore' });
+      writeFileSync(path.join(first, 'package.json'), originalPackage);
+    }
+    assert.equal(
+      commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      firstBehavior,
+    );
+
     const external = path.join(root, 'external-runner');
     writeFileSync(external, '#!/bin/sh\nexit 0\n');
     chmodSync(external, 0o755);

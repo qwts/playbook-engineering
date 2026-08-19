@@ -26,7 +26,11 @@ import path from 'node:path';
 import { CORE_LEASE_FIELDS, PROTOCOL_VERSION, ensureStateDirs, lanePeaksDir, leasesDir, machineToken, stateDir } from './protocol.mjs';
 
 const GIT_EXECUTABLES = ['/usr/bin/git', '/bin/git'];
-const BEHAVIOR_IDENTITY_VERSION = 2;
+const BEHAVIOR_IDENTITY_VERSION = 3;
+const UNTRACKED_GUARD_DIAGNOSTICS = new Set([
+  '? .guard/history.jsonl',
+  '? .guard/last-run.json',
+]);
 
 function canonicalWorktreePath(worktree) {
   try {
@@ -169,8 +173,18 @@ export function commandBehaviorIdentity(worktree, command, { env = process.env, 
       options,
     ).split('\0').filter(Boolean);
     const revision = status.find((entry) => entry.startsWith('# branch.oid '))?.slice('# branch.oid '.length);
-    const dirty = status.some((entry) => !entry.startsWith('# '));
+    const dirty = status.some((entry) => !entry.startsWith('# ') && !UNTRACKED_GUARD_DIAGNOSTICS.has(entry));
     if (!revision || revision === '(initial)' || dirty) return null;
+
+    // status/diff intentionally trust index hints such as assume-unchanged and
+    // skip-worktree. Those hints are local performance controls, not evidence
+    // that the worktree bytes still match HEAD, so any such entry makes this a
+    // cold start. With `-v`, ordinary tracked entries are tagged `H`, while an
+    // assume-unchanged tag is lower-case and skip-worktree is tagged `S`.
+    const tracked = execFileSync(git, ['-C', canonicalWorktree, 'ls-files', '-v', '-z'], options)
+      .split('\0')
+      .filter(Boolean);
+    if (tracked.some((entry) => !entry.startsWith('H '))) return null;
 
     const executable = executableEvidence(canonicalWorktree, command, behaviorEnv);
     const environment = normalizedEnvironment(behaviorEnv, worktree, canonicalWorktree);
