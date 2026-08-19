@@ -6,6 +6,11 @@ function assertRepository(repository) {
   if (!REPOSITORY.test(repository || '')) throw new Error('repository is invalid for release-origin lookup');
 }
 
+function githubApiBase(apiUrl) {
+  if (!apiUrl) throw new Error('GitHub REST endpoint is missing for release-origin lookup');
+  return new URL(apiUrl.endsWith('/') ? apiUrl : `${apiUrl}/`);
+}
+
 async function githubJson({ url, token, fetchImpl }) {
   if (!token) throw new Error('GitHub token is missing for release-origin lookup');
   const response = await fetchImpl(url, {
@@ -36,16 +41,14 @@ export function mergeGroupHeadPullRequest(event) {
 
 export async function getPullRequest({ repository, number, apiUrl, token, fetchImpl = fetch }) {
   assertRepository(repository);
-  if (!apiUrl) throw new Error('GitHub REST endpoint is missing for release-origin lookup');
-  const url = new URL(`/repos/${repository}/pulls/${number}`, apiUrl);
+  const url = new URL(`repos/${repository}/pulls/${number}`, githubApiBase(apiUrl));
   return assertPullRequest(await githubJson({ url, token, fetchImpl }));
 }
 
 export async function listPullRequestsForCommit({ repository, sha, apiUrl, token, fetchImpl = fetch }) {
   assertRepository(repository);
   if (!FULL_SHA.test(sha || '')) throw new Error('commit SHA is invalid for release-origin lookup');
-  if (!apiUrl) throw new Error('GitHub REST endpoint is missing for release-origin lookup');
-  const url = new URL(`/repos/${repository}/commits/${sha}/pulls?per_page=100`, apiUrl);
+  const url = new URL(`repos/${repository}/commits/${sha}/pulls?per_page=100`, githubApiBase(apiUrl));
   const pullRequests = await githubJson({ url, token, fetchImpl });
   if (!Array.isArray(pullRequests)) throw new Error('release-origin lookup returned malformed data');
   return pullRequests.map(assertPullRequest);
@@ -62,14 +65,13 @@ export async function listPullRequestFiles({
   if (!Number.isSafeInteger(number) || number <= 0) {
     throw new Error('pull request number is invalid for release-origin lookup');
   }
-  if (!apiUrl) throw new Error('GitHub REST endpoint is missing for release-origin lookup');
 
   const files = [];
+  const apiBase = githubApiBase(apiUrl);
   // GitHub exposes at most 3,000 pull-request files. Harness projections are
   // much smaller, but exhausting every available page keeps the trust decision
   // bound to the complete API diff rather than a caller-controlled prefix.
   for (let page = 1; page <= 30; page += 1) {
-    const apiBase = apiUrl.endsWith('/') ? apiUrl : `${apiUrl}/`;
     const url = new URL(`repos/${repository}/pulls/${number}/files?per_page=100&page=${page}`, apiBase);
     const batch = await githubJson({ url, token, fetchImpl });
     if (!Array.isArray(batch)) throw new Error('release-origin file lookup returned malformed data');

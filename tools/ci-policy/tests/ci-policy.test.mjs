@@ -16,6 +16,7 @@ import {
   releaseOutputs,
 } from '../../../.github/actions/ci-policy/classify.mjs';
 import {
+  getPullRequest,
   listPullRequestFiles,
   listPullRequestsForCommit,
   mergeGroupHeadPullRequest,
@@ -372,6 +373,29 @@ test('harness changed-file evidence comes from the complete GitHub pull-request 
   ]);
 });
 
+test('harness file-evidence failures retain ordinary source policy', async () => {
+  const fullPage = Array.from({ length: 100 }, (_, index) => ({ filename: `path-${index}` }));
+  for (const [reason, fetchImpl] of [
+    ['HTTP failure', async () => ({ ok: false, status: 503 })],
+    ['malformed response', async () => ({ ok: true, json: async () => ({ files: managedHarnessFiles }) })],
+    ['complete-diff limit', async () => ({ ok: true, json: async () => fullPage })],
+  ]) {
+    const options = releaseRun({
+      pullRequests: [harnessPullRequest()],
+      apiUrl: 'https://github.example/api/v3',
+      token: 'test-token',
+      fetchImpl,
+    });
+    const changedFiles = await harnessProjectionChangedFiles(options);
+    assert.deepEqual(changedFiles, [], reason);
+    assert.equal(
+      releaseOutputs({ ...options, changedFiles }).release_gate_mode,
+      'source-policy',
+      reason,
+    );
+  }
+});
+
 test('ordinary automation and unconfigured repositories get no generated-release exception', () => {
   const dependabot = releasePullRequest({
     author: 'dependabot[bot]',
@@ -405,6 +429,36 @@ test('the merge queue classifies its own head pull request, not the entries behi
   // A generated projection queued ahead of this source PR is never fetched, so it cannot
   // weaken the head PR's source policy.
   assert.equal(releaseOutputs({ ...options, pullRequests }).release_gate_mode, 'source-policy');
+});
+
+test('release-origin lookups preserve the GitHub Enterprise API base path', async () => {
+  const sha = 'a'.repeat(40);
+  const requested = [];
+  const fetchImpl = async (url) => {
+    requested.push(String(url));
+    const json = String(url).includes('/commits/')
+      ? [source]
+      : String(url).includes('/files?')
+        ? managedHarnessFiles
+        : source;
+    return { ok: true, json: async () => json };
+  };
+  const options = {
+    repository: 'qwts/overlook',
+    apiUrl: 'https://github.example/api/v3',
+    token: 'test-token',
+    fetchImpl,
+  };
+
+  await getPullRequest({ ...options, number: 116 });
+  await listPullRequestsForCommit({ ...options, sha });
+  await listPullRequestFiles({ ...options, number: 27 });
+
+  assert.deepEqual(requested, [
+    'https://github.example/api/v3/repos/qwts/overlook/pulls/116',
+    `https://github.example/api/v3/repos/qwts/overlook/commits/${sha}/pulls?per_page=100`,
+    'https://github.example/api/v3/repos/qwts/overlook/pulls/27/files?per_page=100&page=1',
+  ]);
 });
 
 test('manual and post-merge lanes classify the exact commit through its associated pull requests', async () => {
@@ -460,6 +514,10 @@ test('release-origin lookups fail closed on missing or malformed evidence', asyn
   await assert.rejects(
     () => listPullRequestsForCommit({ ...base, token: '', fetchImpl: responses.notAnArray }),
     /token is missing/,
+  );
+  await assert.rejects(
+    () => listPullRequestFiles({ ...base, number: 27, fetchImpl: responses.forbidden }),
+    /HTTP 403/,
   );
   await assert.rejects(
     () => listPullRequestFiles({

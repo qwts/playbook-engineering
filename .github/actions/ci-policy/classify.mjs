@@ -110,7 +110,14 @@ export async function harnessProjectionChangedFiles(options) {
   if (!projection || options.pullRequests.length !== 1) return [];
   const [pullRequest] = options.pullRequests;
   if (!matchesProjectionIdentity(pullRequest, options.repository, projection)) return [];
-  return listPullRequestFiles({ ...options, number: pullRequest.number });
+  try {
+    return await listPullRequestFiles({ ...options, number: pullRequest.number });
+  } catch {
+    // Incomplete hosted evidence cannot authorize a no-release projection.
+    // Retain the repository's ordinary source policy instead of aborting the
+    // policy action; the direct API helper remains strict for other callers.
+    return [];
+  }
 }
 
 export function releaseOutputs(options) {
