@@ -133,14 +133,16 @@ Wrapping a command:
 node tools/agent-guard/run-guarded.mjs --label test:dom -- npm run test:dom:inner
 ```
 
-The wrapper puts the command in its own process group, polls the whole
-descendant tree's RSS every 250 ms, and terminates the group on breach
-(`SIGTERM`, then `SIGKILL` after 2 s, or immediately past 1.25× the ceiling,
-because a fast runaway outruns a polite shutdown). Every run writes
+The wrapper starts the exact command arguments in their own process group behind
+a private pipe. It samples the held group's RSS before release, so even a
+successful sub-250 ms command records a positive peak; timeout, signal, or a
+failed initial sample leaves the gate closed for retry, while an over-ceiling
+sample terminates it. The wrapper then polls
+descendant RSS every 250 ms and terminates the group on breach (`SIGTERM`, then
+`SIGKILL` after 2 s, or immediately past 1.25× the ceiling). Every run writes
 `.guard/last-run.json` and appends to `.guard/history.jsonl` at the Git worktree
-root (or at the supplied cwd outside Git); a run killed for `rss-limit` or
-`timeout` exits non-zero, so a test that "passes" while eating the machine is a
-failed test.
+root (or at the supplied cwd outside Git); `rss-limit` and `timeout` runs exit
+non-zero.
 
 ## Environment
 
