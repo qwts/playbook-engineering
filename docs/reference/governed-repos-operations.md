@@ -122,10 +122,9 @@ generators with its write credential. This composition is deterministic:
 central deletion and reordering still propagate, while a second run produces
 no new diff.
 
-The root `.prettierignore` is also composed rather than replaced. Its marked
-governance block is aligned with `GOVERNED_FORMAT_EXEMPT_FILES`, the managed
-payload within the same harness inventory that drives synchronization and
-`lint:synced`; every repository-owned line outside the block survives
+The root `.prettierignore` is composed rather than replaced. Its marked block
+follows `GOVERNED_FORMAT_EXEMPT_FILES` in the harness inventory used by
+synchronization and `lint:synced`; repository-owned lines outside it survive
 byte-for-byte. A manifest exclusion removes that path from the repository's
 managed block too, so its local formatter continues to own the excluded file.
 This keeps consumer formatters from rewriting managed files while language and
@@ -139,10 +138,7 @@ its root layer is canonical; that manifest field and the local
 `sync-codex.mjs` command retain their original names as compatibility
 interfaces, not identity boundaries.
 
-Repository-owned adapter surveys and their exact fleet snapshots are recorded
-in the [hook composition audits](hook-composition-audits.md). Use those records
-to distinguish a target-owned entry that needs a stable preservation marker
-from a centrally owned entry that synchronization must replace.
+Fleet snapshots: [hook composition audits](hook-composition-audits.md).
 
 After the source change is reviewed and merged, approve the generated pull
 requests from a normal human checkout:
