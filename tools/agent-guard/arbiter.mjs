@@ -8,7 +8,7 @@
 //   node tools/agent-guard/arbiter.mjs status
 //   node tools/agent-guard/arbiter.mjs doctor
 //   node tools/agent-guard/arbiter.mjs check [--rss-mb N] [--label name]
-//   node tools/agent-guard/arbiter.mjs grant <lane> [--minutes N]
+//   node tools/agent-guard/arbiter.mjs grant <lane>  # disabled legacy command
 //   node tools/agent-guard/arbiter.mjs revoke <lane>
 
 import path from 'node:path';
