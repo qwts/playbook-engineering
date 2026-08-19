@@ -60,12 +60,12 @@ repos. Concretely:
    turned crash recovery into the outage. A locally-minted random token, stored
    with the state it identifies, distinguishes a restored or copied state
    directory without ever consulting a name the network can change.
-5. **Agents and the owner are governed differently.** Agents are denied the
-   heavy lanes (e2e, storybook, perf, coverage, full `ci`) by default and told to
-   push and let CI verify. The owner is never refused *by policy* — their runs
-   are clamped and headroom-checked like any other, and a refusal for genuine
-   memory pressure remains overridable in their own terminal. Heavy lanes are
-   never delegated through a same-user grant; see the amendment below.
+5. **Local wrapper callers fail closed as agents.** Heavy lanes (e2e,
+   storybook, perf, coverage, full `ci`) are denied and directed to CI. Neither
+   an unmarked environment nor a same-user file authenticates an owner. An
+   exceptional direct owner run is outside the wrapper's lease, admission,
+   ceiling, and timeout protections and is never delegated to an agent; see the
+   amendment below.
 6. **The wrapper never infers a CI exemption.** Markers and paths are forgeable,
    while GitHub OIDC uses a transferable bearer credential that does not prove
    process location. Hosted workflows invoke underlying CI commands directly,
@@ -81,9 +81,10 @@ Issue #235 proved that an innocently named package script can hide
 `arbiter.mjs grant`, strip harness markers, and mint the same-user file another
 script consumes. Such files cannot authenticate human intent. The arbiter now
 refuses minting and lane policy ignores grant artifacts; they remain listable
-and revocable only for cleanup. Owners run the underlying command from a
-non-agent terminal, while agents use CI. Lease, ceiling, timeout, and admission
-enforcement are unchanged.
+and revocable only for cleanup. This retires the prior authenticated-owner path
+through the wrapper: no process-local evidence can distinguish it safely.
+Enforcement is unchanged for admitted commands. A direct owner run is outside
+its protections; agents use CI and cannot receive that exception.
 
 ### Distribution: the harness sync, not a reusable workflow or a skill
 

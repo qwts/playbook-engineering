@@ -99,7 +99,7 @@ function grant(argv) {
   const laneId = argv[1] ?? '';
   process.stderr.write(
     `legacy grant minting is disabled${laneId ? ` for ${JSON.stringify(laneId)}` : ''}: ` +
-      'same-user files cannot authenticate human approval. The owner runs the underlying lane directly from their own non-agent terminal.\n',
+      'same-user files cannot authenticate human approval. An owner may choose the underlying lane directly from their own non-agent terminal, but that exceptional run is outside agent-guard protection.\n',
   );
   return 1;
 }

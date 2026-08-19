@@ -175,6 +175,7 @@ export function evaluateLanePolicy({ label, command }) {
     message:
       `The "${lane.id}" lane is a heavy local suite (${lane.why}) and agents do not run it on this machine by default. ` +
       'Push the branch and let GitHub CI verify — the workflow invokes its underlying CI entrypoint directly. ' +
-      'If a local run is genuinely required, the owner runs the underlying lane directly from their own non-agent terminal; same-user grant files are not authorization.',
+      'If a local run is genuinely required, the owner makes that exceptional decision in their own non-agent terminal. ' +
+      'Running the underlying lane directly is outside this wrapper and therefore outside its lease, admission, ceiling, and timeout protections; same-user grant files are not authorization.',
   };
 }

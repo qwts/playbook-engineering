@@ -128,7 +128,7 @@ describe('lane policy', () => {
     const verdict = evaluateLanePolicy({ label: 'test:e2e', env: { ...env, CLAUDECODE: '1' } });
     assert.equal(verdict.allowed, false);
     assert.match(verdict.message, /Push the branch and let GitHub CI verify/u);
-    assert.match(verdict.message, /owner runs the underlying lane directly/u);
+    assert.match(verdict.message, /outside its lease, admission, ceiling, and timeout protections/u);
   });
 
   test('an unmarked local caller cannot claim human authentication', () => {
