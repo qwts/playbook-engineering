@@ -6,19 +6,10 @@
 
 ## Context
 
-Local development machines are a shared, finite resource that nothing in this
-org was accounting for. Agents write most of the code (ENG-0002), several agent
-sessions now run concurrently across worktrees and repos, and each one follows
-its repo's documented validation gates as if it were alone on the box.
-
-On 2026-08-02 an 8 GB machine was driven into memory exhaustion during a routine
-PR review. One agent ran `npm run ci`, `npm run test:e2e`, a targeted E2E rerun
-and `npm run test:stories:ci` in sequence; each fans out to 10–15 workers at
-400–500 MB, and every E2E worker boots a full Electron app. Codex, Cursor,
-Brave, ChatGPT and further agent sessions in other worktrees were running at the
-same time. The machine reached 7.38 GB of 8 GB used with 11.05 GB of swap
-committed and memory pressure red, and the owner had to force-close agents to
-recover it. This had happened repeatedly, across both Claude Code and Codex.
+Local machines are a finite resource shared by concurrent agent sessions across
+repos and worktrees. On 2026-08-02, overlapping full CI and Electron-backed
+suites exhausted an 8 GB machine, committed 11.05 GB of swap, and forced the
+owner to terminate agents. The failure had recurred in Claude Code and Codex.
 
 A process-tree guard already existed — `qwts/image-trail` wrote one after its
 own runaway, and `qwts/overlook` adopted a copy. It did not fire, for three
@@ -69,14 +60,12 @@ repos. Concretely:
    turned crash recovery into the outage. A locally-minted random token, stored
    with the state it identifies, distinguishes a restored or copied state
    directory without ever consulting a name the network can change.
-5. **Agents and the owner are governed differently.** Agents are denied the
-   heavy lanes (e2e, storybook, perf, coverage, full `ci`) by default and told to
-   push and let CI verify. The owner is never refused *by policy* — their runs
-   are clamped and headroom-checked like any other, and a refusal for genuine
-   memory pressure remains overridable in their own terminal. The heavy-lane
-   opt-in for an agent is an out-of-band, time-boxed grant the owner creates:
-   an environment variable would be an opt-in the agent grants itself, since the
-   agent composes its own command lines.
+5. **Local wrapper callers fail closed as agents.** Heavy lanes (e2e,
+   storybook, perf, coverage, full `ci`) are denied and directed to CI. Neither
+   an unmarked environment nor a same-user file authenticates an owner. An
+   exceptional direct owner run is outside the wrapper's lease, admission,
+   ceiling, and timeout protections and is never delegated to an agent; see the
+   amendment below.
 6. **The wrapper never infers a CI exemption.** Markers and paths are forgeable,
    while GitHub OIDC uses a transferable bearer credential that does not prove
    process location. Hosted workflows invoke underlying CI commands directly,
@@ -85,6 +74,17 @@ repos. Concretely:
    `beforeShellExecution` and Codex `PreToolUse` all invoke the same hook. A
    guard only one harness honours does not solve a problem that Codex sessions
    caused half of.
+
+### Amendment — 2026-08-19: same-user grants are legacy-only
+
+Issue #235 proved that an innocently named package script can hide
+`arbiter.mjs grant`, strip harness markers, and mint the same-user file another
+script consumes. Such files cannot authenticate human intent. The arbiter now
+refuses minting and lane policy ignores grant artifacts; they remain listable
+and revocable only for cleanup. This retires the prior authenticated-owner path
+through the wrapper: no process-local evidence can distinguish it safely.
+Enforcement is unchanged for admitted commands. A direct owner run is outside
+its protections; agents use CI and cannot receive that exception.
 
 ### Distribution: the harness sync, not a reusable workflow or a skill
 
@@ -159,7 +159,8 @@ remove the enforcement point the way one already did once.
 ## References
 
 - qwts/playbook-engineering#138 — the originating issue and the incident evidence
-- [Machine memory guard](../reference/agent-memory-guard.md) — the operational reference: budget formula, lanes, grants, and what to do when a run is refused
+- [Machine memory guard](../reference/agent-memory-guard.md) — the operational reference: budget formula, lanes, legacy-grant cleanup, and what to do when a run is refused
+- qwts/playbook-engineering#235 — same-user owner-grant minting through unmarked package scripts
 - [ENG-0006](ENG-0006-agentic-primitives-governance.md) — agent primitives are code, one canonical source; this record's distribution choice is that rule applied to an executable primitive
 - [ENG-0004](ENG-0004-centralize-shared-cicd.md) — centralize shared tooling here rather than per repo
 - [ENG-0012](ENG-0012-decision-priority-order.md) — the priority order this was reviewed against; agentic development is deliberately constrained here in favour of the owner's machine
