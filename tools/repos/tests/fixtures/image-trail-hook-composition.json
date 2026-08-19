@@ -1,0 +1,45 @@
+{
+  "repository": "image-trail",
+  "path": ".claude/settings.json",
+  "marker": "scripts/guard-session-context.mjs",
+  "canonicalIdentity": {
+    "initial": {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "agent-hook --event session-start --contract=initial # agent-bot agent-hook",
+          "timeout": 60
+        }
+      ]
+    },
+    "updated": {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "agent-hook --event session-start --contract=updated # agent-bot agent-hook",
+          "timeout": 90
+        }
+      ]
+    }
+  },
+  "targetProcessGuard": {
+    "initial": {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/guard-session-context.mjs",
+          "timeout": 5
+        }
+      ]
+    },
+    "updated": {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/guard-session-context.mjs",
+          "timeout": 10
+        }
+      ]
+    }
+  }
+}

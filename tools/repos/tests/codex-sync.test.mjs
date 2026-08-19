@@ -243,6 +243,87 @@ test('manifest-declared composition preserves generated hook adapters exactly on
   }
 });
 
+test('Image Trail composes independent SessionStart owners through canonical and target updates', () => {
+  const fixture = JSON.parse(readFileSync(
+    new URL('./fixtures/image-trail-hook-composition.json', import.meta.url),
+    'utf8',
+  ));
+  const manifest = JSON.parse(readFileSync(
+    new URL('../../../governance/repos.json', import.meta.url),
+    'utf8',
+  ));
+  const entry = manifest.repos.find((repo) => repo.name === fixture.repository);
+  const markers = entry?.codexSync?.preserveJsonArrayEntries?.[fixture.path];
+
+  assert.deepEqual(markers, [fixture.marker]);
+
+  const source = (identity, schema) => canonical(fixture.path, `${JSON.stringify({
+    $schema: schema,
+    hooks: { SessionStart: [identity] },
+  }, null, 2)}\n`);
+  const options = { preserveArrayEntriesContaining: markers };
+  const staleIdentity = {
+    hooks: [{ type: 'command', command: 'stale centrally owned session-start hook' }],
+  };
+  const initialTarget = Buffer.from(`${JSON.stringify({
+    $schema: 'stale-schema',
+    permissions: { defaultMode: 'acceptEdits' },
+    hooks: {
+      SessionStart: [
+        staleIdentity,
+        fixture.targetProcessGuard.initial,
+        fixture.targetProcessGuard.initial,
+      ],
+    },
+  }, null, 2)}\n`);
+
+  const first = mergeManagedFile(
+    source(fixture.canonicalIdentity.initial, 'initial-schema'),
+    initialTarget,
+    options,
+  );
+  const firstValue = JSON.parse(first.content.toString('utf8'));
+
+  assert.deepEqual(firstValue.hooks.SessionStart, [
+    fixture.canonicalIdentity.initial,
+    fixture.targetProcessGuard.initial,
+  ]);
+  assert.deepEqual(firstValue.permissions, { defaultMode: 'acceptEdits' });
+
+  const updatedTargetValue = structuredClone(firstValue);
+  updatedTargetValue.permissions.defaultMode = 'plan';
+  updatedTargetValue.hooks.SessionStart = [
+    fixture.canonicalIdentity.initial,
+    fixture.targetProcessGuard.updated,
+    fixture.targetProcessGuard.updated,
+  ];
+  const updatedTarget = Buffer.from(`${JSON.stringify(updatedTargetValue, null, 2)}\n`);
+  const updatedSource = source(fixture.canonicalIdentity.updated, 'updated-schema');
+  const second = mergeManagedFile(updatedSource, updatedTarget, options);
+  const secondValue = JSON.parse(second.content.toString('utf8'));
+  const third = mergeManagedFile(updatedSource, second.content, options);
+
+  assert.deepEqual(secondValue.hooks.SessionStart, [
+    fixture.canonicalIdentity.updated,
+    fixture.targetProcessGuard.updated,
+  ]);
+  assert.equal(secondValue.$schema, 'updated-schema');
+  assert.deepEqual(secondValue.permissions, { defaultMode: 'plan' });
+  assert.equal(
+    secondValue.hooks.SessionStart.filter(
+      (hook) => JSON.stringify(hook).includes('agent-bot agent-hook'),
+    ).length,
+    1,
+  );
+  assert.equal(
+    secondValue.hooks.SessionStart.filter(
+      (hook) => JSON.stringify(hook).includes(fixture.marker),
+    ).length,
+    1,
+  );
+  assert.equal(second.content.toString('utf8'), third.content.toString('utf8'));
+});
+
 test('Claude composition keeps repo configuration while replacing governed hooks', () => {
   const path = '.claude/settings.json';
   const marker = 'agent-bot agent-hook';

@@ -127,6 +127,11 @@ its root layer is canonical; that manifest field and the local
 `sync-codex.mjs` command retain their original names as compatibility
 interfaces, not identity boundaries.
 
+Repository-owned adapter surveys and their exact fleet snapshots are recorded
+in the [hook composition audits](hook-composition-audits.md). Use those records
+to distinguish a target-owned entry that needs a stable preservation marker
+from a centrally owned entry that synchronization must replace.
+
 After the source change is reviewed and merged, approve the generated pull
 requests from a normal human checkout:
 
