@@ -150,11 +150,40 @@ test('managed formatter composition preserves repository rules and updates only 
   const first = files.get(pathname);
   const second = mergeManagedFile(source, first.content);
   const merged = first.content.toString('utf8');
+  const blockStart = merged.indexOf('# governed:agent-harness-format:start');
 
   assert.match(merged, /^dist\/\nrepo-owned-generated\//u);
-  assert.match(merged, /\ncoverage\/$/u);
+  assert.ok(merged.indexOf('coverage/') < blockStart, 'the managed block stays after repository rules');
   assert.doesNotMatch(merged, /stale-managed-path/u);
   assert.equal(first.content.toString('utf8'), second.content.toString('utf8'));
+});
+
+test('managed formatter composition moves its block after repo-owned negations without changing them', () => {
+  const pathname = '.prettierignore';
+  const canonicalBlock = readFileSync(pathname, 'utf8');
+  const source = canonical(pathname, canonicalBlock);
+  const before = '\uFEFFdist/\r\n';
+  const after = [
+    '!tools/agent-guard/run-guarded.mjs',
+    '# repo-owned café',
+  ].join('\r\n');
+  const target = Buffer.from([
+    before,
+    '# governed:agent-harness-format:start\n',
+    'stale-managed-path\n',
+    '# governed:agent-harness-format:end\n',
+    after,
+  ].join(''));
+  const repositoryOwned = `${before}${after}`;
+  const repositoryOwnedBytes = Buffer.from(repositoryOwned);
+  const first = mergeManagedFile(source, target);
+  const merged = first.content.toString('utf8');
+  const blockStart = merged.indexOf('# governed:agent-harness-format:start');
+
+  assert.deepEqual(first.content.subarray(0, repositoryOwnedBytes.length), repositoryOwnedBytes);
+  assert.ok(merged.indexOf('!tools/agent-guard/run-guarded.mjs') < blockStart);
+  assert.equal(merged.slice(blockStart), canonicalBlock);
+  assert.equal(mergeManagedFile(source, first.content).content.toString('utf8'), merged);
 });
 
 test('managed formatter composition appends once and fails closed on marker corruption', () => {

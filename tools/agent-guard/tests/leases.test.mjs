@@ -7,7 +7,8 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { once } from 'node:events';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
@@ -24,12 +25,21 @@ import {
   readLeases,
   releaseLease,
   repositoryIdentity,
+  repositoryWorktreeRoot,
   retargetLease,
   readLanePeakMb,
   recordLanePeak,
   withAdmissionLock,
 } from '../lib/leases.mjs';
 import { ensureStateDirs, leasesDir, machineToken } from '../lib/protocol.mjs';
+import {
+  applyAutomaticLaneHistoryPolicy,
+  guardedInvocation,
+  guardDiagnosticPaths,
+  POLL_MS,
+  recordProcessTreeSample,
+  startProcessTreeMonitor,
+} from '../run-guarded.mjs';
 
 const roots = [];
 let env;
@@ -321,8 +331,101 @@ describe('liveness probe', () => {
   });
 });
 
-describe('lane peak store (#180)', () => {
-  test('linked worktrees share only matching command behavior (#223, #236)', async () => {
+describe('process-tree peak monitoring', () => {
+  test('the guarded command is spawned directly without shell interpolation', () => {
+    const command = ['node', '-e', 'console.log("$HOME; $(whoami)")', 'argument with spaces'];
+    assert.deepEqual(guardedInvocation(command), {
+      executable: 'node',
+      args: command.slice(1),
+    });
+  });
+
+  test('monitoring records positive process-tree diagnostics without making admission evidence', () => {
+    const tinyState = { peakRssMb: 0, peakProcessCount: 0, done: false };
+    assert.deepEqual(
+      recordProcessTreeSample(tinyState, '701 1 701 1\n', 701),
+      { rssMb: 1, processCount: 1 },
+      'a live 1 KB process rounds up to positive whole-MB diagnostics',
+    );
+    const emptyState = { peakRssMb: 0, peakProcessCount: 0, done: false };
+    recordProcessTreeSample(emptyState, '701 1 701 0\n', 701);
+    assert.equal(emptyState.peakRssMb, 0, 'zero RSS stays an unmeasured diagnostic');
+    const completedState = { peakRssMb: 0, peakProcessCount: 0, done: true };
+    recordProcessTreeSample(completedState, '701 1 701 8192\n', 701);
+    assert.equal(completedState.peakRssMb, 0, 'an in-flight ps result cannot mutate diagnostics after exit');
+
+    const state = { peakRssMb: 0, peakProcessCount: 0, done: false };
+    const samples = [];
+    const sample = () => {
+      const observed = recordProcessTreeSample(state, '701 1 701 1\n702 701 701 1536\n', 701);
+      samples.push(observed);
+    };
+    const scheduled = [];
+    const timer = startProcessTreeMonitor(sample, {
+      schedule(callback, intervalMs) {
+        scheduled.push({ callback, intervalMs });
+        return 'timer';
+      },
+    });
+
+    assert.equal(timer, 'timer');
+    assert.deepEqual(samples, [{ rssMb: 2, processCount: 2 }], 'the initial target sample runs synchronously before scheduling');
+    assert.equal(scheduled.length, 1);
+    assert.equal(scheduled[0].intervalMs, POLL_MS);
+    assert.equal(state.peakRssMb, 2, 'a real non-empty tree always produces a positive whole-MB peak');
+    assert.equal(state.peakProcessCount, 2);
+    scheduled[0].callback();
+    assert.equal(state.peakRssMb, 2, 'later smaller/equal samples cannot erase the maximum');
+    recordProcessTreeSample(state, '701 1 701 8192\n', 701);
+    assert.equal(state.peakRssMb, 8, 'later larger samples still raise the maximum');
+  });
+
+  test('a real target sample contributes only to run diagnostics', async () => {
+    const command = [process.execPath, '-e', 'require("node:fs").readFileSync(3)'];
+    const invocation = guardedInvocation(command);
+    const state = { peakRssMb: 0, peakProcessCount: 0, done: false };
+    const child = spawn(invocation.executable, invocation.args, {
+      detached: true,
+      env: process.env,
+      stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
+    });
+    const ps = psExecutable();
+    assert.ok(ps, 'a system ps binary is required for production-equivalent sampling');
+    try {
+      const psOutput = execFileSync(ps, ['-axo', 'pid=,ppid=,pgid=,rss='], { encoding: 'utf8' });
+      recordProcessTreeSample(state, psOutput, child.pid);
+      child.stdio[3].end();
+      const [code, signal] = await once(child, 'exit');
+      assert.equal(code, 0);
+      assert.equal(signal, null);
+      assert.ok(state.peakRssMb > 0, 'the observed target contributes a positive diagnostic peak');
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // The fast child may have exited between the check and cleanup.
+        }
+      }
+    }
+  });
+
+  test('automatic runner admission ignores pre-existing protected peak entries', async () => {
+    const command = ['/bin/echo', 'future-provenance'];
+    const behaviorIdentity = 'legacy-v6-seed';
+    await recordLanePeak({ env, repo: 'overlook', label: 'test', command, behaviorIdentity, peakRssMb: 64 });
+    const preseededPeak = readLanePeakMb({ env, repo: 'overlook', label: 'test', command, behaviorIdentity });
+    assert.equal(preseededPeak, 64, 'the lower-level future-provenance store retains its existing entry');
+
+    const request = { ceilingMb: 2048, lanePeakMb: preseededPeak, reserveMb: 320 };
+    assert.equal(applyAutomaticLaneHistoryPolicy(request), request);
+    assert.equal(request.lanePeakMb, null, 'the runner cannot present stored history to admission');
+    assert.equal(request.reserveMb, request.ceilingMb, 'the runner always reserves the enforced ceiling');
+  });
+});
+
+describe('dormant lane peak store (future provenance)', () => {
+  test('linked worktrees share storage but retain exact child-visible behavior (#236)', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'agent-guard-repos-'));
     roots.push(root);
     const first = path.join(root, 'first', 'app');
@@ -359,7 +462,9 @@ describe('lane peak store (#180)', () => {
     );
 
     const peakEnv = scratchEnv();
-    const command = ['npm', 'test'];
+    const nativeEcho = ['/bin/echo', '/usr/bin/echo'].find((candidate) => existsSync(candidate));
+    assert.ok(nativeEcho, 'a native literal-argv executable is required for behavior identity tests');
+    const command = [nativeEcho, 'literal-mode'];
     const environmentFor = (cwd, overrides = {}) => ({
       ...peakEnv,
       PWD: cwd,
@@ -377,7 +482,110 @@ describe('lane peak store (#180)', () => {
       behaviorEnv: environmentFor(sibling),
     });
     assert.match(firstBehavior, /^[0-9a-f]{64}$/u);
-    assert.equal(siblingBehavior, firstBehavior, 'same revision and effective environment may share across worktrees');
+    assert.notEqual(siblingBehavior, firstBehavior, 'distinct raw PWD and INIT_CWD spellings cannot share history');
+    const firstPortableBehavior = commandBehaviorIdentity(first, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(first, { PWD: '.', INIT_CWD: '.' }),
+    });
+    const siblingPortableBehavior = commandBehaviorIdentity(sibling, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(sibling, { PWD: '.', INIT_CWD: '.' }),
+    });
+    assert.notEqual(
+      siblingPortableBehavior,
+      firstPortableBehavior,
+      'the child-visible absolute invocation cwd keeps linked-worktree behavior distinct',
+    );
+
+    const firstNested = path.join(first, 'packages', 'app');
+    const siblingNested = path.join(sibling, 'packages', 'app');
+    const firstOtherCwd = path.join(first, 'packages', 'other');
+    mkdirSync(firstNested, { recursive: true });
+    mkdirSync(siblingNested, { recursive: true });
+    mkdirSync(firstOtherCwd, { recursive: true });
+    const firstNestedBehavior = commandBehaviorIdentity(firstNested, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(firstNested),
+    });
+    const siblingNestedBehavior = commandBehaviorIdentity(siblingNested, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(siblingNested),
+    });
+    const firstOtherCwdBehavior = commandBehaviorIdentity(firstOtherCwd, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(firstOtherCwd),
+    });
+    assert.match(firstNestedBehavior, /^[0-9a-f]{64}$/u);
+    assert.notEqual(
+      siblingNestedBehavior,
+      firstNestedBehavior,
+      'matching repository-relative cwd does not erase distinct raw cwd spellings',
+    );
+    assert.notEqual(firstNestedBehavior, firstBehavior, 'the repository-relative cwd is command behavior');
+    assert.notEqual(firstOtherCwdBehavior, firstNestedBehavior, 'different repository-relative cwd values cannot share history');
+    assert.notEqual(
+      commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      firstBehavior,
+      'the actual relative cwd remains bound even when the structural environment is unchanged',
+    );
+
+    // Every cwd in one Git worktree writes diagnostics at the worktree root,
+    // so one nested run cannot poison the other cwd identities. Only those
+    // two root paths are exempt; the same suffix below a nested cwd is not.
+    assert.equal(repositoryWorktreeRoot(firstNested, { env: peakEnv }), repositoryWorktreeRoot(first, { env: peakEnv }));
+    assert.equal(repositoryWorktreeRoot(siblingNested, { env: peakEnv }), repositoryWorktreeRoot(sibling, { env: peakEnv }));
+    const nestedDiagnosticPaths = guardDiagnosticPaths(firstNested, { env: peakEnv });
+    const rootDiagnostics = path.join(repositoryWorktreeRoot(first, { env: peakEnv }), '.guard');
+    assert.equal(nestedDiagnosticPaths.guardDir, rootDiagnostics);
+    assert.equal(nestedDiagnosticPaths.lastRunPath, path.join(rootDiagnostics, 'last-run.json'));
+    assert.equal(nestedDiagnosticPaths.lastRunDisplayPath, path.join('..', '..', '.guard', 'last-run.json'));
+    mkdirSync(rootDiagnostics);
+    writeFileSync(path.join(rootDiagnostics, 'last-run.json'), '{}\n');
+    writeFileSync(path.join(rootDiagnostics, 'history.jsonl'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(firstNested) }),
+      firstNestedBehavior,
+      'root-owned diagnostics do not make a nested-cwd run cold',
+    );
+    assert.equal(
+      commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      firstBehavior,
+      'the same root-owned diagnostics remain inert for a root run',
+    );
+    writeFileSync(path.join(rootDiagnostics, 'caller-owned.json'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(firstNested) }),
+      null,
+      'the root diagnostic exemption does not cover other files in .guard',
+    );
+    rmSync(path.join(rootDiagnostics, 'caller-owned.json'));
+    const nestedDiagnostics = path.join(firstNested, '.guard');
+    mkdirSync(nestedDiagnostics);
+    writeFileSync(path.join(nestedDiagnostics, 'last-run.json'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(firstNested) }),
+      null,
+      'diagnostic suffixes beneath a nested cwd are not broadly exempted',
+    );
+    rmSync(nestedDiagnostics, { recursive: true, force: true });
+    rmSync(rootDiagnostics, { recursive: true, force: true });
+
+    const nonRepository = path.join(root, 'not-a-repository');
+    mkdirSync(nonRepository);
+    assert.equal(
+      commandBehaviorIdentity(nonRepository, command, { env: peakEnv, behaviorEnv: environmentFor(nonRepository) }),
+      null,
+      'a failed repository top-level probe must be a cold start',
+    );
+    assert.equal(repositoryWorktreeRoot(nonRepository, { env: peakEnv }), null);
+    assert.equal(
+      commandBehaviorIdentity(path.join(root, 'missing-cwd'), command, {
+        env: peakEnv,
+        behaviorEnv: environmentFor(path.join(root, 'missing-cwd')),
+      }),
+      null,
+      'an unresolvable cwd path must be a cold start',
+    );
     assert.notEqual(
       commandBehaviorIdentity(first, command, {
         env: peakEnv,
@@ -395,9 +603,30 @@ describe('lane peak store (#180)', () => {
       repo: firstIdentity,
       label: 'test',
       command,
-      behaviorIdentity: firstBehavior,
+      behaviorIdentity: firstPortableBehavior,
       peakRssMb: 900,
     });
+    assert.equal(
+      readLanePeakMb({
+        env: peakEnv,
+        repo: repositoryIdentity(first),
+        label: 'test',
+        command,
+        behaviorIdentity: firstPortableBehavior,
+      }),
+      900,
+    );
+    assert.equal(
+      readLanePeakMb({
+        env: peakEnv,
+        repo: repositoryIdentity(sibling),
+        label: 'test',
+        command,
+        behaviorIdentity: siblingPortableBehavior,
+      }),
+      null,
+      'linked worktrees share the protected namespace but not child-visible behavior history',
+    );
     assert.equal(
       readLanePeakMb({
         env: peakEnv,
@@ -406,7 +635,8 @@ describe('lane peak store (#180)', () => {
         command,
         behaviorIdentity: siblingBehavior,
       }),
-      900,
+      null,
+      'an absolute sibling-worktree spelling cannot borrow portable-cwd history',
     );
     assert.equal(
       readLanePeakMb({
@@ -422,7 +652,7 @@ describe('lane peak store (#180)', () => {
       null,
     );
 
-    // The argv did not change, but the npm script did. Both unstaged and
+    // The argv did not change, but tracked behavior did. Both unstaged and
     // staged edits are untrusted; after commit, the new revision gets a fresh
     // identity rather than borrowing the old light peak.
     writeFileSync(path.join(sibling, 'package.json'), `${JSON.stringify({ scripts: { test: 'node heavy.mjs' } }, null, 2)}\n`);
@@ -485,19 +715,510 @@ describe('lane peak store (#180)', () => {
     );
     rmSync(untracked, { force: true });
 
+    // The wrapper's own two untracked diagnostics must not make a successful
+    // clean run permanently cold, but no broader .guard exemption exists.
+    const diagnostics = path.join(first, '.guard');
+    mkdirSync(diagnostics);
+    writeFileSync(path.join(diagnostics, 'last-run.json'), '{}\n');
+    writeFileSync(path.join(diagnostics, 'history.jsonl'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      firstBehavior,
+      'guard-owned untracked diagnostics do not invalidate otherwise clean evidence',
+    );
+    writeFileSync(path.join(diagnostics, 'caller-owned.json'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      null,
+      'other untracked guard files still fail closed',
+    );
+    rmSync(path.join(diagnostics, 'caller-owned.json'));
+
+    const originalPackage = `${JSON.stringify({ scripts: { test: 'node light.mjs' } }, null, 2)}\n`;
+    const hiddenPackage = `${JSON.stringify({ scripts: { test: 'node hidden-heavy.mjs' } }, null, 2)}\n`;
+    for (const [hide, reveal, label] of [
+      ['--assume-unchanged', '--no-assume-unchanged', 'assume-unchanged'],
+      ['--skip-worktree', '--no-skip-worktree', 'skip-worktree'],
+    ]) {
+      execFileSync(git, ['-C', first, 'update-index', hide, 'package.json'], { stdio: 'ignore' });
+      writeFileSync(path.join(first, 'package.json'), hiddenPackage);
+      assert.equal(
+        commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+        null,
+        `${label} index state cannot hide changed command behavior`,
+      );
+      execFileSync(git, ['-C', first, 'update-index', reveal, 'package.json'], { stdio: 'ignore' });
+      writeFileSync(path.join(first, 'package.json'), originalPackage);
+    }
+    assert.equal(
+      commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      firstBehavior,
+    );
+
     const external = path.join(root, 'external-runner');
     writeFileSync(external, '#!/bin/sh\nexit 0\n');
     chmodSync(external, 0o755);
-    const externalBefore = commandBehaviorIdentity(first, [external], {
+    const externalBefore = commandBehaviorIdentity(first, [external, 'literal-mode'], {
       env: peakEnv,
       behaviorEnv: environmentFor(first),
     });
     writeFileSync(external, '#!/bin/sh\necho changed\nexit 0\n');
-    const externalAfter = commandBehaviorIdentity(first, [external], {
+    const externalAfter = commandBehaviorIdentity(first, [external, 'literal-mode'], {
       env: peakEnv,
       behaviorEnv: environmentFor(first),
     });
     assert.notEqual(externalAfter, externalBefore, 'changed executable contents must invalidate history');
+  });
+
+  test('structural environment paths share only canonical worktree-contained targets', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'agent-guard-environment-'));
+    roots.push(root);
+    const first = path.join(root, 'first', 'app');
+    const sibling = path.join(root, 'linked-worktree');
+    const firstToolbin = path.join(root, 'first', 'toolbin');
+    const siblingToolbin = path.join(root, 'toolbin');
+    mkdirSync(first, { recursive: true });
+    mkdirSync(firstToolbin, { recursive: true });
+    mkdirSync(siblingToolbin, { recursive: true });
+
+    const git = ['/usr/bin/git', '/bin/git'].find((candidate) => {
+      try {
+        execFileSync(candidate, ['--version'], { stdio: 'ignore' });
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(git, 'a system Git binary is required to resolve worktree evidence');
+
+    execFileSync(git, ['-C', first, 'init', '--quiet'], { stdio: 'ignore' });
+    writeFileSync(path.join(first, 'package.json'), `${JSON.stringify({ scripts: { test: 'helper' } }, null, 2)}\n`);
+    writeFileSync(path.join(first, 'helper'), '#!/bin/sh\nexit 0\n');
+    chmodSync(path.join(first, 'helper'), 0o755);
+    mkdirSync(path.join(first, 'contained-bin'));
+    writeFileSync(path.join(first, 'contained-bin', 'helper'), '#!/bin/sh\nexit 0\n');
+    chmodSync(path.join(first, 'contained-bin', 'helper'), 0o755);
+    symlinkSync('../toolbin', path.join(first, 'escape-bin'));
+    execFileSync(git, ['-C', first, 'add', 'package.json', 'helper', 'contained-bin/helper', 'escape-bin'], {
+      stdio: 'ignore',
+    });
+    execFileSync(git, [
+      '-C', first,
+      '-c', 'user.name=Agent Guard Test',
+      '-c', 'user.email=guard@example.invalid',
+      'commit', '--quiet', '-m', 'fixture',
+    ], { stdio: 'ignore' });
+    execFileSync(git, ['-C', first, 'worktree', 'add', '--quiet', '--detach', sibling], { stdio: 'ignore' });
+
+    writeFileSync(path.join(firstToolbin, 'helper'), '#!/bin/sh\necho first\n');
+    chmodSync(path.join(firstToolbin, 'helper'), 0o755);
+    writeFileSync(path.join(siblingToolbin, 'helper'), '#!/bin/sh\necho sibling\n');
+    chmodSync(path.join(siblingToolbin, 'helper'), 0o755);
+
+    const peakEnv = scratchEnv();
+    const systemPath = process.env.PATH ?? '/usr/bin:/bin';
+    const command = ['./helper', 'literal-mode'];
+    const environmentFor = (cwd, overrides = {}) => ({
+      ...peakEnv,
+      PWD: cwd,
+      INIT_CWD: cwd,
+      PATH: `${cwd}${path.delimiter}${systemPath}`,
+      AGENT_GUARDED: '<guard-lease>',
+      ...overrides,
+    });
+    const identityFor = (cwd, overrides = {}) => commandBehaviorIdentity(cwd, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(cwd, overrides),
+    });
+
+    const firstBehavior = identityFor(first);
+    const siblingBehavior = identityFor(sibling);
+    assert.match(firstBehavior, /^[0-9a-f]{64}$/u);
+    assert.notEqual(
+      siblingBehavior,
+      firstBehavior,
+      'absolute PWD, INIT_CWD, and PATH spellings remain distinct across linked worktrees',
+    );
+    const firstDot = `${first}${path.sep}.`;
+    assert.notEqual(identityFor(first, { PWD: firstDot }), firstBehavior, 'raw PWD spelling is behavior even when canonical meaning matches');
+    assert.notEqual(identityFor(first, { INIT_CWD: firstDot }), firstBehavior, 'raw INIT_CWD spelling is behavior even when canonical meaning matches');
+    assert.notEqual(
+      identityFor(first, { PATH: `${firstDot}${path.delimiter}${systemPath}` }),
+      firstBehavior,
+      'raw PATH components are behavior even when canonical meaning matches',
+    );
+    const cwdAlias = path.join(root, 'cwd-alias');
+    symlinkSync(first, cwdAlias);
+    assert.notEqual(identityFor(first, { PWD: cwdAlias }), firstBehavior, 'a PWD symlink spelling cannot borrow canonical-path history');
+    assert.notEqual(identityFor(first, { INIT_CWD: cwdAlias }), firstBehavior, 'an INIT_CWD symlink spelling cannot borrow canonical-path history');
+    assert.notEqual(
+      identityFor(first, { PATH: `${cwdAlias}${path.delimiter}${systemPath}` }),
+      firstBehavior,
+      'a PATH symlink spelling cannot borrow canonical-path history',
+    );
+
+    assert.notEqual(
+      identityFor(first, { PWD: '<worktree>' }),
+      firstBehavior,
+      'a literal sentinel-looking PWD cannot impersonate the actual worktree root',
+    );
+    assert.notEqual(
+      identityFor(first, { INIT_CWD: '<worktree>' }),
+      firstBehavior,
+      'a literal sentinel-looking INIT_CWD cannot impersonate the actual worktree root',
+    );
+    assert.notEqual(
+      identityFor(first, { PATH: `<worktree>${path.delimiter}${systemPath}` }),
+      firstBehavior,
+      'a literal sentinel-looking PATH component cannot impersonate the actual worktree root',
+    );
+    assert.notEqual(
+      identityFor(first, { PWD: '' }),
+      firstBehavior,
+      'an empty PWD remains distinct from the invocation cwd',
+    );
+    assert.notEqual(
+      identityFor(first, { INIT_CWD: '' }),
+      firstBehavior,
+      'an empty INIT_CWD remains distinct from the invocation cwd',
+    );
+    assert.notEqual(
+      identityFor(sibling, { PWD: '', INIT_CWD: '' }),
+      identityFor(first, { PWD: '', INIT_CWD: '' }),
+      'the same env spellings do not erase distinct absolute invocation cwd values',
+    );
+    assert.notEqual(
+      identityFor(first, { PATH: `${path.delimiter}${systemPath}` }),
+      firstBehavior,
+      'raw PATH spelling remains bound even when an empty component resolves to cwd',
+    );
+
+    const firstAbsoluteEscape = `${first}${path.sep}..${path.sep}toolbin`;
+    const siblingAbsoluteEscape = `${sibling}${path.sep}..${path.sep}toolbin`;
+    assert.notEqual(
+      identityFor(first, { PATH: `${firstAbsoluteEscape}${path.delimiter}${systemPath}` }),
+      identityFor(sibling, { PATH: `${siblingAbsoluteEscape}${path.delimiter}${systemPath}` }),
+      'absolute worktree/../toolbin spellings retain their distinct external resolutions',
+    );
+    assert.notEqual(
+      identityFor(first, { PATH: `${path.join(first, 'escape-bin')}${path.delimiter}${systemPath}` }),
+      identityFor(sibling, { PATH: `${path.join(sibling, 'escape-bin')}${path.delimiter}${systemPath}` }),
+      'tracked symlinks that escape each worktree retain their external canonical targets',
+    );
+    assert.notEqual(
+      identityFor(first, { PATH: `..${path.sep}toolbin${path.delimiter}${systemPath}` }),
+      identityFor(sibling, { PATH: `..${path.sep}toolbin${path.delimiter}${systemPath}` }),
+      'relative external PATH entries with distinct helper bytes resolve from each invocation cwd',
+    );
+    assert.notEqual(
+      identityFor(first, { PATH: `missing-bin${path.delimiter}${systemPath}` }),
+      identityFor(sibling, { PATH: `missing-bin${path.delimiter}${systemPath}` }),
+      'unresolved relative PATH entries retain their distinct absolute resolved spellings',
+    );
+
+    const firstContained = identityFor(first, {
+      PWD: '.',
+      INIT_CWD: `contained-bin${path.sep}..`,
+      PATH: `contained-bin${path.delimiter}${systemPath}`,
+    });
+    const siblingContained = identityFor(sibling, {
+      PWD: '.',
+      INIT_CWD: `contained-bin${path.sep}..`,
+      PATH: `contained-bin${path.delimiter}${systemPath}`,
+    });
+    assert.notEqual(
+      siblingContained,
+      firstContained,
+      'same relative env spellings still run from distinct absolute linked-worktree cwd values',
+    );
+  });
+
+  test('interpreter history binds exact payload files and rejects indirect execution', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'agent-guard-payloads-'));
+    roots.push(root);
+    const checkout = path.join(root, 'checkout');
+    const external = path.join(root, 'external');
+    mkdirSync(checkout);
+    mkdirSync(external);
+
+    const git = ['/usr/bin/git', '/bin/git'].find((candidate) => existsSync(candidate));
+    assert.ok(git, 'a system Git binary is required to resolve payload evidence');
+    execFileSync(git, ['-C', checkout, 'init', '--quiet'], { stdio: 'ignore' });
+    writeFileSync(path.join(checkout, 'README.md'), 'fixture\n');
+    writeFileSync(path.join(checkout, '.gitignore'), 'ignored/\nnode_modules/\n');
+    writeFileSync(path.join(checkout, 'package.json'), `${JSON.stringify({ scripts: { test: 'node node_modules/job.js' } }, null, 2)}\n`);
+    writeFileSync(path.join(checkout, '+O'), 'tracked option-shaped decoy\n');
+    writeFileSync(path.join(checkout, '-m'), 'raise SystemExit(0)\n');
+    execFileSync(git, ['-C', checkout, 'add', '--', '.gitignore', 'README.md', 'package.json', '+O', '-m'], { stdio: 'ignore' });
+    execFileSync(git, [
+      '-C', checkout,
+      '-c', 'user.name=Agent Guard Test',
+      '-c', 'user.email=guard@example.invalid',
+      'commit', '--quiet', '-m', 'fixture',
+    ], { stdio: 'ignore' });
+    mkdirSync(path.join(checkout, 'ignored'));
+    writeFileSync(path.join(checkout, 'ignored', 'job.mjs'), 'process.exit(0);\n');
+    mkdirSync(path.join(checkout, 'node_modules'));
+    const ignoredDependency = path.join(checkout, 'node_modules', 'job.js');
+    writeFileSync(ignoredDependency, 'process.exit(0);\n');
+
+    const peakEnv = scratchEnv();
+    const baseBehaviorEnv = {
+      PWD: checkout,
+      INIT_CWD: checkout,
+      PATH: process.env.PATH ?? '/usr/bin:/bin',
+      AGENT_GUARDED: '<guard-lease>',
+    };
+    const identityFor = (command, overrides = {}) => commandBehaviorIdentity(checkout, command, {
+      env: peakEnv,
+      behaviorEnv: { ...baseBehaviorEnv, ...overrides },
+    });
+
+    const dispatcherBin = path.join(external, 'dispatcher-bin');
+    mkdirSync(dispatcherBin);
+    const transitiveDispatchers = [
+      'bun',
+      'bunx',
+      'c8',
+      'corepack',
+      'deno',
+      'electron',
+      'npm',
+      'npx',
+      'pnpm',
+      'pnpx',
+      'playwright',
+      'test-storybook',
+      'vitest',
+      'yarn',
+      'yarnpkg',
+    ];
+    for (const dispatcher of transitiveDispatchers) {
+      const executable = path.join(dispatcherBin, dispatcher);
+      writeFileSync(executable, '#!/bin/sh\nexit 0\n');
+      chmodSync(executable, 0o755);
+      assert.equal(
+        identityFor([dispatcher, 'literal-task'], { PATH: dispatcherBin }),
+        null,
+        `${dispatcher} transitive dispatch stays cold`,
+      );
+    }
+
+    const npmCommand = ['npm', 'test'];
+    const npmBehaviorEnv = { PATH: dispatcherBin };
+    const npmBefore = identityFor(npmCommand, npmBehaviorEnv);
+    assert.equal(npmBefore, null, 'npm cannot seed history from ignored dependency bytes');
+    writeFileSync(ignoredDependency, 'Buffer.alloc(1024 * 1024 * 1024);\n');
+    assert.equal(
+      identityFor(npmCommand, npmBehaviorEnv),
+      null,
+      'mutating the ignored node_modules payload keeps npm safely cold',
+    );
+    assert.equal(
+      await recordLanePeak({
+        env: peakEnv,
+        repo: 'ignored-dependency',
+        label: 'test',
+        command: npmCommand,
+        behaviorIdentity: npmBefore,
+        peakRssMb: 64,
+      }),
+      false,
+      'cold package-manager evidence cannot be written as reusable history',
+    );
+    assert.equal(
+      readLanePeakMb({
+        env: peakEnv,
+        repo: 'ignored-dependency',
+        label: 'test',
+        command: npmCommand,
+        behaviorIdentity: npmBefore,
+      }),
+      null,
+    );
+
+    const nodePayload = path.join(external, 'job.mjs');
+    writeFileSync(nodePayload, 'process.exit(0);\n');
+    const nodeBefore = identityFor([process.execPath, nodePayload]);
+    assert.match(nodeBefore, /^[0-9a-f]{64}$/u, 'an exact Node file payload is provable');
+    writeFileSync(nodePayload, 'process.exit(1);\n');
+    const nodeAfter = identityFor([process.execPath, nodePayload]);
+    assert.notEqual(nodeAfter, nodeBefore, 'same-length external payload mutation invalidates history');
+    assert.match(identityFor([process.execPath, '--', nodePayload]), /^[0-9a-f]{64}$/u, 'the explicit -- file form is provable');
+
+    const runtimeAlias = path.join(external, 'node-runtime');
+    symlinkSync(process.execPath, runtimeAlias);
+    assert.match(identityFor([runtimeAlias, nodePayload]), /^[0-9a-f]{64}$/u, 'canonical runtime identity recognizes a symlink alias');
+    const conflictingRuntimeAlias = path.join(external, 'node');
+    symlinkSync('/bin/sh', conflictingRuntimeAlias);
+    assert.equal(
+      identityFor([conflictingRuntimeAlias, path.join(external, 'exact.sh')]),
+      null,
+      'a requested Node name cannot disguise a canonical shell runtime',
+    );
+    const falseRuntimeAlias = path.join(external, 'python');
+    symlinkSync('/bin/echo', falseRuntimeAlias);
+    assert.equal(
+      identityFor([falseRuntimeAlias, nodePayload]),
+      null,
+      'a requested interpreter name cannot disguise an unrecognized executable',
+    );
+
+    const targetA = path.join(external, 'target-a.mjs');
+    const targetB = path.join(external, 'target-b.mjs');
+    const linkedPayload = path.join(external, 'linked.mjs');
+    writeFileSync(targetA, 'process.exit(0);\n');
+    writeFileSync(targetB, 'process.exit(0);\n');
+    symlinkSync(targetA, linkedPayload);
+    const linkedA = identityFor([process.execPath, linkedPayload]);
+    rmSync(linkedPayload);
+    symlinkSync(targetB, linkedPayload);
+    const linkedB = identityFor([process.execPath, linkedPayload]);
+    assert.notEqual(linkedB, linkedA, 'retargeting a payload symlink invalidates identical bytes');
+
+    const relativePayload = path.relative(checkout, nodePayload);
+    assert.match(identityFor([process.execPath, relativePayload]), /^[0-9a-f]{64}$/u, 'a resolvable relative payload is provable');
+    assert.equal(identityFor([process.execPath, path.join(external, 'missing.mjs')]), null, 'missing payloads stay cold');
+    assert.equal(identityFor([process.execPath, external]), null, 'directory payloads stay cold');
+
+    const exactInterpreters = [
+      [process.execPath, '.mjs', 'process.exit(0);\n'],
+      ['/bin/sh', '.sh', 'exit 0\n'],
+    ];
+    const python = ['/usr/bin/python3', '/usr/local/bin/python3', '/opt/homebrew/bin/python3'].find((candidate) => existsSync(candidate));
+    for (const [interpreter, extension, contents] of exactInterpreters) {
+      const payload = path.join(external, `exact${extension}`);
+      writeFileSync(payload, contents);
+      assert.match(identityFor([interpreter, payload]), /^[0-9a-f]{64}$/u, `${path.basename(interpreter)} exact file payload is provable`);
+    }
+    if (python) {
+      const pythonPayload = path.join(external, 'exact.py');
+      writeFileSync(pythonPayload, 'raise SystemExit(0)\n');
+      assert.match(identityFor([python, '-S', pythonPayload]), /^[0-9a-f]{64}$/u, 'Python -S file payload is provable');
+      assert.match(identityFor([python, '-S', '--', pythonPayload]), /^[0-9a-f]{64}$/u, 'Python -S -- file payload is provable');
+      assert.match(identityFor([python, '-S', '--', '-m']), /^[0-9a-f]{64}$/u, 'an explicit separator permits an option-shaped file payload');
+      assert.equal(identityFor([python, pythonPayload]), null, 'plain Python file execution stays cold because site startup is implicit');
+    }
+    if (existsSync('/bin/bash')) {
+      assert.equal(
+        identityFor(['/bin/bash', '+O', 'extglob', path.join(external, 'exact.sh')]),
+        null,
+        'leading + shell options cannot make a tracked decoy look like the executed payload',
+      );
+    }
+
+    const dynamicForms = [
+      [process.execPath],
+      [process.execPath, '-'],
+      [process.execPath, '-e', 'process.exit(0)'],
+      [process.execPath, '--eval', 'process.exit(0)'],
+      [process.execPath, '--test', nodePayload],
+      ['/bin/sh'],
+      ['/bin/sh', '-s'],
+      ['/bin/sh', '-c', 'exit 0'],
+    ];
+    if (python) dynamicForms.push(
+      [python],
+      [python, '-'],
+      [python, '-c', 'raise SystemExit(0)'],
+      [python, '-m', 'module_name'],
+      [python, '-S'],
+      [python, '-S', '-c', 'raise SystemExit(0)'],
+      [python, '-S', '-m', 'module_name'],
+    );
+    for (const command of dynamicForms) {
+      assert.equal(identityFor(command), null, `${command.join(' ')} must stay cold without a strict file payload`);
+    }
+
+    assert.equal(identityFor([process.execPath, nodePayload], { NODE_PATH: external }), null, 'NODE_PATH indirection stays cold');
+    assert.equal(identityFor([process.execPath, nodePayload], { NODE_OPTIONS: `--require=${nodePayload}` }), null, 'NODE_OPTIONS payload indirection stays cold');
+    assert.equal(identityFor([process.execPath, nodePayload], { LD_AUDIT: nodePayload }), null, 'dynamic-loader environment stays cold');
+    assert.match(
+      identityFor([process.execPath, nodePayload], { NODE_OPTIONS: '--max-old-space-size=512' }),
+      /^[0-9a-f]{64}$/u,
+      'the guard-owned heap ceiling does not make direct Node payloads permanently cold',
+    );
+    assert.equal(identityFor(['/bin/sh', path.join(external, 'exact.sh')], { ENV: nodePayload }), null, 'shell startup-file indirection stays cold');
+    if (python) {
+      const pythonPayload = path.join(external, 'exact.py');
+      assert.equal(identityFor([python, '-S', pythonPayload], { PYTHONPATH: external }), null, 'Python path indirection stays cold');
+      assert.equal(identityFor([python, '-S', pythonPayload], { PYTHONINSPECT: '1' }), null, 'Python inherited-stdin inspection stays cold');
+      assert.equal(identityFor([python, '-S', pythonPayload], { PYTHONUSERBASE: external }), null, 'Python user-base indirection stays cold');
+    }
+
+    const renamedRuntime = path.join(external, 'renamed-runtime');
+    copyFileSync('/bin/sh', renamedRuntime);
+    chmodSync(renamedRuntime, 0o755);
+    assert.equal(identityFor([renamedRuntime]), null, 'a renamed runtime with implicit stdin stays cold');
+    assert.equal(identityFor([renamedRuntime, '-']), null, 'a renamed runtime with explicit stdin stays cold');
+    assert.equal(identityFor([renamedRuntime, '--']), null, 'a renamed runtime with an option-only stdin form stays cold');
+    assert.equal(identityFor([renamedRuntime, '--no-warnings']), null, 'an unrecognized executable with option-shaped argv stays cold');
+    assert.equal(
+      identityFor([renamedRuntime, `--import=file://${nodePayload}`]),
+      null,
+      'an option-attached file URL stays cold for an unrecognized executable',
+    );
+    assert.equal(
+      identityFor([renamedRuntime, path.join(external, 'exact.sh')]),
+      null,
+      'a copied runtime with an external file operand stays cold when its family is unprovable',
+    );
+    assert.equal(identityFor([renamedRuntime, external]), null, 'a renamed runtime with a mutable directory operand stays cold');
+    assert.equal(
+      identityFor([renamedRuntime, `--require=${nodePayload}`]),
+      null,
+      'an option-attached filesystem target stays cold for an unrecognized executable',
+    );
+    assert.equal(
+      identityFor([renamedRuntime, path.join('ignored', 'job.mjs')]),
+      null,
+      'an ignored in-repository file stays cold for an unrecognized executable',
+    );
+    const guardDiagnostics = path.join(checkout, '.guard');
+    mkdirSync(guardDiagnostics);
+    writeFileSync(path.join(guardDiagnostics, 'last-run.json'), '{}\n');
+    assert.equal(
+      identityFor([renamedRuntime, path.join('.guard', 'last-run.json')]),
+      null,
+      'an exempt mutable guard diagnostic cannot become unrecognized-runtime payload evidence',
+    );
+
+    for (const unsupportedShell of [
+      '/bin/ash',
+      '/bin/csh',
+      '/bin/mksh',
+      '/bin/tcsh',
+      '/bin/zsh',
+      '/usr/bin/fish',
+      '/usr/bin/mksh',
+      '/usr/local/bin/fish',
+      '/opt/homebrew/bin/fish',
+      '/usr/local/bin/pwsh',
+      '/opt/homebrew/bin/pwsh',
+    ].filter((candidate) => existsSync(candidate))) {
+      assert.equal(
+        identityFor([unsupportedShell, path.join(external, 'exact.sh')]),
+        null,
+        `${path.basename(unsupportedShell)} stays cold without startup-file evidence`,
+      );
+    }
+
+    for (const wrapper of ['/usr/bin/env', '/bin/nice', '/usr/bin/nice', '/usr/bin/nohup', '/usr/bin/time', '/usr/bin/xargs'].filter((candidate) => existsSync(candidate))) {
+      assert.equal(
+        identityFor([wrapper, process.execPath, nodePayload]),
+        null,
+        `${path.basename(wrapper)} indirection cannot bypass interpreter payload evidence`,
+      );
+    }
+    for (const wrapperName of ['chrt', 'doas', 'env', 'flock', 'ionice', 'nice', 'nohup', 'setsid', 'stdbuf', 'strace', 'sudo', 'time', 'timeout', 'xargs']) {
+      const wrapperAlias = path.join(external, wrapperName);
+      symlinkSync(process.execPath, wrapperAlias);
+      assert.equal(
+        identityFor([wrapperAlias, process.execPath, nodePayload]),
+        null,
+        `${wrapperName} aliases stay cold rather than hiding an interpreter payload`,
+      );
+    }
   });
 
   test('peaks round-trip through the protected store and keep the max of a rolling window', async () => {

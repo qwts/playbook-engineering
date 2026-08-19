@@ -32,6 +32,23 @@ const INPUT_DERIVED_GIT_AUTHORS = new Set([
   'pull',
   'rebase',
 ]);
+const GIT_RECOVERY_SUBCOMMANDS = new Set([
+  'am',
+  'cherry-pick',
+  'merge',
+  'rebase',
+  'revert',
+]);
+const GIT_GLOBAL_QUERY_OPTIONS = new Set([
+  '-h',
+  '--help',
+  '-v',
+  '--version',
+  '--exec-path',
+  '--html-path',
+  '--info-path',
+  '--man-path',
+]);
 const GIT_NON_PUBLISH_SUBCOMMANDS = new Set([
   'add',
   'annotate',
@@ -97,7 +114,8 @@ const GIT_NON_PUBLISH_SUBCOMMANDS = new Set([
 ]);
 const SHELLS = new Set(['bash', 'dash', 'ksh', 'sh', 'zsh']);
 const INDIRECT_EXECUTORS = new Set([
-  '.', 'eval', 'find', 'nice', 'nohup', 'parallel', 'source', 'sudo', 'watch', 'xargs',
+  '.', 'eval', 'find', 'nice', 'nohup', 'parallel', 'setsid', 'source', 'stdbuf',
+  'sudo', 'time', 'timeout', 'watch', 'xargs',
 ]);
 const GH_READ_SUBCOMMANDS = {
   alias: ['list'],
@@ -560,6 +578,13 @@ function shellLex(command) {
     else if (ch === '{' && !wordStarted && /(?:\s|$)/u.test(text[i + 1] || '')) operator = ch;
     else if (ch === '}' && !wordStarted && /(?:\s|;|&|\||$)/u.test(text[i + 1] || '')) operator = ch;
     if (operator) {
+      // In zsh an adjacent parenthesis can be part of executable syntax such
+      // as a glob qualifier (`*(e:'command':)`). Splitting it into a benign
+      // word plus a shell group would hide the qualifier's command from the
+      // recursive scan. A separated `(` remains an ordinary control operator.
+      if (operator === '(' && wordStarted) {
+        return { safe: false, substitutions, tokens };
+      }
       if (REDIRECTION_OPERATORS.has(operator) && wordStarted && /^\d+$/u.test(value) && !dynamic) {
         value = '';
         wordStarted = false;
@@ -603,9 +628,11 @@ function stripRedirections(tokens) {
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (token.type === 'operator' && REDIRECTION_OPERATORS.has(token.value)) {
-      if (token.value === '<<<') return { safe: false, words: [] };
       const target = tokens[i + 1];
-      if (!target || target.type !== 'word' || target.dynamic) return { safe: false, words: [] };
+      // Redirection expansion produces a filename, descriptor, or input data,
+      // not another command. shellLex has already extracted every command
+      // substitution from dynamic operands for recursive classification.
+      if (!target || target.type !== 'word') return { safe: false, words: [] };
       i += 1;
       continue;
     }
@@ -669,6 +696,7 @@ function unwrapPrefixes(input, inheritedContext) {
   while (words.length) {
     const assigned = assignment(words[0]);
     if (assigned) {
+      if (assigned.append) return { context, safe: false, words: [] };
       context = withAssignment(context, assigned);
       words.shift();
       continue;
@@ -713,6 +741,7 @@ function unwrapPrefixes(input, inheritedContext) {
       const item = words[0];
       const assigned = assignment(item);
       if (assigned) {
+        if (assigned.append) return { context, safe: false, words: [] };
         context = withAssignment(context, assigned);
         words.shift();
         continue;
@@ -807,18 +836,16 @@ function parseGit(words, context) {
       break;
     }
     if (option.value === '-c') {
-      const name = words[i + 1];
-      if (!name || name.dynamic || !name.value) return unsafeScan();
-      if (name.value.includes('=')) {
-        globalArgs.push('-c', name.value);
-        i += 2;
-        continue;
-      }
-      const value = words[i + 2];
-      if (!value || value.dynamic) return unsafeScan();
-      globalArgs.push('-c', `${name.value}=${value.value}`);
-      i += 3;
+      const config = words[i + 1];
+      if (!config || config.dynamic || !config.value) return unsafeScan();
+      globalArgs.push('-c', config.value);
+      i += 2;
       continue;
+    }
+    if (GIT_GLOBAL_QUERY_OPTIONS.has(option.value)) {
+      return i === words.length - 1
+        ? { operations: [], safe: true }
+        : unsafeScan();
     }
     if (takesValue.has(option.value)) {
       const argument = words[i + 1];
@@ -849,6 +876,28 @@ function parseGit(words, context) {
   const subcommand = words[i];
   if (!subcommand || subcommand.dynamic) return unsafeScan();
   const value = subcommand.value;
+  if (value === 'bisect') {
+    const action = words[i + 1];
+    if (action?.dynamic) return unsafeScan();
+    if (action?.value === 'run') return unsafeScan();
+  }
+  if (value === 'submodule') {
+    let action = null;
+    for (let j = i + 1; j < words.length; j += 1) {
+      const item = words[j];
+      if (item.dynamic) return unsafeScan();
+      if (item.value === '--') {
+        action = words[j + 1] || null;
+        break;
+      }
+      if (['-q', '--quiet', '--cached'].includes(item.value)) continue;
+      if (item.value.startsWith('-')) return unsafeScan();
+      action = item;
+      break;
+    }
+    if (action?.dynamic) return unsafeScan();
+    if (action?.value === 'foreach') return unsafeScan();
+  }
   if (value === 'push') {
     return { operations: [{ context, globalArgs, kind: 'git-push', subcommand: value, words }], safe: true };
   }
@@ -861,6 +910,17 @@ function parseGit(words, context) {
   if (value === 'notes') {
     const action = words[i + 1];
     if (action && !action.dynamic && ['get-ref', 'list', 'show'].includes(action.value)) {
+      return { operations: [], safe: true };
+    }
+  }
+  if (GIT_RECOVERY_SUBCOMMANDS.has(value)) {
+    const action = words[i + 1];
+    if (
+      words.length === i + 2
+      && action
+      && !action.dynamic
+      && ['--abort', '--quit'].includes(action.value)
+    ) {
       return { operations: [], safe: true };
     }
   }
@@ -984,18 +1044,37 @@ function parseShell(words, context, depth) {
 }
 
 function inspectSimpleCommand(tokens, depth, inheritedContext) {
+  if (depth > 8) return unsafeScan();
   const stripped = stripRedirections(tokens);
   if (!stripped.safe) return unsafeScan();
   let words = stripped.words;
   if (!words.length) return { operations: [], safe: true };
 
-  while (
-    words.length
-    && !words[0].dynamic
-    && ['!', 'coproc', 'do', 'elif', 'else', 'if', 'then', 'time', 'until', 'while'].includes(words[0].value)
-  ) {
+  const structuralPrefixes = new Set([
+    '!', 'coproc', 'do', 'elif', 'else', 'if', 'then', 'time', 'until', 'while',
+  ]);
+  const prefix = words[0]?.dynamic ? '' : words[0]?.value;
+  if (prefix === 'coproc') {
+    const command = words.slice(1);
+    if (!command.length || command[0].dynamic) return unsafeScan();
+    if (structuralPrefixes.has(command[0].value)) return unsafeScan();
+    const scan = inspectSimpleCommand(command, depth + 1, inheritedContext);
+    if (
+      command.length > 1
+      && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(command[0].value)
+    ) {
+      mergeScan(scan, inspectSimpleCommand(command.slice(1), depth + 1, inheritedContext));
+    }
+    return scan;
+  }
+  if (prefix === 'time') {
+    words = words.slice(1);
+    if (words[0]?.value === '-p' && !words[0].dynamic) words = words.slice(1);
+    else if (words[0]?.dynamic || words[0]?.value?.startsWith('-')) return unsafeScan();
+  } else if (structuralPrefixes.has(prefix)) {
     words = words.slice(1);
   }
+  if (words[0]?.dynamic || structuralPrefixes.has(words[0]?.value)) return unsafeScan();
   const structural = words[0]?.dynamic ? '' : words[0]?.value;
   if (['case', 'for', 'function', 'select'].includes(structural)) return { operations: [], safe: true };
   if (['done', 'esac', 'fi', 'in'].includes(structural)) return { operations: [], safe: true };
@@ -1018,6 +1097,9 @@ function inspectCommand(command, depth = 0, context = {}) {
   if (depth > 8) return unsafeScan();
   const lexed = shellLex(command);
   if (!lexed.safe) return unsafeScan();
+  if (lexed.tokens.some((token) => (
+    token.type === 'operator' && ['|', '|&'].includes(token.value)
+  ))) return unsafeScan();
   const scan = { operations: [], safe: true };
   for (const nested of lexed.substitutions) {
     mergeScan(scan, inspectCommand(nested, depth + 1, context));
@@ -1047,9 +1129,10 @@ function identMatches(value, authors) {
 }
 
 function operationEnvironment(env, context) {
-  const merged = context.clearEnv ? {} : { ...env };
-  for (const name of context.unset) delete merged[name];
-  for (const [name, setting] of Object.entries(context.env)) {
+  const normalized = cloneContext(context);
+  const merged = normalized.clearEnv ? {} : { ...env };
+  for (const name of normalized.unset) delete merged[name];
+  for (const [name, setting] of Object.entries(normalized.env)) {
     if (setting.dynamic) return null;
     merged[name] = setting.append
       ? `${merged[name] || ''}${setting.value}`
@@ -1077,6 +1160,7 @@ function commitOptionSummary(operation) {
   const reuseOptions = new Set([
     '--reedit-message', '--reuse-message', '-C', '-c',
   ]);
+  const untrackedModes = new Set(['all', 'no', 'normal']);
   const shortFlags = new Set(['a', 'e', 'i', 'n', 'o', 'p', 'q', 's', 'v', 'z']);
   const shortValues = new Set(['C', 'F', 'c', 'm', 't']);
   let author = '';
@@ -1111,6 +1195,12 @@ function commitOptionSummary(operation) {
       continue;
     }
     if (argument === '--gpg-sign' || argument.startsWith('--gpg-sign=')) continue;
+    if (argument === '--no-untracked-files') continue;
+    if (argument === '--untracked-files') continue;
+    if (argument.startsWith('--untracked-files=')) {
+      if (!untrackedModes.has(argument.slice('--untracked-files='.length))) return null;
+      continue;
+    }
     if (flags.has(argument)) continue;
 
     const equals = argument.indexOf('=');
@@ -1137,6 +1227,11 @@ function commitOptionSummary(operation) {
     for (let offset = 1; offset < argument.length; offset += 1) {
       const short = argument[offset];
       if (shortFlags.has(short)) continue;
+      if (short === 'u') {
+        const attached = argument.slice(offset + 1);
+        if (attached && !untrackedModes.has(attached)) return null;
+        break;
+      }
       if (short === 'S') break;
       if (!shortValues.has(short)) return null;
       let value = argument.slice(offset + 1);
@@ -1213,14 +1308,15 @@ function identityAllowed(identity, authors) {
   return identMatches(identity.name, authors) && identMatches(identity.email, authors);
 }
 
-function resolveGhLogin(env = {}) {
-  const fromEnv = env.GH_USER || env.GITHUB_USER || env.GITHUB_ACTOR || '';
-  if (fromEnv) return String(fromEnv).trim().toLowerCase();
+function resolveGhLogin(env = {}, context = {}) {
   try {
-    const run = spawnSync('gh', ['api', 'user', '--jq', '.login'], {
+    const options = {
       encoding: 'utf8',
+      env,
       timeout: 4000,
-    });
+    };
+    if (context.cwd) options.cwd = context.cwd;
+    const run = spawnSync('gh', ['api', 'user', '--jq', '.login'], options);
     if (run.status === 0) return (run.stdout || '').trim().toLowerCase();
   } catch {}
   return '';
@@ -1235,8 +1331,10 @@ function isUnmanagedGitAuthor(env, authors, operation) {
   );
 }
 
-function isUnmanagedGhActor(env, authors) {
-  return authors.includes(resolveGhLogin(env));
+function isUnmanagedGhActor(env, authors, operation = {}) {
+  const context = operation.context || cloneContext();
+  const effectiveEnv = operationEnvironment(env, context);
+  return Boolean(effectiveEnv && authors.includes(resolveGhLogin(effectiveEnv, context)));
 }
 
 function isHumanAttributedPublish(command) {
@@ -1250,8 +1348,8 @@ function unmanagedPublishAllowed(command, env, authors) {
   if (!scan.safe || !scan.operations.length) return false;
   for (const operation of scan.operations) {
     if (operation.kind === 'git-commit' && !isUnmanagedGitAuthor(env, authors, operation)) return false;
-    if (operation.kind === 'git-push' && !isUnmanagedGhActor(env, authors)) return false;
-    if (operation.kind === 'gh-write' && !isUnmanagedGhActor(env, authors)) return false;
+    if (operation.kind === 'git-push' && !isUnmanagedGhActor(env, authors, operation)) return false;
+    if (operation.kind === 'gh-write' && !isUnmanagedGhActor(env, authors, operation)) return false;
   }
   return true;
 }
@@ -1375,6 +1473,8 @@ export function renderUninstalledIdentitySource(dialect) {
     `const REDIRECTION_OPERATORS = new Set(${JSON.stringify([...REDIRECTION_OPERATORS])});`,
     `const GIT_COMMIT_SUBCOMMANDS = new Set(${JSON.stringify([...GIT_COMMIT_SUBCOMMANDS])});`,
     `const INPUT_DERIVED_GIT_AUTHORS = new Set(${JSON.stringify([...INPUT_DERIVED_GIT_AUTHORS])});`,
+    `const GIT_RECOVERY_SUBCOMMANDS = new Set(${JSON.stringify([...GIT_RECOVERY_SUBCOMMANDS])});`,
+    `const GIT_GLOBAL_QUERY_OPTIONS = new Set(${JSON.stringify([...GIT_GLOBAL_QUERY_OPTIONS])});`,
     `const GIT_NON_PUBLISH_SUBCOMMANDS = new Set(${JSON.stringify([...GIT_NON_PUBLISH_SUBCOMMANDS])});`,
     `const SHELLS = new Set(${JSON.stringify([...SHELLS])});`,
     `const INDIRECT_EXECUTORS = new Set(${JSON.stringify([...INDIRECT_EXECUTORS])});`,
