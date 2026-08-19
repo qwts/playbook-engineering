@@ -63,6 +63,7 @@ const GIT_NON_PUBLISH_SUBCOMMANDS = new Set([
   'reflog',
   'remote',
   'request-pull',
+  'reset',
   'restore',
   'rev-list',
   'rev-parse',
@@ -340,17 +341,58 @@ function shellLex(command) {
   const text = String(command || '');
   const tokens = [];
   const substitutions = [];
+  const pendingHeredocs = [];
+  let expectedHeredoc = null;
   let value = '';
   let dynamic = false;
   let quote = null;
+  let wordQuoted = false;
   let wordStarted = false;
 
   function finishWord() {
     if (!wordStarted) return;
     tokens.push({ type: 'word', value, dynamic });
+    if (expectedHeredoc) {
+      pendingHeredocs.push({
+        delimiter: value,
+        dynamic,
+        quoted: wordQuoted,
+        stripTabs: expectedHeredoc.stripTabs,
+      });
+      expectedHeredoc = null;
+    }
     value = '';
     dynamic = false;
+    wordQuoted = false;
     wordStarted = false;
+  }
+
+  function skipHeredocBodies(start) {
+    let cursor = start;
+    for (const heredoc of pendingHeredocs) {
+      // An unquoted body performs shell expansions before reaching its
+      // consumer, so it can execute a protected command. Quoted delimiters
+      // make the body inert to the shell; the receiving command is still
+      // classified normally (and bare shells remain fail-closed).
+      if (!heredoc.quoted || heredoc.dynamic || !heredoc.delimiter) return null;
+      let found = false;
+      while (cursor <= text.length) {
+        const newline = text.indexOf('\n', cursor);
+        const lineEnd = newline < 0 ? text.length : newline;
+        const candidate = text.slice(cursor, lineEnd).replace(/\r$/u, '');
+        const normalized = heredoc.stripTabs ? candidate.replace(/^\t+/u, '') : candidate;
+        if (normalized === heredoc.delimiter) {
+          cursor = lineEnd + (newline < 0 ? 0 : 1);
+          found = true;
+          break;
+        }
+        if (newline < 0) break;
+        cursor = newline + 1;
+      }
+      if (!found) return null;
+    }
+    pendingHeredocs.length = 0;
+    return cursor;
   }
 
   function addExpansion(i) {
@@ -437,24 +479,46 @@ function shellLex(command) {
 
     if (/\s/u.test(ch)) {
       finishWord();
-      if (ch === '\n') tokens.push({ type: 'operator', value: '\n' });
+      if (ch === '\n') {
+        if (expectedHeredoc) return { safe: false, substitutions, tokens };
+        tokens.push({ type: 'operator', value: '\n' });
+        if (pendingHeredocs.length) {
+          const next = skipHeredocBodies(i + 1);
+          if (next === null) return { safe: false, substitutions, tokens };
+          i = next - 1;
+        }
+      }
       continue;
     }
     if (ch === '#' && !wordStarted) {
       const end = text.indexOf('\n', i + 1);
-      if (end === -1) break;
+      if (end === -1) {
+        if (expectedHeredoc || pendingHeredocs.length) {
+          return { safe: false, substitutions, tokens };
+        }
+        break;
+      }
+      if (expectedHeredoc) return { safe: false, substitutions, tokens };
       tokens.push({ type: 'operator', value: '\n' });
-      i = end;
+      if (pendingHeredocs.length) {
+        const next = skipHeredocBodies(end + 1);
+        if (next === null) return { safe: false, substitutions, tokens };
+        i = next - 1;
+      } else {
+        i = end;
+      }
       continue;
     }
     if (ch === "'" || ch === '"') {
       quote = ch;
+      wordQuoted = true;
       wordStarted = true;
       continue;
     }
     if (ch === '\\') {
       const next = text[i + 1];
       if (next === undefined) return { safe: false, substitutions, tokens };
+      wordQuoted = true;
       wordStarted = true;
       if (next !== '\n') value += next;
       i += 1;
@@ -491,6 +555,10 @@ function shellLex(command) {
         wordStarted = false;
       } else finishWord();
       tokens.push({ type: 'operator', value: operator });
+      if (operator === '<<' || operator === '<<-') {
+        if (expectedHeredoc) return { safe: false, substitutions, tokens };
+        expectedHeredoc = { stripTabs: operator === '<<-' };
+      }
       i += operator.length - 1;
       continue;
     }
@@ -498,7 +566,9 @@ function shellLex(command) {
     value += ch;
     wordStarted = true;
   }
-  if (quote) return { safe: false, substitutions, tokens };
+  if (quote || expectedHeredoc || pendingHeredocs.length) {
+    return { safe: false, substitutions, tokens };
+  }
   finishWord();
   return { safe: true, substitutions, tokens };
 }
@@ -523,7 +593,7 @@ function stripRedirections(tokens) {
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (token.type === 'operator' && REDIRECTION_OPERATORS.has(token.value)) {
-      if (token.value.startsWith('<<')) return { safe: false, words: [] };
+      if (token.value === '<<<') return { safe: false, words: [] };
       const target = tokens[i + 1];
       if (!target || target.type !== 'word' || target.dynamic) return { safe: false, words: [] };
       i += 1;
@@ -739,6 +809,12 @@ function parseGit(words, context) {
   if (value === 'stash') {
     const action = words[i + 1];
     if (action && !action.dynamic && ['list', 'show'].includes(action.value)) {
+      return { operations: [], safe: true };
+    }
+  }
+  if (value === 'notes') {
+    const action = words[i + 1];
+    if (action && !action.dynamic && ['get-ref', 'list', 'show'].includes(action.value)) {
       return { operations: [], safe: true };
     }
   }
