@@ -632,6 +632,15 @@ describe('command hook', () => {
     assert.equal(evaluateCommand(`env --uns TOKEN --chd=${outside} node scripts/check-traceability.mjs`, local).allow, false);
     assert.equal(evaluateCommand(`env --spl='--chd=${outside} node scripts/check-traceability.mjs'`, local).allow, false);
     assert.equal(evaluateCommand(`env -iS'--chd=${outside} node scripts/check-traceability.mjs'`, local).allow, false);
+    assert.equal(
+      evaluateCommand(`env -S'-iC${outside}\\_node\\_scripts/check-traceability.mjs'`, local).allow,
+      false,
+    );
+    assert.equal(
+      evaluateCommand(`EVIL=-iC${outside} env -S '\${EVIL} node scripts/check-traceability.mjs'`, local).allow,
+      false,
+    );
+    assert.equal(evaluateCommand('env --future-operand ignored node scripts/check-traceability.mjs', local).allow, false);
     assert.equal(evaluateCommand(`command env -C ${outside} node scripts/check-traceability.mjs`, local).allow, false);
     assert.equal(evaluateCommand(`env -S '-C ${outside} node scripts/check-traceability.mjs'`, local).allow, false);
     assert.equal(evaluateCommand(`env --split-string='--chdir=${outside} node scripts/check-traceability.mjs'`, local).allow, false);

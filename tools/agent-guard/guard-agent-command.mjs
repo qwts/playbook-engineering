@@ -416,7 +416,7 @@ function scopeWords(text) {
       index += 1;
       continue;
     }
-    words.push({ index: start, value: word.value });
+    words.push({ index: start, end: word.end, value: word.value });
     index = word.end;
   }
   return words;
@@ -443,6 +443,7 @@ const ENV_LONG_OPTIONS = [
   '--chdir',
   '--debug',
   '--default-signal',
+  '--env0-from',
   '--help',
   '--ignore-environment',
   '--ignore-signal',
@@ -453,7 +454,7 @@ const ENV_LONG_OPTIONS = [
   '--unset',
   '--version',
 ];
-const ENV_LONG_OPERAND_OPTIONS = new Set(['--argv0', '--chdir', '--path', '--split-string', '--unset']);
+const ENV_LONG_OPERAND_OPTIONS = new Set(['--argv0', '--chdir', '--env0-from', '--path', '--split-string', '--unset']);
 const ENV_SHORT_FLAGS = new Set(['0', 'i', 'v']);
 const ENV_SHORT_OPERAND_OPTIONS = new Map([
   ['a', '--argv0'],
@@ -497,6 +498,38 @@ function envOption(word) {
   return envLongOption(word) ?? envShortOption(word);
 }
 
+function hasUnmodeledEnvInvocation(command) {
+  for (const segment of splitSegments(command)) {
+    const words = scopeWords(segment);
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index].value.split('/').at(-1) !== 'env' || !prefixReaches(words, index)) continue;
+      for (let optionAt = index + 1; optionAt < words.length; optionAt += 1) {
+        const word = words[optionAt];
+        if (/^\w+=/u.test(word.value)) continue;
+        if (word.value === '--') break;
+        if (word.value === '-') continue;
+        if (!word.value.startsWith('-')) break;
+        const option = envOption(word.value);
+        // Unknown and ambiguous options already fail in current env releases,
+        // but a future operand-taking option could otherwise hide the command
+        // or a later cwd change from this parser. Deny instead of guessing.
+        if (option === null) return true;
+        if (!ENV_LONG_OPERAND_OPTIONS.has(option.name)) continue;
+        let operand = word;
+        if (option.value === null) {
+          operand = words[++optionAt];
+          if (!operand) return true;
+        }
+        if (
+          option.name === '--split-string' &&
+          /[\\$]/u.test(segment.slice(operand.index, operand.end))
+        ) return true;
+      }
+    }
+  }
+  return false;
+}
+
 function directoryOptionTargets(segment) {
   const words = scopeWords(segment);
   const targets = [];
@@ -514,7 +547,7 @@ function directoryOptionTargets(segment) {
         } else if (parsedOption?.name === '--chdir') {
           envTarget = parsedOption.value;
         } else if (
-          ['--argv0', '--path', '--unset'].includes(parsedOption?.name) &&
+          ['--argv0', '--env0-from', '--path', '--unset'].includes(parsedOption?.name) &&
           parsedOption.value === null
         ) {
           optionAt += 1;
@@ -658,7 +691,7 @@ export function resolveExecutionDirs(cwd, command) {
       } else if (parsedOption?.name === '--chdir') {
         chdirTarget = parsedOption.value;
       } else if (
-        ['--argv0', '--path', '--unset'].includes(parsedOption?.name) &&
+        ['--argv0', '--env0-from', '--path', '--unset'].includes(parsedOption?.name) &&
         parsedOption.value === null
       ) {
         index += 1;
@@ -2337,6 +2370,14 @@ export function hasProtectedEnvironmentAssignment(command) {
 export function evaluateCommand(command, { cwd = process.cwd() } = {}) {
   if (typeof command !== 'string' || command.length === 0) return { allow: true };
   const dynamicCommand = maskNonShellHeredocs(command);
+  if (hasUnmodeledEnvInvocation(dynamicCommand)) {
+    return {
+      allow: false,
+      reason:
+        'Blocked an env invocation whose option or split-string semantics cannot be proven statically. ' +
+        `Use literal supported env options without split-string escapes or variable expansion. ${USE_ENTRYPOINT}`,
+    };
+  }
   // Executable-loading environment overrides are denied only in positions
   // that reach a command's environment: leading VAR=… prefixes and the
   // argument list of env-style wrappers — where a quoted assignment is still
