@@ -2,6 +2,9 @@
   "name": "playbook-engineering",
   "version": "1.0.0",
   "description": "Software engineering planning and documentation",
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  },
   "scripts": {
     "codex:approve": "node tools/repos/approve-codex-sync.mjs",
     "lint:markdown": "markdownlint docs/ skills/ AGENTS.md",
