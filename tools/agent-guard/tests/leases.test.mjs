@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
@@ -630,6 +630,152 @@ describe('lane peak store (#180)', () => {
       behaviorEnv: environmentFor(first),
     });
     assert.notEqual(externalAfter, externalBefore, 'changed executable contents must invalidate history');
+  });
+
+  test('structural environment paths share only canonical worktree-contained targets', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'agent-guard-environment-'));
+    roots.push(root);
+    const first = path.join(root, 'first', 'app');
+    const sibling = path.join(root, 'linked-worktree');
+    const firstToolbin = path.join(root, 'first', 'toolbin');
+    const siblingToolbin = path.join(root, 'toolbin');
+    mkdirSync(first, { recursive: true });
+    mkdirSync(firstToolbin, { recursive: true });
+    mkdirSync(siblingToolbin, { recursive: true });
+
+    const git = ['/usr/bin/git', '/bin/git'].find((candidate) => {
+      try {
+        execFileSync(candidate, ['--version'], { stdio: 'ignore' });
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(git, 'a system Git binary is required to resolve worktree evidence');
+
+    execFileSync(git, ['-C', first, 'init', '--quiet'], { stdio: 'ignore' });
+    writeFileSync(path.join(first, 'package.json'), `${JSON.stringify({ scripts: { test: 'helper' } }, null, 2)}\n`);
+    writeFileSync(path.join(first, 'helper'), '#!/bin/sh\nexit 0\n');
+    chmodSync(path.join(first, 'helper'), 0o755);
+    mkdirSync(path.join(first, 'contained-bin'));
+    writeFileSync(path.join(first, 'contained-bin', 'helper'), '#!/bin/sh\nexit 0\n');
+    chmodSync(path.join(first, 'contained-bin', 'helper'), 0o755);
+    symlinkSync('../toolbin', path.join(first, 'escape-bin'));
+    execFileSync(git, ['-C', first, 'add', 'package.json', 'helper', 'contained-bin/helper', 'escape-bin'], {
+      stdio: 'ignore',
+    });
+    execFileSync(git, [
+      '-C', first,
+      '-c', 'user.name=Agent Guard Test',
+      '-c', 'user.email=guard@example.invalid',
+      'commit', '--quiet', '-m', 'fixture',
+    ], { stdio: 'ignore' });
+    execFileSync(git, ['-C', first, 'worktree', 'add', '--quiet', '--detach', sibling], { stdio: 'ignore' });
+
+    writeFileSync(path.join(firstToolbin, 'helper'), '#!/bin/sh\necho first\n');
+    chmodSync(path.join(firstToolbin, 'helper'), 0o755);
+    writeFileSync(path.join(siblingToolbin, 'helper'), '#!/bin/sh\necho sibling\n');
+    chmodSync(path.join(siblingToolbin, 'helper'), 0o755);
+
+    const peakEnv = scratchEnv();
+    const systemPath = process.env.PATH ?? '/usr/bin:/bin';
+    const command = ['npm', 'test'];
+    const environmentFor = (cwd, overrides = {}) => ({
+      ...peakEnv,
+      PWD: cwd,
+      INIT_CWD: cwd,
+      PATH: `${cwd}${path.delimiter}${systemPath}`,
+      AGENT_GUARDED: '<guard-lease>',
+      ...overrides,
+    });
+    const identityFor = (cwd, overrides = {}) => commandBehaviorIdentity(cwd, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(cwd, overrides),
+    });
+
+    const firstBehavior = identityFor(first);
+    const siblingBehavior = identityFor(sibling);
+    assert.match(firstBehavior, /^[0-9a-f]{64}$/u);
+    assert.equal(
+      siblingBehavior,
+      firstBehavior,
+      'canonical worktree-root PWD, INIT_CWD, and PATH targets share structurally',
+    );
+
+    assert.notEqual(
+      identityFor(first, { PWD: '<worktree>' }),
+      firstBehavior,
+      'a literal sentinel-looking PWD cannot impersonate the actual worktree root',
+    );
+    assert.notEqual(
+      identityFor(first, { INIT_CWD: '<worktree>' }),
+      firstBehavior,
+      'a literal sentinel-looking INIT_CWD cannot impersonate the actual worktree root',
+    );
+    assert.notEqual(
+      identityFor(first, { PATH: `<worktree>${path.delimiter}${systemPath}` }),
+      firstBehavior,
+      'a literal sentinel-looking PATH component cannot impersonate the actual worktree root',
+    );
+    assert.notEqual(
+      identityFor(first, { PWD: '' }),
+      firstBehavior,
+      'an empty PWD remains distinct from the invocation cwd',
+    );
+    assert.notEqual(
+      identityFor(first, { INIT_CWD: '' }),
+      firstBehavior,
+      'an empty INIT_CWD remains distinct from the invocation cwd',
+    );
+    assert.equal(
+      identityFor(sibling, { PWD: '', INIT_CWD: '' }),
+      identityFor(first, { PWD: '', INIT_CWD: '' }),
+      'the same exact empty PWD and INIT_CWD values still share across linked worktrees',
+    );
+    assert.equal(
+      identityFor(first, { PATH: `${path.delimiter}${systemPath}` }),
+      firstBehavior,
+      'an empty PATH component has execvp cwd semantics',
+    );
+
+    const firstAbsoluteEscape = `${first}${path.sep}..${path.sep}toolbin`;
+    const siblingAbsoluteEscape = `${sibling}${path.sep}..${path.sep}toolbin`;
+    assert.notEqual(
+      identityFor(first, { PATH: `${firstAbsoluteEscape}${path.delimiter}${systemPath}` }),
+      identityFor(sibling, { PATH: `${siblingAbsoluteEscape}${path.delimiter}${systemPath}` }),
+      'absolute worktree/../toolbin spellings retain their distinct external resolutions',
+    );
+    assert.notEqual(
+      identityFor(first, { PATH: `${path.join(first, 'escape-bin')}${path.delimiter}${systemPath}` }),
+      identityFor(sibling, { PATH: `${path.join(sibling, 'escape-bin')}${path.delimiter}${systemPath}` }),
+      'tracked symlinks that escape each worktree retain their external canonical targets',
+    );
+    assert.notEqual(
+      identityFor(first, { PATH: `..${path.sep}toolbin${path.delimiter}${systemPath}` }),
+      identityFor(sibling, { PATH: `..${path.sep}toolbin${path.delimiter}${systemPath}` }),
+      'relative external PATH entries with distinct helper bytes resolve from each invocation cwd',
+    );
+    assert.notEqual(
+      identityFor(first, { PATH: `missing-bin${path.delimiter}${systemPath}` }),
+      identityFor(sibling, { PATH: `missing-bin${path.delimiter}${systemPath}` }),
+      'unresolved relative PATH entries retain their distinct absolute resolved spellings',
+    );
+
+    const firstContained = identityFor(first, {
+      PWD: '.',
+      INIT_CWD: `contained-bin${path.sep}..`,
+      PATH: `contained-bin${path.delimiter}${systemPath}`,
+    });
+    const siblingContained = identityFor(sibling, {
+      PWD: '.',
+      INIT_CWD: `contained-bin${path.sep}..`,
+      PATH: `contained-bin${path.delimiter}${systemPath}`,
+    });
+    assert.equal(
+      siblingContained,
+      firstContained,
+      'same contained relative targets share across linked worktrees',
+    );
   });
 
   test('peaks round-trip through the protected store and keep the max of a rolling window', async () => {

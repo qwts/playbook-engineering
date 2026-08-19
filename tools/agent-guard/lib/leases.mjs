@@ -26,7 +26,7 @@ import path from 'node:path';
 import { CORE_LEASE_FIELDS, PROTOCOL_VERSION, ensureStateDirs, lanePeaksDir, leasesDir, machineToken, stateDir } from './protocol.mjs';
 
 const GIT_EXECUTABLES = ['/usr/bin/git', '/bin/git'];
-const BEHAVIOR_IDENTITY_VERSION = 4;
+const BEHAVIOR_IDENTITY_VERSION = 5;
 const UNTRACKED_GUARD_DIAGNOSTICS = new Set([
   '? .guard/history.jsonl',
   '? .guard/last-run.json',
@@ -127,23 +127,54 @@ function executableEvidence(worktree, command, env) {
   }
 }
 
-function normalizedEnvironment(env, repositoryRoots) {
-  const normalizeWorktreePath = (value) => {
-    for (const repositoryRoot of repositoryRoots) {
-      if (value === repositoryRoot) return '<worktree>';
-      if (value.startsWith(`${repositoryRoot}${path.sep}`)) return `<worktree>${value.slice(repositoryRoot.length)}`;
-    }
-    return value;
-  };
+function repositoryRelativePath(repositoryRoot, target) {
+  const relative = path.relative(repositoryRoot, target);
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+  return relative ? relative.split(path.sep).join('/') : '.';
+}
+
+// Objects, rather than sentinel strings, keep structural tags disjoint from
+// literal environment values. Only canonical containment earns a portable
+// worktree-relative tag; every other spelling stays bound to its raw and
+// absolute resolution evidence.
+function structuralPathEvidence(raw, canonicalCwd, repositoryRoot, { emptyMeansCwd = false } = {}) {
+  if (raw === '' && !emptyMeansCwd) return { scope: 'literal', value: '' };
+  const spelling = raw === '' && emptyMeansCwd ? '.' : raw;
+  const resolved = path.resolve(canonicalCwd, spelling);
+  try {
+    const canonical = realpathSync(resolved);
+    const repositoryPath = repositoryRelativePath(repositoryRoot, canonical);
+    if (repositoryPath !== null) return { scope: 'worktree', path: repositoryPath };
+    return {
+      scope: 'external',
+      raw,
+      resolved,
+      canonical,
+    };
+  } catch {
+    return { scope: 'unresolved', raw, resolved };
+  }
+}
+
+function normalizedEnvironment(env, canonicalCwd, repositoryRoot) {
   const entries = [];
   for (const name of Object.keys(env).sort()) {
     if (typeof env[name] !== 'string') return null;
-    let value = env[name];
+    const raw = env[name];
     // These are structural checkout locations, not caller-selected behavior:
     // model their repository-relative meaning so equivalent sibling
     // worktrees can share. Every other environment value remains exact.
-    if (name === 'PWD' || name === 'INIT_CWD') value = normalizeWorktreePath(value);
-    else if (name === 'PATH') value = value.split(path.delimiter).map(normalizeWorktreePath).join(path.delimiter);
+    let value = raw;
+    if (name === 'PWD' || name === 'INIT_CWD') {
+      value = structuralPathEvidence(raw, canonicalCwd, repositoryRoot);
+    } else if (name === 'PATH') {
+      value = {
+        scope: 'path-list',
+        entries: raw.split(path.delimiter).map((entry) => (
+          structuralPathEvidence(entry, canonicalCwd, repositoryRoot, { emptyMeansCwd: true })
+        )),
+      };
+    }
     entries.push([name, value]);
   }
   return entries;
@@ -170,9 +201,7 @@ export function repositoryWorktreeRoot(worktree, { env = process.env } = {}) {
 }
 
 function repositoryRelativeCwd(repositoryRoot, canonicalCwd) {
-  const relative = path.relative(repositoryRoot, canonicalCwd);
-  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
-  return relative ? relative.split(path.sep).join('/') : '.';
+  return repositoryRelativePath(repositoryRoot, canonicalCwd);
 }
 
 /**
@@ -186,7 +215,6 @@ function repositoryRelativeCwd(repositoryRoot, canonicalCwd) {
  */
 export function commandBehaviorIdentity(worktree, command, { env = process.env, behaviorEnv = env } = {}) {
   if (!Array.isArray(command) || command.length === 0 || command.some((part) => typeof part !== 'string')) return null;
-  const resolvedCwd = path.resolve(worktree);
   const canonicalCwd = canonicalWorktreePath(worktree);
   const git = GIT_EXECUTABLES.find((candidate) => existsSync(candidate));
   if (git === undefined) return null;
@@ -217,20 +245,7 @@ export function commandBehaviorIdentity(worktree, command, { env = process.env, 
     if (tracked.some((entry) => !entry.startsWith('H '))) return null;
 
     const executable = executableEvidence(canonicalCwd, command, behaviorEnv);
-    const cwdDepth = relativeCwd === '.' ? 0 : relativeCwd.split('/').length;
-    const resolvedRepositoryRoot = path.resolve(resolvedCwd, ...Array(cwdDepth).fill('..'));
-    const repositoryRoots = [repositoryRoot];
-    try {
-      // Preserve a non-canonical spelling such as macOS's /var -> /private/var
-      // only when it resolves to this repository root. A symlink inside the
-      // checkout can change path depth, so blindly ascending could otherwise
-      // normalize an unrelated ancestor (even `/`) as the worktree.
-      if (realpathSync(resolvedRepositoryRoot) === repositoryRoot) repositoryRoots.push(resolvedRepositoryRoot);
-    } catch {
-      // The canonical root remains sufficient and errs toward isolated peaks.
-    }
-    repositoryRoots.sort((left, right) => right.length - left.length);
-    const environment = normalizedEnvironment(behaviorEnv, repositoryRoots);
+    const environment = normalizedEnvironment(behaviorEnv, canonicalCwd, repositoryRoot);
     if (executable === null || environment === null) return null;
     const evidence = JSON.stringify({
       version: BEHAVIOR_IDENTITY_VERSION,
