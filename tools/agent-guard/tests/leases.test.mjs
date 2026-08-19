@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
@@ -24,12 +24,14 @@ import {
   readLeases,
   releaseLease,
   repositoryIdentity,
+  repositoryWorktreeRoot,
   retargetLease,
   readLanePeakMb,
   recordLanePeak,
   withAdmissionLock,
 } from '../lib/leases.mjs';
 import { ensureStateDirs, leasesDir, machineToken } from '../lib/protocol.mjs';
+import { guardDiagnosticPaths } from '../run-guarded.mjs';
 
 const roots = [];
 let env;
@@ -378,6 +380,96 @@ describe('lane peak store (#180)', () => {
     });
     assert.match(firstBehavior, /^[0-9a-f]{64}$/u);
     assert.equal(siblingBehavior, firstBehavior, 'same revision and effective environment may share across worktrees');
+
+    const firstNested = path.join(first, 'packages', 'app');
+    const siblingNested = path.join(sibling, 'packages', 'app');
+    const firstOtherCwd = path.join(first, 'packages', 'other');
+    mkdirSync(firstNested, { recursive: true });
+    mkdirSync(siblingNested, { recursive: true });
+    mkdirSync(firstOtherCwd, { recursive: true });
+    const firstNestedBehavior = commandBehaviorIdentity(firstNested, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(firstNested),
+    });
+    const siblingNestedBehavior = commandBehaviorIdentity(siblingNested, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(siblingNested),
+    });
+    const firstOtherCwdBehavior = commandBehaviorIdentity(firstOtherCwd, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(firstOtherCwd),
+    });
+    assert.match(firstNestedBehavior, /^[0-9a-f]{64}$/u);
+    assert.equal(
+      siblingNestedBehavior,
+      firstNestedBehavior,
+      'linked worktrees may share behavior only at the same repository-relative cwd',
+    );
+    assert.notEqual(firstNestedBehavior, firstBehavior, 'the repository-relative cwd is command behavior');
+    assert.notEqual(firstOtherCwdBehavior, firstNestedBehavior, 'different repository-relative cwd values cannot share history');
+    assert.notEqual(
+      commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      firstBehavior,
+      'the actual relative cwd remains bound even when the structural environment is unchanged',
+    );
+
+    // Every cwd in one Git worktree writes diagnostics at the worktree root,
+    // so one nested run cannot poison the other cwd identities. Only those
+    // two root paths are exempt; the same suffix below a nested cwd is not.
+    assert.equal(repositoryWorktreeRoot(firstNested, { env: peakEnv }), repositoryWorktreeRoot(first, { env: peakEnv }));
+    assert.equal(repositoryWorktreeRoot(siblingNested, { env: peakEnv }), repositoryWorktreeRoot(sibling, { env: peakEnv }));
+    const nestedDiagnosticPaths = guardDiagnosticPaths(firstNested, { env: peakEnv });
+    const rootDiagnostics = path.join(repositoryWorktreeRoot(first, { env: peakEnv }), '.guard');
+    assert.equal(nestedDiagnosticPaths.guardDir, rootDiagnostics);
+    assert.equal(nestedDiagnosticPaths.lastRunPath, path.join(rootDiagnostics, 'last-run.json'));
+    assert.equal(nestedDiagnosticPaths.lastRunDisplayPath, path.join('..', '..', '.guard', 'last-run.json'));
+    mkdirSync(rootDiagnostics);
+    writeFileSync(path.join(rootDiagnostics, 'last-run.json'), '{}\n');
+    writeFileSync(path.join(rootDiagnostics, 'history.jsonl'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(firstNested) }),
+      firstNestedBehavior,
+      'root-owned diagnostics do not make a nested-cwd run cold',
+    );
+    assert.equal(
+      commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      firstBehavior,
+      'the same root-owned diagnostics remain inert for a root run',
+    );
+    writeFileSync(path.join(rootDiagnostics, 'caller-owned.json'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(firstNested) }),
+      null,
+      'the root diagnostic exemption does not cover other files in .guard',
+    );
+    rmSync(path.join(rootDiagnostics, 'caller-owned.json'));
+    const nestedDiagnostics = path.join(firstNested, '.guard');
+    mkdirSync(nestedDiagnostics);
+    writeFileSync(path.join(nestedDiagnostics, 'last-run.json'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(firstNested) }),
+      null,
+      'diagnostic suffixes beneath a nested cwd are not broadly exempted',
+    );
+    rmSync(nestedDiagnostics, { recursive: true, force: true });
+    rmSync(rootDiagnostics, { recursive: true, force: true });
+
+    const nonRepository = path.join(root, 'not-a-repository');
+    mkdirSync(nonRepository);
+    assert.equal(
+      commandBehaviorIdentity(nonRepository, command, { env: peakEnv, behaviorEnv: environmentFor(nonRepository) }),
+      null,
+      'a failed repository top-level probe must be a cold start',
+    );
+    assert.equal(repositoryWorktreeRoot(nonRepository, { env: peakEnv }), null);
+    assert.equal(
+      commandBehaviorIdentity(path.join(root, 'missing-cwd'), command, {
+        env: peakEnv,
+        behaviorEnv: environmentFor(path.join(root, 'missing-cwd')),
+      }),
+      null,
+      'an unresolvable cwd path must be a cold start',
+    );
     assert.notEqual(
       commandBehaviorIdentity(first, command, {
         env: peakEnv,
@@ -485,6 +577,46 @@ describe('lane peak store (#180)', () => {
     );
     rmSync(untracked, { force: true });
 
+    // The wrapper's own two untracked diagnostics must not make a successful
+    // clean run permanently cold, but no broader .guard exemption exists.
+    const diagnostics = path.join(first, '.guard');
+    mkdirSync(diagnostics);
+    writeFileSync(path.join(diagnostics, 'last-run.json'), '{}\n');
+    writeFileSync(path.join(diagnostics, 'history.jsonl'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      firstBehavior,
+      'guard-owned untracked diagnostics do not invalidate otherwise clean evidence',
+    );
+    writeFileSync(path.join(diagnostics, 'caller-owned.json'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      null,
+      'other untracked guard files still fail closed',
+    );
+    rmSync(path.join(diagnostics, 'caller-owned.json'));
+
+    const originalPackage = `${JSON.stringify({ scripts: { test: 'node light.mjs' } }, null, 2)}\n`;
+    const hiddenPackage = `${JSON.stringify({ scripts: { test: 'node hidden-heavy.mjs' } }, null, 2)}\n`;
+    for (const [hide, reveal, label] of [
+      ['--assume-unchanged', '--no-assume-unchanged', 'assume-unchanged'],
+      ['--skip-worktree', '--no-skip-worktree', 'skip-worktree'],
+    ]) {
+      execFileSync(git, ['-C', first, 'update-index', hide, 'package.json'], { stdio: 'ignore' });
+      writeFileSync(path.join(first, 'package.json'), hiddenPackage);
+      assert.equal(
+        commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+        null,
+        `${label} index state cannot hide changed command behavior`,
+      );
+      execFileSync(git, ['-C', first, 'update-index', reveal, 'package.json'], { stdio: 'ignore' });
+      writeFileSync(path.join(first, 'package.json'), originalPackage);
+    }
+    assert.equal(
+      commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
+      firstBehavior,
+    );
+
     const external = path.join(root, 'external-runner');
     writeFileSync(external, '#!/bin/sh\nexit 0\n');
     chmodSync(external, 0o755);
@@ -498,6 +630,152 @@ describe('lane peak store (#180)', () => {
       behaviorEnv: environmentFor(first),
     });
     assert.notEqual(externalAfter, externalBefore, 'changed executable contents must invalidate history');
+  });
+
+  test('structural environment paths share only canonical worktree-contained targets', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'agent-guard-environment-'));
+    roots.push(root);
+    const first = path.join(root, 'first', 'app');
+    const sibling = path.join(root, 'linked-worktree');
+    const firstToolbin = path.join(root, 'first', 'toolbin');
+    const siblingToolbin = path.join(root, 'toolbin');
+    mkdirSync(first, { recursive: true });
+    mkdirSync(firstToolbin, { recursive: true });
+    mkdirSync(siblingToolbin, { recursive: true });
+
+    const git = ['/usr/bin/git', '/bin/git'].find((candidate) => {
+      try {
+        execFileSync(candidate, ['--version'], { stdio: 'ignore' });
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(git, 'a system Git binary is required to resolve worktree evidence');
+
+    execFileSync(git, ['-C', first, 'init', '--quiet'], { stdio: 'ignore' });
+    writeFileSync(path.join(first, 'package.json'), `${JSON.stringify({ scripts: { test: 'helper' } }, null, 2)}\n`);
+    writeFileSync(path.join(first, 'helper'), '#!/bin/sh\nexit 0\n');
+    chmodSync(path.join(first, 'helper'), 0o755);
+    mkdirSync(path.join(first, 'contained-bin'));
+    writeFileSync(path.join(first, 'contained-bin', 'helper'), '#!/bin/sh\nexit 0\n');
+    chmodSync(path.join(first, 'contained-bin', 'helper'), 0o755);
+    symlinkSync('../toolbin', path.join(first, 'escape-bin'));
+    execFileSync(git, ['-C', first, 'add', 'package.json', 'helper', 'contained-bin/helper', 'escape-bin'], {
+      stdio: 'ignore',
+    });
+    execFileSync(git, [
+      '-C', first,
+      '-c', 'user.name=Agent Guard Test',
+      '-c', 'user.email=guard@example.invalid',
+      'commit', '--quiet', '-m', 'fixture',
+    ], { stdio: 'ignore' });
+    execFileSync(git, ['-C', first, 'worktree', 'add', '--quiet', '--detach', sibling], { stdio: 'ignore' });
+
+    writeFileSync(path.join(firstToolbin, 'helper'), '#!/bin/sh\necho first\n');
+    chmodSync(path.join(firstToolbin, 'helper'), 0o755);
+    writeFileSync(path.join(siblingToolbin, 'helper'), '#!/bin/sh\necho sibling\n');
+    chmodSync(path.join(siblingToolbin, 'helper'), 0o755);
+
+    const peakEnv = scratchEnv();
+    const systemPath = process.env.PATH ?? '/usr/bin:/bin';
+    const command = ['npm', 'test'];
+    const environmentFor = (cwd, overrides = {}) => ({
+      ...peakEnv,
+      PWD: cwd,
+      INIT_CWD: cwd,
+      PATH: `${cwd}${path.delimiter}${systemPath}`,
+      AGENT_GUARDED: '<guard-lease>',
+      ...overrides,
+    });
+    const identityFor = (cwd, overrides = {}) => commandBehaviorIdentity(cwd, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(cwd, overrides),
+    });
+
+    const firstBehavior = identityFor(first);
+    const siblingBehavior = identityFor(sibling);
+    assert.match(firstBehavior, /^[0-9a-f]{64}$/u);
+    assert.equal(
+      siblingBehavior,
+      firstBehavior,
+      'canonical worktree-root PWD, INIT_CWD, and PATH targets share structurally',
+    );
+
+    assert.notEqual(
+      identityFor(first, { PWD: '<worktree>' }),
+      firstBehavior,
+      'a literal sentinel-looking PWD cannot impersonate the actual worktree root',
+    );
+    assert.notEqual(
+      identityFor(first, { INIT_CWD: '<worktree>' }),
+      firstBehavior,
+      'a literal sentinel-looking INIT_CWD cannot impersonate the actual worktree root',
+    );
+    assert.notEqual(
+      identityFor(first, { PATH: `<worktree>${path.delimiter}${systemPath}` }),
+      firstBehavior,
+      'a literal sentinel-looking PATH component cannot impersonate the actual worktree root',
+    );
+    assert.notEqual(
+      identityFor(first, { PWD: '' }),
+      firstBehavior,
+      'an empty PWD remains distinct from the invocation cwd',
+    );
+    assert.notEqual(
+      identityFor(first, { INIT_CWD: '' }),
+      firstBehavior,
+      'an empty INIT_CWD remains distinct from the invocation cwd',
+    );
+    assert.equal(
+      identityFor(sibling, { PWD: '', INIT_CWD: '' }),
+      identityFor(first, { PWD: '', INIT_CWD: '' }),
+      'the same exact empty PWD and INIT_CWD values still share across linked worktrees',
+    );
+    assert.equal(
+      identityFor(first, { PATH: `${path.delimiter}${systemPath}` }),
+      firstBehavior,
+      'an empty PATH component has execvp cwd semantics',
+    );
+
+    const firstAbsoluteEscape = `${first}${path.sep}..${path.sep}toolbin`;
+    const siblingAbsoluteEscape = `${sibling}${path.sep}..${path.sep}toolbin`;
+    assert.notEqual(
+      identityFor(first, { PATH: `${firstAbsoluteEscape}${path.delimiter}${systemPath}` }),
+      identityFor(sibling, { PATH: `${siblingAbsoluteEscape}${path.delimiter}${systemPath}` }),
+      'absolute worktree/../toolbin spellings retain their distinct external resolutions',
+    );
+    assert.notEqual(
+      identityFor(first, { PATH: `${path.join(first, 'escape-bin')}${path.delimiter}${systemPath}` }),
+      identityFor(sibling, { PATH: `${path.join(sibling, 'escape-bin')}${path.delimiter}${systemPath}` }),
+      'tracked symlinks that escape each worktree retain their external canonical targets',
+    );
+    assert.notEqual(
+      identityFor(first, { PATH: `..${path.sep}toolbin${path.delimiter}${systemPath}` }),
+      identityFor(sibling, { PATH: `..${path.sep}toolbin${path.delimiter}${systemPath}` }),
+      'relative external PATH entries with distinct helper bytes resolve from each invocation cwd',
+    );
+    assert.notEqual(
+      identityFor(first, { PATH: `missing-bin${path.delimiter}${systemPath}` }),
+      identityFor(sibling, { PATH: `missing-bin${path.delimiter}${systemPath}` }),
+      'unresolved relative PATH entries retain their distinct absolute resolved spellings',
+    );
+
+    const firstContained = identityFor(first, {
+      PWD: '.',
+      INIT_CWD: `contained-bin${path.sep}..`,
+      PATH: `contained-bin${path.delimiter}${systemPath}`,
+    });
+    const siblingContained = identityFor(sibling, {
+      PWD: '.',
+      INIT_CWD: `contained-bin${path.sep}..`,
+      PATH: `contained-bin${path.delimiter}${systemPath}`,
+    });
+    assert.equal(
+      siblingContained,
+      firstContained,
+      'same contained relative targets share across linked worktrees',
+    );
   });
 
   test('peaks round-trip through the protected store and keep the max of a rolling window', async () => {

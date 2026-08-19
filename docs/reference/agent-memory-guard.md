@@ -38,15 +38,21 @@ measures well under the cap no longer books the full cap against admission.
 Peak history is keyed by the checkout's canonical Git common directory, lane
 label, exact command arguments, and a versioned command-behavior identity. That
 identity requires a clean exact Git revision and binds the resolved executable
-plus the complete effective child environment; environment values are
-authenticated with the machine token and are never stored. The structural
-`PWD`, `INIT_CWD`, and `PATH` entries rooted in the checkout are represented
-relative to it so linked worktrees at the same revision can share when all
-other evidence matches; every other environment value remains exact. A staged,
-dirty, untracked, non-Git, or otherwise unprovable state is a cold start.
+plus the repository-relative working directory and complete effective child
+environment; environment values are authenticated with the machine token and
+are never stored. The structural `PWD`, `INIT_CWD`, and `PATH` entries rooted
+in the checkout are represented relative to it so linked worktrees at the same
+revision and relative working directory can share when all other evidence
+matches; every other environment value remains exact. A staged, dirty,
+untracked, non-Git, or otherwise unprovable state is a cold start.
 Unrelated clones remain isolated, and a cheap command, older revision,
 different top-level runtime, or different environment cannot lend its
 measurement to a heavier behavior under the same label.
+Assume-unchanged or skip-worktree index hints force a cold start too. Only the
+wrapper's exact untracked `.guard/last-run.json` and `.guard/history.jsonl`
+diagnostics at the Git worktree root are excluded from cleanliness; every cwd
+in that worktree writes to the same pair, while the same suffix beneath another
+directory and every other untracked path stay cold.
 
 ## Admission
 
@@ -131,9 +137,10 @@ The wrapper puts the command in its own process group, polls the whole
 descendant tree's RSS every 250 ms, and terminates the group on breach
 (`SIGTERM`, then `SIGKILL` after 2 s, or immediately past 1.25× the ceiling,
 because a fast runaway outruns a polite shutdown). Every run writes
-`.guard/last-run.json` and appends to `.guard/history.jsonl`; a run killed for
-`rss-limit` or `timeout` exits non-zero, so a test that "passes" while eating
-the machine is a failed test.
+`.guard/last-run.json` and appends to `.guard/history.jsonl` at the Git worktree
+root (or at the supplied cwd outside Git); a run killed for `rss-limit` or
+`timeout` exits non-zero, so a test that "passes" while eating the machine is a
+failed test.
 
 ## Environment
 

@@ -24,12 +24,12 @@
 //        AGENT_GUARDED=1 (set for children so nested guards pass through).
 
 import { execFile, spawn } from 'node:child_process';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
 import { clampCeiling, decideAdmission, deriveBudgetForMemory, laneReservationMb } from './lib/budget.mjs';
-import { acquireLease, commandBehaviorIdentity, heartbeatLease, leaseExists, psExecutable, readLanePeakMb, readLeases, recordLanePeak, releaseLease, repositoryIdentity, retargetLease, withAdmissionLock } from './lib/leases.mjs';
+import { acquireLease, commandBehaviorIdentity, heartbeatLease, leaseExists, psExecutable, readLanePeakMb, readLeases, recordLanePeak, releaseLease, repositoryIdentity, repositoryWorktreeRoot, retargetLease, withAdmissionLock } from './lib/leases.mjs';
 import { evaluateLanePolicy, harnessName, isAgentSession } from './lib/policy.mjs';
 import { readMemoryStatus, topConsumers } from './lib/system-memory.mjs';
 
@@ -109,6 +109,22 @@ export function resolveInvocation({ options, command, env = process.env, process
   if (!policy.allowed) return { action: 'refuse', commandLine, policy };
   if (leaseExists(env.AGENT_GUARDED, env, { processGroupId })) return { action: 'passthrough', commandLine, policy };
   return { action: 'admit', commandLine, policy };
+}
+
+export function guardDiagnosticPaths(worktree, { env = process.env } = {}) {
+  let cwd;
+  try {
+    cwd = realpathSync(worktree);
+  } catch {
+    cwd = path.resolve(worktree);
+  }
+  const guardDir = path.join(repositoryWorktreeRoot(cwd, { env }) ?? cwd, '.guard');
+  const lastRunPath = path.join(guardDir, 'last-run.json');
+  return {
+    guardDir,
+    lastRunPath,
+    lastRunDisplayPath: path.relative(cwd, lastRunPath) || lastRunPath,
+  };
 }
 
 // Aggregate RSS (KB) of the guarded tree: descendants of rootPid plus anything
@@ -255,7 +271,11 @@ async function main() {
 
   const worktree = process.cwd();
   const repoIdentity = repositoryIdentity(worktree);
-  const guardDir = path.join(worktree, '.guard');
+  // One diagnostic location per Git worktree: a run from a nested cwd must
+  // not leave untracked files that make runs from every other cwd cold. A
+  // non-Git or unresolvable cwd already has no reusable behavior identity, so
+  // it safely falls back to its own local diagnostics.
+  const { guardDir, lastRunPath, lastRunDisplayPath } = guardDiagnosticPaths(worktree, { env: process.env });
   const nodeOptions = [process.env.NODE_OPTIONS, `--max-old-space-size=${request.heapMb}`].filter(Boolean).join(' ');
   // Model the exact environment the child receives. The lease id itself is
   // intentionally represented by a stable sentinel: every guarded child gets
@@ -419,13 +439,13 @@ async function main() {
       terminationReason: state.reason ?? 'completed',
     };
     try {
-      writeFileSync(path.join(guardDir, 'last-run.json'), `${JSON.stringify(record, null, 2)}\n`);
+      writeFileSync(lastRunPath, `${JSON.stringify(record, null, 2)}\n`);
       appendFileSync(path.join(guardDir, 'history.jsonl'), `${JSON.stringify(record)}\n`);
     } catch {
       // Diagnostics are best-effort.
     }
     if (state.reason !== null) {
-      note(`run failed: ${state.reason} (diagnostics in .guard/last-run.json).`);
+      note(`run failed: ${state.reason} (diagnostics in ${lastRunDisplayPath}).`);
       process.exit(1);
     }
     // Only a completed run's peak informs future reservations: a run killed
