@@ -81,7 +81,7 @@ principles; it does not waive the lower priorities.
 | [ENG-0079](ENG-0079-per-agent-identity.md) | Agent identity is per agent — the harness is detected, the agent is pinned | Proposed |
 | [ENG-0081](ENG-0081-transcript-bound-agent-execution-identities.md) | Agent execution identities bind bot actions to provider transcripts | Proposed |
 | [ENG-0128](ENG-0128-agent-bot-runtime-ownership.md) | Agent identity runtime ownership; durable vs uninstalled classes; unmanaged publish as ai9d | Proposed |
-| [ENG-0138](ENG-0138-machine-scoped-agent-memory-budget.md) | The local memory budget is machine-scoped and derived from the machine | Proposed |
+| [ENG-0138](ENG-0138-machine-scoped-agent-memory-budget.md) | The local memory budget is machine-scoped; same-user grants are legacy-only | Proposed |
 | [ENG-0149](ENG-0149-code-scanning.md) | Code scanning conformance is verified by analysis, not by configuration | Proposed |
 | [ENG-0151](ENG-0151-model-routing.md) | Model routing is retrieved from a registry, never recalled | Proposed |
 | [ENG-0160](ENG-0160-semantic-judge-arbitrates-size-ratchets.md) | The semantic judge arbitrates size-ratchet adjustments | Accepted |

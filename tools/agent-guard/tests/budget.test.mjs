@@ -247,13 +247,22 @@ describe('admission', () => {
     assert.equal(atThreshold.reason, 'swap-pressure');
   });
 
-  test('a thrashing machine still admits lint and unit lanes', () => {
+  test('a thrashing machine still admits measured lint and unit lanes', () => {
     // A guard that refuses every command on a busy machine gets switched off,
     // and a switched-off guard protects nothing. The swap gate is aimed at the
-    // Electron-sized runs that actually freeze the box.
+    // Electron-sized runs that actually freeze the box. The exemption follows
+    // measured cost, not the caller's requested reservation.
     const thrashing = { totalMb: 8192, availableMb: 1762, swapTotalMb: 7168, swapUsedMb: 6459 };
-    assert.equal(decideAdmission({ budget, memory: thrashing, leases: [], requestMb: budget.lightRunMb }).granted, true);
-    assert.equal(decideAdmission({ budget, memory: thrashing, leases: [], requestMb: budget.lightRunMb + 1 }).reason, 'swap-pressure');
+    assert.equal(decideAdmission({ budget, memory: thrashing, leases: [], requestMb: budget.lightRunMb, lanePeakMb: budget.lightRunMb }).granted, true);
+    assert.equal(decideAdmission({ budget, memory: thrashing, leases: [], requestMb: 256, lanePeakMb: budget.lightRunMb + 1 }).reason, 'swap-pressure');
+  });
+
+  test('cold starts and caller-tightened ceilings cannot claim the swap exemption (#223)', () => {
+    const thrashing = { totalMb: 8192, availableMb: 1762, swapTotalMb: 7168, swapUsedMb: 6459 };
+    const cold = decideAdmission({ budget, memory: thrashing, leases: [], requestMb: 256 });
+    assert.equal(cold.reason, 'swap-pressure');
+    assert.equal(cold.measuredLightRun, false);
+    assert.match(cold.message, /caller-declared ceiling does not qualify/u);
   });
 
   test('the light-run carve-out never escapes the headroom floor', () => {
@@ -263,6 +272,7 @@ describe('admission', () => {
       memory: { totalMb: 8192, availableMb: 900, swapTotalMb: 7168, swapUsedMb: 6459 },
       leases: [],
       requestMb: budget.lightRunMb,
+      lanePeakMb: budget.lightRunMb,
     });
     assert.equal(decision.granted, false);
     assert.equal(decision.reason, 'insufficient-headroom');
@@ -375,8 +385,26 @@ describe('pressure-aware admission (#180)', () => {
     const heavy = decideAdmission({ budget, memory, leases: [], requestMb: budget.maxRunMb });
     assert.equal(heavy.granted, false);
     assert.equal(heavy.reason, 'memory-pressure');
-    // The light carve-out survives, as with the swap gate.
-    assert.equal(decideAdmission({ budget, memory, leases: [], requestMb: budget.lightRunMb }).granted, true);
+    // The measured-light carve-out survives, as with the swap gate.
+    assert.equal(decideAdmission({ budget, memory, leases: [], requestMb: budget.lightRunMb, lanePeakMb: budget.lightRunMb }).granted, true);
+  });
+
+  test('warning pressure refuses cold starts and caller-tightened ceilings (#223)', () => {
+    const memory = { totalMb: 24576, availableMb: 12163, swapTotalMb: 3072, swapUsedMb: 552, pressureLevel: 2 };
+    assert.equal(decideAdmission({ budget, memory, leases: [], requestMb: 256 }).reason, 'memory-pressure');
+    assert.equal(decideAdmission({ budget, memory, leases: [], requestMb: 256, lanePeakMb: budget.lightRunMb + 1 }).reason, 'memory-pressure');
+  });
+
+  test('a measured-light lane is classified by its peak, not its larger reservation (#223)', () => {
+    const incidentBudget = deriveBudget(16384);
+    const memory = { totalMb: 16384, availableMb: 8000, swapTotalMb: 3072, swapUsedMb: 552, pressureLevel: 2 };
+    const lanePeakMb = 996;
+    const requestMb = laneReservationMb(incidentBudget.maxRunMb, lanePeakMb);
+    assert.equal(incidentBudget.lightRunMb, 1024);
+    assert.ok(requestMb > incidentBudget.lightRunMb, 'the planning margin crosses the light-run threshold');
+    const decision = decideAdmission({ budget: incidentBudget, memory, leases: [], requestMb, lanePeakMb });
+    assert.equal(decision.granted, true);
+    assert.equal(decision.measuredLightRun, true);
   });
 
   test('normal pressure retires static swap history as refusal evidence', () => {

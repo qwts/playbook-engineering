@@ -2,7 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { GOVERNED_HARNESS_FILES } from '../lib/baseline-files.mjs';
+import {
+  GOVERNED_FORMAT_EXEMPT_FILES,
+  GOVERNED_HARNESS_FILES,
+} from '../lib/baseline-files.mjs';
 import {
   CODEX_REVIEW_BOT,
   CODEX_SYNC_BOT,
@@ -15,6 +18,7 @@ import {
   diffManagedFiles,
   gitBlobSha,
   materializeManagedFiles,
+  MANAGED_TEXT_BLOCKS,
   mergeManagedFile,
   managedCodexPaths,
   preferredMergeFlag,
@@ -94,6 +98,90 @@ test('managed diff detects missing, changed, and mode-only drift', () => {
     diffManagedFiles(files, tree, ['a', 'b', 'c', 'd']).map((file) => file.path),
     ['b', 'c', 'd'],
   );
+});
+
+test('the governed formatter block covers the exact byte-managed inventory', () => {
+  const source = readFileSync('.prettierignore', 'utf8');
+  const markers = MANAGED_TEXT_BLOCKS.get('.prettierignore');
+  const begin = source.indexOf(markers.begin);
+  const end = source.indexOf(markers.end);
+  assert.ok(begin >= 0 && end > begin);
+  const lines = new Set(source.slice(begin, end).split(/\r?\n/u));
+
+  assert.deepEqual(
+    GOVERNED_FORMAT_EXEMPT_FILES.filter((path) => !lines.has(path)),
+    [],
+    'every governed byte path must be exempt from downstream formatters',
+  );
+  assert.deepEqual(
+    [...lines].filter((line) => GOVERNED_FORMAT_EXEMPT_FILES.includes(line) === false && /^(?:\.|governance\/|tools\/)/u.test(line)),
+    [],
+    'the format block must not retain paths outside the governed inventory',
+  );
+});
+
+test('managed formatter composition preserves repository rules and updates only its block', async () => {
+  const pathname = '.prettierignore';
+  const source = canonical(pathname, readFileSync(pathname, 'utf8'));
+  const stale = [
+    'dist/',
+    'repo-owned-generated/',
+    '',
+    '# governed:agent-harness-format:start',
+    'stale-managed-path',
+    '# governed:agent-harness-format:end',
+    '',
+    'coverage/',
+  ].join('\n');
+  const targetContent = Buffer.from(stale);
+  const target = new Map([[pathname, {
+    path: pathname,
+    type: 'blob',
+    sha: gitBlobSha(targetContent),
+    mode: '100644',
+  }]]);
+
+  const files = await materializeManagedFiles(
+    new Map([[pathname, source]]),
+    target,
+    [pathname],
+    async () => targetContent,
+  );
+  const first = files.get(pathname);
+  const second = mergeManagedFile(source, first.content);
+  const merged = first.content.toString('utf8');
+
+  assert.match(merged, /^dist\/\nrepo-owned-generated\//u);
+  assert.match(merged, /\ncoverage\/$/u);
+  assert.doesNotMatch(merged, /stale-managed-path/u);
+  assert.equal(first.content.toString('utf8'), second.content.toString('utf8'));
+});
+
+test('managed formatter composition appends once and fails closed on marker corruption', () => {
+  const pathname = '.prettierignore';
+  const source = canonical(pathname, readFileSync(pathname, 'utf8'));
+  const appended = mergeManagedFile(source, Buffer.from('dist/\n'));
+
+  assert.match(appended.content.toString('utf8'), /^dist\/\n\n# governed:agent-harness-format:start/um);
+  assert.throws(
+    () => mergeManagedFile(source, Buffer.from([
+      '# governed:agent-harness-format:start',
+      'stale',
+      '# governed:agent-harness-format:start',
+      '# governed:agent-harness-format:end',
+    ].join('\n'))),
+    /must contain exactly one ordered/u,
+  );
+});
+
+test('a missing formatter file receives only the governed block', () => {
+  const pathname = '.prettierignore';
+  const block = readFileSync(pathname, 'utf8');
+  const source = canonical(pathname, `playbook-only-ignore/\n\n${block}`);
+  const merged = mergeManagedFile(source, null).content.toString('utf8');
+
+  assert.match(merged, /^# governed:agent-harness-format:start/u);
+  assert.doesNotMatch(merged, /playbook-only-ignore/u);
 });
 
 test('managed JSON overlays preserve repository-owned agent harness configuration', async () => {
@@ -243,6 +331,87 @@ test('manifest-declared composition preserves generated hook adapters exactly on
   }
 });
 
+test('Image Trail composes independent SessionStart owners through canonical and target updates', () => {
+  const fixture = JSON.parse(readFileSync(
+    new URL('./fixtures/image-trail-hook-composition.json', import.meta.url),
+    'utf8',
+  ));
+  const manifest = JSON.parse(readFileSync(
+    new URL('../../../governance/repos.json', import.meta.url),
+    'utf8',
+  ));
+  const entry = manifest.repos.find((repo) => repo.name === fixture.repository);
+  const markers = entry?.codexSync?.preserveJsonArrayEntries?.[fixture.path];
+
+  assert.deepEqual(markers, [fixture.marker]);
+
+  const source = (identity, schema) => canonical(fixture.path, `${JSON.stringify({
+    $schema: schema,
+    hooks: { SessionStart: [identity] },
+  }, null, 2)}\n`);
+  const options = { preserveArrayEntriesContaining: markers };
+  const staleIdentity = {
+    hooks: [{ type: 'command', command: 'stale centrally owned session-start hook' }],
+  };
+  const initialTarget = Buffer.from(`${JSON.stringify({
+    $schema: 'stale-schema',
+    permissions: { defaultMode: 'acceptEdits' },
+    hooks: {
+      SessionStart: [
+        staleIdentity,
+        fixture.targetProcessGuard.initial,
+        fixture.targetProcessGuard.initial,
+      ],
+    },
+  }, null, 2)}\n`);
+
+  const first = mergeManagedFile(
+    source(fixture.canonicalIdentity.initial, 'initial-schema'),
+    initialTarget,
+    options,
+  );
+  const firstValue = JSON.parse(first.content.toString('utf8'));
+
+  assert.deepEqual(firstValue.hooks.SessionStart, [
+    fixture.canonicalIdentity.initial,
+    fixture.targetProcessGuard.initial,
+  ]);
+  assert.deepEqual(firstValue.permissions, { defaultMode: 'acceptEdits' });
+
+  const updatedTargetValue = structuredClone(firstValue);
+  updatedTargetValue.permissions.defaultMode = 'plan';
+  updatedTargetValue.hooks.SessionStart = [
+    fixture.canonicalIdentity.initial,
+    fixture.targetProcessGuard.updated,
+    fixture.targetProcessGuard.updated,
+  ];
+  const updatedTarget = Buffer.from(`${JSON.stringify(updatedTargetValue, null, 2)}\n`);
+  const updatedSource = source(fixture.canonicalIdentity.updated, 'updated-schema');
+  const second = mergeManagedFile(updatedSource, updatedTarget, options);
+  const secondValue = JSON.parse(second.content.toString('utf8'));
+  const third = mergeManagedFile(updatedSource, second.content, options);
+
+  assert.deepEqual(secondValue.hooks.SessionStart, [
+    fixture.canonicalIdentity.updated,
+    fixture.targetProcessGuard.updated,
+  ]);
+  assert.equal(secondValue.$schema, 'updated-schema');
+  assert.deepEqual(secondValue.permissions, { defaultMode: 'plan' });
+  assert.equal(
+    secondValue.hooks.SessionStart.filter(
+      (hook) => JSON.stringify(hook).includes('agent-bot agent-hook'),
+    ).length,
+    1,
+  );
+  assert.equal(
+    secondValue.hooks.SessionStart.filter(
+      (hook) => JSON.stringify(hook).includes(fixture.marker),
+    ).length,
+    1,
+  );
+  assert.equal(second.content.toString('utf8'), third.content.toString('utf8'));
+});
+
 test('Claude composition keeps repo configuration while replacing governed hooks', () => {
   const path = '.claude/settings.json';
   const marker = 'agent-bot agent-hook';
@@ -327,6 +496,34 @@ test('manifest exclusions remove files from the managed set', () => {
   assert.equal(paths.length, GOVERNED_HARNESS_FILES.length - 1);
   assert.ok(!paths.includes(excluded));
   assert.deepEqual(managedCodexPaths({ codexSync: { enabled: false } }), []);
+});
+
+test('manifest exclusions remove repository-owned files from the formatter block', async () => {
+  const pathname = '.prettierignore';
+  const excluded = '.codex/config.toml';
+  const formatExemptFiles = managedCodexPaths({ codexSync: { exclude: [excluded] } });
+  const source = canonical(pathname, readFileSync(pathname, 'utf8'));
+  const targetContent = Buffer.from('dist/\n');
+  const target = new Map([[pathname, {
+    path: pathname,
+    type: 'blob',
+    sha: gitBlobSha(targetContent),
+    mode: '100644',
+  }]]);
+
+  const files = await materializeManagedFiles(
+    new Map([[pathname, source]]),
+    target,
+    [pathname],
+    async () => targetContent,
+    {},
+    formatExemptFiles,
+  );
+  const merged = files.get(pathname).content.toString('utf8');
+
+  assert.match(merged, /^dist\//u, 'repository-owned rules survive composition');
+  assert.doesNotMatch(merged, /^\.codex\/config\.toml$/mu);
+  assert.match(merged, /^\.codex\/environments\/environment\.toml$/mu);
 });
 
 test('an open stable-branch pull request is reused without resetting its branch', () => {

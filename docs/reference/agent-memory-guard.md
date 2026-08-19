@@ -35,6 +35,18 @@ sanctioned local lane needs more. The cap is enforced on the running process
 tree, and what admission *reserves* is smaller still when the lane has a
 recent measured peak: peak plus a conservative margin, so a lane that
 measures well under the cap no longer books the full cap against admission.
+Peak history is keyed by the checkout's canonical Git common directory, lane
+label, exact command arguments, and a versioned command-behavior identity. That
+identity requires a clean exact Git revision and binds the resolved executable
+plus the complete effective child environment; environment values are
+authenticated with the machine token and are never stored. The structural
+`PWD`, `INIT_CWD`, and `PATH` entries rooted in the checkout are represented
+relative to it so linked worktrees at the same revision can share when all
+other evidence matches; every other environment value remains exact. A staged,
+dirty, untracked, non-Git, or otherwise unprovable state is a cold start.
+Unrelated clones remain isolated, and a cheap command, older revision,
+different top-level runtime, or different environment cannot lend its
+measurement to a heavier behavior under the same label.
 
 ## Admission
 
@@ -45,8 +57,10 @@ A run is granted only if all three hold:
    run outright, and normal (green) pressure retires committed-but-idle swap as
    evidence — macOS keeps swap allocated after pressure subsides. Without
    pressure evidence, refused when swap is at least 50% committed. Either gate
-   spares runs no larger than the light-run size. A machine already trading
-   pages for progress is one more Electron worker away from a freeze.
+   spares only lanes whose recent measured peak is no larger than the light-run
+   size. An unmeasured lane is not light, and lowering a caller-declared ceiling
+   cannot claim the exemption. A machine already trading pages for progress is
+   one more Electron worker away from a freeze.
 2. **Headroom.** `available − (what running leases have not yet materialized) −
    this request` must stay above the availability floor. Availability comes from
    `vm_stat` and `sysctl vm.swapusage` on macOS, `/proc/meminfo` on Linux.
@@ -82,16 +96,18 @@ authoritative lane. Its workflow invokes the underlying CI entrypoint directly,
 so nothing is lost but latency and no process-local signal has to authorize a
 wrapper bypass.
 
-The owner is never refused by policy — their runs are clamped and
-headroom-checked like anything else, and `AGENT_GUARD_FORCE=1` overrides a
-refusal in their own terminal. The hook blocks agents from using it: a run
-killed for real memory pressure is a real result, and reporting it is the
-expected behaviour.
+Every caller that enters the local wrapper fails closed as an agent because an
+unmarked process and a same-user file cannot authenticate owner intent. Heavy
+lanes are therefore not delegable back to an agent session and legacy grant
+files are cleanup artifacts only.
 
-Heavy lanes are not delegable back to an agent session. A local grant file
-would be writable by the same OS user as the agent and therefore cannot
-authenticate human intent. If a local run is required, the owner runs it
-directly from a non-agent terminal; otherwise the agent uses CI.
+If a local heavy run is genuinely required, the agent reports the refusal and
+the owner decides whether to invoke the underlying lane directly from a
+non-agent terminal. That is an explicit owner exception **outside** this
+wrapper: it does not acquire a lease or receive admission, RSS-ceiling, or
+timeout enforcement. CI remains the protected and authoritative heavy lane.
+`AGENT_GUARD_FORCE=1` can override an admission refusal only after a command has
+passed lane policy; it does not authorize a heavy agent run.
 
 ## Commands
 
@@ -127,7 +143,7 @@ the machine is a failed test.
 | `AGENT_GUARD_HEAP_MB` | Per-process V8 heap; defaults to half the tree ceiling |
 | `AGENT_GUARD_TIMEOUT_S` | Wall-clock timeout, `0` disables |
 | `AGENT_GUARD_WAIT_S` | How long to queue for headroom; humans default to 180, agents to 0 |
-| `AGENT_GUARD_FORCE` | Human escape hatch; blocked for agents |
+| `AGENT_GUARD_FORCE` | Overrides admission after lane policy; never authorizes a heavy agent run |
 | `AGENT_GUARD_STATE_DIR` | Lease directory. **Tests only** — pointing a session elsewhere gives it a private budget nothing can see, which is the per-worktree bug again |
 | `AGENT_GUARDED` | Set by the guard for its own children, carrying the id of the lease it holds, so nested guarded scripts pass through. Honoured only when it names a live lease bound to the caller's own process group — a copied or hand-supplied value from an unrelated process is ignored and the run is guarded normally. Blocked for agents |
 
