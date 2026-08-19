@@ -42,14 +42,16 @@ environment, and raw plus structural `PWD`, `INIT_CWD`, and `PATH` evidence.
 Linked worktrees share the protected namespace, but child-visible path
 differences keep peaks separate. Direct Node and supported sh-family files, and
 Python `-S` file forms, bind canonical entry-file metadata and SHA-256; stdin,
-inline, module, startup-path, unsupported-shell, and listed indirect-wrapper
-forms stay cold. Runtime recognition uses canonical names; a copied or renamed
-runtime stays cold for no-arg, stdin, option, or filesystem-target argv. Other
-unrecognized executables use exact native argv evidence. Package-manager and
-entry-file evidence does not claim a hermetic network or transitive-input
-closure. Dirty, staged, untracked, non-Git, assume-unchanged, skip-worktree, or
-otherwise unprovable states stay cold. Only the two root-owned `.guard`
-diagnostics are ignored.
+inline, module, startup-path, unsupported-shell, indirect-wrapper,
+package-manager, and named transitive tool dispatchers stay cold. Runtime
+recognition uses canonical names; a copied or renamed runtime stays cold for
+no-arg, stdin, option, or filesystem-target argv. Other unrecognized
+executables use exact native argv evidence, without claiming hermetic network
+or transitive-input closure. Dirty, staged, untracked, non-Git,
+assume-unchanged, skip-worktree, or otherwise unprovable states stay cold. Only
+the two root-owned `.guard` diagnostics are ignored. Thus #223 Finding 1 stays
+open pending immutable, path-invariant package provenance; this policy fixes
+Finding 2 without letting declared ceilings buy the light-run exemption.
 
 ## Admission
 
@@ -131,9 +133,10 @@ node tools/agent-guard/run-guarded.mjs --label test:dom -- npm run test:dom:inne
 ```
 
 The wrapper directly spawns exact argv in its own process group and starts an
-asynchronous RSS sample before the 250 ms polling interval. Only a positive
-sample of the live target tree becomes peak history; a missed fast target stays
-cold. Breaches get `SIGTERM`, then `SIGKILL` after 2 s or immediately past
+asynchronous RSS sample before the 250 ms polling interval. Peak history needs
+positive live-target samples spanning at least one full interval; a missed fast
+target or startup-only transient stays cold. Breaches get `SIGTERM`, then
+`SIGKILL` after 2 s or immediately past
 1.25× the ceiling. Diagnostics use `.guard/last-run.json` and
 `.guard/history.jsonl` at the worktree root (or cwd outside Git); `rss-limit`
 and `timeout` exit non-zero.
