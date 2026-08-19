@@ -1106,11 +1106,7 @@ function commitOptionSummary(operation) {
     }
     if (argument === '--gpg-sign' || argument.startsWith('--gpg-sign=')) continue;
     if (argument === '--no-untracked-files') continue;
-    if (argument === '--untracked-files') {
-      const operand = operation.words[i + 1];
-      if (operand && !operand.dynamic && untrackedModes.has(operand.value)) i += 1;
-      continue;
-    }
+    if (argument === '--untracked-files') continue;
     if (argument.startsWith('--untracked-files=')) {
       if (!untrackedModes.has(argument.slice('--untracked-files='.length))) return null;
       continue;
@@ -1144,10 +1140,6 @@ function commitOptionSummary(operation) {
       if (short === 'u') {
         const attached = argument.slice(offset + 1);
         if (attached && !untrackedModes.has(attached)) return null;
-        if (!attached) {
-          const operand = operation.words[i + 1];
-          if (operand && !operand.dynamic && untrackedModes.has(operand.value)) i += 1;
-        }
         break;
       }
       if (short === 'S') break;

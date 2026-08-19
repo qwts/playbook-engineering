@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -492,15 +498,6 @@ test('documented commit untracked-file options preserve determinable identity', 
       }
     }
     for (const adapter of managedAdapters) {
-      for (const command of [
-        'git commit --allow-empty -u no -m x',
-        'git commit --allow-empty --untracked-files normal -m x',
-      ]) {
-        adapterAllowed(adapter, command, 'human', {
-          cwd: unmanaged,
-          env: withoutGitIdentity,
-        });
-      }
       for (const malformed of [
         'git commit --allow-empty -ubogus -m x',
         'git commit --allow-empty --untracked-files=bogus -m x',
@@ -514,6 +511,55 @@ test('documented commit untracked-file options preserve determinable identity', 
     }
   } finally {
     rmSync(unmanaged, { recursive: true, force: true });
+  }
+});
+
+test('tokens after bare untracked-file flags remain Git pathspecs', () => {
+  const unmanaged = identityRepository('ai9d', 'ai9d@example.test');
+  const human = identityRepository('Human User', 'human@example.test');
+  const cases = [
+    { args: ['-u', 'no'], pathspec: 'no', shell: '-u no' },
+    {
+      args: ['--untracked-files', 'normal'],
+      pathspec: 'normal',
+      shell: '--untracked-files normal',
+    },
+  ];
+  try {
+    for (const name of ['no', 'normal', 'other']) {
+      writeFileSync(join(unmanaged, name), `${name}\n`);
+    }
+    runGit(unmanaged, ['add', 'no', 'normal', 'other']);
+
+    for (const option of cases) {
+      const real = runGit(unmanaged, [
+        'commit', '--dry-run', '--short', ...option.args,
+      ], withoutGitIdentity);
+      assert.match(
+        real.stdout,
+        new RegExp(`^A  ${option.pathspec}$`, 'mu'),
+        `real Git must treat ${option.shell} as a pathspec-bearing spelling`,
+      );
+      assert.doesNotMatch(
+        real.stdout,
+        /^A  other$/mu,
+        `real Git must not consume ${option.pathspec} as an optional mode operand`,
+      );
+      for (const adapter of managedAdapters) {
+        const command = `git commit --allow-empty ${option.shell} -m x`;
+        adapterAllowed(adapter, command, 'human', {
+          cwd: unmanaged,
+          env: withoutGitIdentity,
+        });
+        assert.equal(adapterDenied(adapter, command, 'human', {
+          cwd: human,
+          env: withoutGitIdentity,
+        }), true, `${adapter.path} must preserve identity checks for ${option.shell}`);
+      }
+    }
+  } finally {
+    rmSync(unmanaged, { recursive: true, force: true });
+    rmSync(human, { recursive: true, force: true });
   }
 });
 
