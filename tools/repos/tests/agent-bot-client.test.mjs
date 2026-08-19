@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,29 +40,34 @@ function managedPreCommand(path) {
   return matches[0];
 }
 
-function runUninstalledAdapter(adapter, command, identity = 'human') {
+function runUninstalledAdapter(adapter, command, identity = 'human', options = {}) {
   const author = identity === 'unmanaged' ? 'ai9d' : 'Human User';
   const login = identity === 'unmanaged' ? 'ai9d' : 'qwts';
+  const runtimeEnv = {
+    ...process.env,
+    AGENT_BOT_HOOK_BIN: join(ROOT, '.missing-agent-hook'),
+    AGENT_BOT_UNMANAGED_AUTHORS: 'ai9d',
+    GH_USER: login,
+    GIT_AUTHOR_EMAIL: `${login}@example.test`,
+    GIT_AUTHOR_NAME: author,
+    GIT_COMMITTER_EMAIL: `${login}@example.test`,
+    GIT_COMMITTER_NAME: author,
+    ...(options.env || {}),
+  };
+  for (const [name, value] of Object.entries(options.env || {})) {
+    if (value === null) delete runtimeEnv[name];
+  }
   return spawnSync('sh', ['-c', managedPreCommand(adapter.path)], {
-    cwd: ROOT,
+    cwd: options.cwd || ROOT,
     encoding: 'utf8',
-    env: {
-      ...process.env,
-      AGENT_BOT_HOOK_BIN: join(ROOT, '.missing-agent-hook'),
-      AGENT_BOT_UNMANAGED_AUTHORS: 'ai9d',
-      GH_USER: login,
-      GIT_AUTHOR_EMAIL: `${login}@example.test`,
-      GIT_AUTHOR_NAME: author,
-      GIT_COMMITTER_EMAIL: `${login}@example.test`,
-      GIT_COMMITTER_NAME: author,
-    },
+    env: runtimeEnv,
     input: JSON.stringify({ command }),
     timeout: 5000,
   });
 }
 
-function adapterDenied(adapter, command, identity = 'human') {
-  const run = runUninstalledAdapter(adapter, command, identity);
+function adapterDenied(adapter, command, identity = 'human', options = {}) {
+  const run = runUninstalledAdapter(adapter, command, identity, options);
   assert.equal(run.status, 0, `${adapter.path} failed for ${JSON.stringify(command)}: ${run.stderr}`);
   const payload = JSON.parse(run.stdout);
   return adapter.dialect === 'cursor'
@@ -69,11 +75,31 @@ function adapterDenied(adapter, command, identity = 'human') {
     : payload.hookSpecificOutput?.permissionDecision === 'deny';
 }
 
-function adapterAllowed(adapter, command, identity = 'human') {
-  const run = runUninstalledAdapter(adapter, command, identity);
+function adapterAllowed(adapter, command, identity = 'human', options = {}) {
+  const run = runUninstalledAdapter(adapter, command, identity, options);
   assert.equal(run.status, 0, `${adapter.path} failed for ${JSON.stringify(command)}: ${run.stderr}`);
   if (adapter.dialect === 'cursor') assert.deepEqual(JSON.parse(run.stdout), {});
   else assert.equal(run.stdout, '');
+}
+
+const withoutGitIdentity = {
+  GIT_AUTHOR_EMAIL: null,
+  GIT_AUTHOR_NAME: null,
+  GIT_COMMITTER_EMAIL: null,
+  GIT_COMMITTER_NAME: null,
+};
+
+function identityRepository(name, email) {
+  const cwd = mkdtempSync(join(tmpdir(), 'uninstalled-identity-'));
+  for (const args of [
+    ['init', '-q'],
+    ['config', 'user.name', name],
+    ['config', 'user.email', email],
+  ]) {
+    const run = spawnSync('git', args, { cwd, encoding: 'utf8' });
+    assert.equal(run.status, 0, `git ${args.join(' ')} failed: ${run.stderr}`);
+  }
+  return cwd;
 }
 
 const grant = (token = 'secret-token') => JSON.stringify({
@@ -284,5 +310,330 @@ test('the named unmanaged principal can still publish through every adapter', ()
   ];
   for (const adapter of managedAdapters) {
     for (const command of publish) adapterAllowed(adapter, command, 'unmanaged');
+  }
+});
+
+test('repository and command-scoped Git config resolve with Git precedence', () => {
+  const unmanaged = identityRepository('ai9d', 'ai9d@example.test');
+  const human = identityRepository('Human User', 'human@example.test');
+  try {
+    for (const adapter of managedAdapters) {
+      adapterAllowed(adapter, 'git commit -m x', 'human', {
+        cwd: unmanaged,
+        env: withoutGitIdentity,
+      });
+      assert.equal(adapterDenied(adapter, 'git commit -m x', 'human', {
+        cwd: human,
+        env: withoutGitIdentity,
+      }), true);
+      adapterAllowed(adapter, `git -C ${unmanaged} commit -m x`, 'human', {
+        cwd: human,
+        env: withoutGitIdentity,
+      });
+      assert.equal(adapterDenied(adapter, `git -C ${human} commit -m x`, 'human', {
+        cwd: unmanaged,
+        env: withoutGitIdentity,
+      }), true, `${adapter.path} must resolve identity after Git -C`);
+      adapterAllowed(adapter, `env -C ${unmanaged} git commit -m x`, 'human', {
+        cwd: human,
+        env: withoutGitIdentity,
+      });
+      assert.equal(adapterDenied(adapter, `env --chdir=${human} git commit -m x`, 'human', {
+        cwd: unmanaged,
+        env: withoutGitIdentity,
+      }), true, `${adapter.path} must resolve identity after env --chdir`);
+      assert.equal(adapterDenied(
+        adapter,
+        'git -c user.name=Someone -c user.email=else@example.test commit --allow-empty -m x',
+        'human',
+        { cwd: unmanaged, env: withoutGitIdentity },
+      ), true, `${adapter.path} must honor the #232 reproduction overrides`);
+      adapterAllowed(
+        adapter,
+        'git -c user.name=ai9d -c user.email=ai9d@example.test commit -m x',
+        'human',
+        { cwd: human, env: withoutGitIdentity },
+      );
+      adapterAllowed(
+        adapter,
+        'git -c user.name=Someone -c user.email=else@example.test -c user.name=ai9d -c user.email=ai9d@example.test commit -m x',
+        'human',
+        { cwd: human, env: withoutGitIdentity },
+      );
+      assert.equal(adapterDenied(
+        adapter,
+        'git -c user.name=ai9d -c user.email=ai9d@example.test -c user.name=Someone -c user.email=else@example.test commit -m x',
+        'human',
+        { cwd: unmanaged, env: withoutGitIdentity },
+      ), true);
+      adapterAllowed(
+        adapter,
+        'git -c user.name ai9d -c user.email ai9d@example.test commit -m x',
+        'human',
+        { cwd: human, env: withoutGitIdentity },
+      );
+      adapterAllowed(
+        adapter,
+        'git -c user.name Someone -c user.email else@example.test -c user.name ai9d -c user.email ai9d@example.test commit -m x',
+        'human',
+        { cwd: human, env: withoutGitIdentity },
+      );
+      assert.equal(adapterDenied(
+        adapter,
+        'git -c user.name ai9d -c user.email ai9d@example.test -c user.name Someone -c user.email else@example.test commit -m x',
+        'human',
+        { cwd: unmanaged, env: withoutGitIdentity },
+      ), true, `${adapter.path} must preserve final-value precedence for split -c`);
+      adapterAllowed(
+        adapter,
+        'git -c user.name=Someone -c user.email else@example.test -c user.name ai9d -c user.email=ai9d@example.test commit -m x',
+        'human',
+        { cwd: human, env: withoutGitIdentity },
+      );
+      assert.equal(adapterDenied(adapter, 'git -c commit -m x', 'human', {
+        cwd: unmanaged,
+        env: withoutGitIdentity,
+      }), true, `${adapter.path} must fail closed when -c has no configuration operand`);
+      for (const malformed of [
+        'git -c user.name',
+        'git -c user.name ai9d',
+        'git -c user.name commit -m x',
+      ]) {
+        assert.equal(adapterDenied(adapter, malformed, 'human', {
+          cwd: unmanaged,
+          env: withoutGitIdentity,
+        }), true, `${adapter.path} must fail closed on malformed split config ${malformed}`);
+      }
+    }
+  } finally {
+    rmSync(unmanaged, { recursive: true, force: true });
+    rmSync(human, { recursive: true, force: true });
+  }
+});
+
+test('--config-env and command environments feed the inspected Git process', () => {
+  const unmanaged = identityRepository('ai9d', 'ai9d@example.test');
+  const human = identityRepository('Human User', 'human@example.test');
+  const unmanagedConfigEnv = {
+    ...withoutGitIdentity,
+    CONFIG_EMAIL: 'ai9d@example.test',
+    CONFIG_NAME: 'ai9d',
+  };
+  try {
+    for (const adapter of managedAdapters) {
+      adapterAllowed(
+        adapter,
+        'git --config-env=user.name=CONFIG_NAME --config-env=user.email=CONFIG_EMAIL commit -m x',
+        'human',
+        { cwd: human, env: unmanagedConfigEnv },
+      );
+      adapterAllowed(
+        adapter,
+        'git --config-env user.name=CONFIG_NAME --config-env user.email=CONFIG_EMAIL commit -m x',
+        'human',
+        { cwd: human, env: unmanagedConfigEnv },
+      );
+      assert.equal(adapterDenied(
+        adapter,
+        'git --config-env=user.name=MISSING_NAME --config-env=user.email=MISSING_EMAIL commit -m x',
+        'human',
+        { cwd: unmanaged, env: withoutGitIdentity },
+      ), true, `${adapter.path} must deny missing --config-env values`);
+      assert.equal(adapterDenied(
+        adapter,
+        'git --config-env=user.name commit -m x',
+        'human',
+        { cwd: unmanaged, env: withoutGitIdentity },
+      ), true, `${adapter.path} must deny malformed --config-env`);
+      adapterAllowed(
+        adapter,
+        'GIT_AUTHOR_NAME=ai9d GIT_AUTHOR_EMAIL=ai9d@example.test GIT_COMMITTER_NAME=ai9d GIT_COMMITTER_EMAIL=ai9d@example.test git commit -m x',
+        'human',
+        { cwd: human },
+      );
+      adapterAllowed(
+        adapter,
+        'env -i GIT_AUTHOR_NAME=ai9d GIT_AUTHOR_EMAIL=ai9d@example.test GIT_COMMITTER_NAME=ai9d GIT_COMMITTER_EMAIL=ai9d@example.test git commit -m x',
+        'human',
+        { cwd: human },
+      );
+      assert.equal(adapterDenied(adapter, 'git commit -m x', 'human', {
+        cwd: unmanaged,
+        env: {
+          GIT_AUTHOR_EMAIL: 'human@example.test',
+          GIT_AUTHOR_NAME: 'Human User',
+          GIT_COMMITTER_EMAIL: 'ai9d@example.test',
+          GIT_COMMITTER_NAME: 'ai9d',
+        },
+      }), true, `${adapter.path} must require the effective author and committer`);
+      assert.equal(adapterDenied(adapter, 'git commit -m x', 'human', {
+        cwd: unmanaged,
+        env: {
+          GIT_AUTHOR_EMAIL: 'ai9d@example.test',
+          GIT_AUTHOR_NAME: 'ai9d',
+          GIT_COMMITTER_EMAIL: 'human@example.test',
+          GIT_COMMITTER_NAME: 'Human User',
+        },
+      }), true, `${adapter.path} must reject a non-allowlisted committer`);
+      assert.equal(adapterDenied(adapter, 'git commit -m x', 'human', {
+        cwd: unmanaged,
+        env: {
+          ...withoutGitIdentity,
+          GIT_AUTHOR_NAME: 'Human User',
+        },
+      }), true, `${adapter.path} must not ignore a name-only author override`);
+      assert.equal(adapterDenied(adapter, 'git commit -m x', 'human', {
+        cwd: unmanaged,
+        env: {
+          ...withoutGitIdentity,
+          GIT_COMMITTER_EMAIL: 'human@example.test',
+        },
+      }), true, `${adapter.path} must not ignore an email-only committer override`);
+      adapterAllowed(
+        adapter,
+        'git -c user.name=Someone -c user.email=else@example.test commit -m x',
+        'human',
+        {
+          cwd: human,
+          env: {
+            GIT_AUTHOR_EMAIL: 'ai9d@example.test',
+            GIT_AUTHOR_NAME: 'ai9d',
+            GIT_COMMITTER_EMAIL: 'ai9d@example.test',
+            GIT_COMMITTER_NAME: 'ai9d',
+          },
+        },
+      );
+      assert.equal(adapterDenied(
+        adapter,
+        'env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL git commit -m x',
+        'unmanaged',
+        { cwd: human },
+      ), true, `${adapter.path} must apply env unsets before resolving Git identity`);
+    }
+  } finally {
+    rmSync(unmanaged, { recursive: true, force: true });
+    rmSync(human, { recursive: true, force: true });
+  }
+});
+
+test('--author overrides only the author and malformed identity options fail closed', () => {
+  const unmanaged = identityRepository('ai9d', 'ai9d@example.test');
+  const humanAuthor = {
+    GIT_AUTHOR_EMAIL: 'human@example.test',
+    GIT_AUTHOR_NAME: 'Human User',
+    GIT_COMMITTER_EMAIL: 'ai9d@example.test',
+    GIT_COMMITTER_NAME: 'ai9d',
+  };
+  try {
+    for (const adapter of managedAdapters) {
+      assert.equal(adapterDenied(
+        adapter,
+        "git commit --author='Human User <human@example.test>' -m x",
+        'human',
+        { cwd: unmanaged, env: withoutGitIdentity },
+      ), true);
+      adapterAllowed(
+        adapter,
+        "git commit --author='ai9d <ai9d@example.test>' -m x",
+        'unmanaged',
+        { cwd: unmanaged },
+      );
+      adapterAllowed(
+        adapter,
+        "git commit --author='Human User <human@example.test>' --author='ai9d <ai9d@example.test>' -m x",
+        'unmanaged',
+        { cwd: unmanaged },
+      );
+      assert.equal(adapterDenied(
+        adapter,
+        "git commit --author='ai9d <ai9d@example.test>' --author='Human User <human@example.test>' -m x",
+        'unmanaged',
+        { cwd: unmanaged },
+      ), true, `${adapter.path} must use the final --author like Git`);
+      assert.equal(adapterDenied(
+        adapter,
+        "git commit --author='ai9d <human@example.test>' -m x",
+        'unmanaged',
+        { cwd: unmanaged },
+      ), true, `${adapter.path} must validate the full explicit author identity`);
+      for (const decoy of [
+        "git commit -m '--author=ai9d <ai9d@example.test>'",
+        "git commit --message '--author=ai9d <ai9d@example.test>'",
+        "git commit '--message=--author=ai9d <ai9d@example.test>'",
+        "git commit '-m--author=ai9d <ai9d@example.test>'",
+        "git commit -- '--author=ai9d <ai9d@example.test>'",
+      ]) {
+        assert.equal(adapterDenied(adapter, decoy, 'human', {
+          cwd: unmanaged,
+          env: humanAuthor,
+        }), true, `${adapter.path} must not read an author option from ${decoy}`);
+      }
+      for (const decoy of [
+        "git commit -m '--author=Human User <human@example.test>'",
+        "git commit -- '--author=Human User <human@example.test>'",
+      ]) {
+        adapterAllowed(adapter, decoy, 'unmanaged', { cwd: unmanaged });
+      }
+      for (const malformed of [
+        'git commit --author -m x',
+        'git commit --author= -m x',
+        'git commit --author=ai9d -m x',
+        'git commit --amend -m x',
+        'git commit -C deadbeef -m x',
+      ]) {
+        assert.equal(adapterDenied(adapter, malformed, 'unmanaged', {
+          cwd: unmanaged,
+        }), true, `${adapter.path} must deny unresolved identity in ${malformed}`);
+      }
+      adapterAllowed(adapter, 'git commit --amend --reset-author -m x', 'unmanaged', {
+        cwd: unmanaged,
+      });
+    }
+  } finally {
+    rmSync(unmanaged, { recursive: true, force: true });
+  }
+});
+
+test('every protected Git operation checks a determinable author and committer', () => {
+  const unmanaged = identityRepository('ai9d', 'ai9d@example.test');
+  const human = identityRepository('Human User', 'human@example.test');
+  const deterministic = [
+    'git commit -m x',
+    'git commit-tree deadbeef',
+    'git merge --no-ff topic',
+    'git notes add -m x',
+    'git revert deadbeef',
+    'git stash push',
+  ];
+  const inputDerived = [
+    'git am patch.mbox',
+    'git cherry-pick deadbeef',
+    'git fast-import',
+    'git filter-branch -- --all',
+    'git pull --rebase',
+    'git rebase main',
+  ];
+  try {
+    for (const adapter of managedAdapters) {
+      for (const command of deterministic) {
+        adapterAllowed(adapter, command, 'human', {
+          cwd: unmanaged,
+          env: withoutGitIdentity,
+        });
+        assert.equal(adapterDenied(adapter, command, 'human', {
+          cwd: human,
+          env: withoutGitIdentity,
+        }), true, `${adapter.path} must deny ${command} under a human identity`);
+      }
+      for (const command of inputDerived) {
+        assert.equal(adapterDenied(adapter, command, 'human', {
+          cwd: unmanaged,
+          env: withoutGitIdentity,
+        }), true, `${adapter.path} must fail closed when ${command} supplies authors from its input`);
+      }
+    }
+  } finally {
+    rmSync(unmanaged, { recursive: true, force: true });
+    rmSync(human, { recursive: true, force: true });
   }
 });
