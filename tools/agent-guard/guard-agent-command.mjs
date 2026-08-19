@@ -510,6 +510,22 @@ function envOption(word) {
   return envLongOption(word) ?? envShortOption(word);
 }
 
+const COREPACK_PROXY_INFO = new Map([
+  ['npm', { command: 'npm', manager: 'npm' }],
+  ['npx', { command: 'npx', manager: 'npm' }],
+  ['pnpm', { command: 'pnpm', manager: 'pnpm' }],
+  // pnpx is an executable package proxy. Classify it like npx for the deny
+  // side while retaining pnpm's cwd-option grammar for scope discovery.
+  ['pnpx', { command: 'npx', manager: 'pnpm' }],
+  ['yarn', { command: 'yarn', manager: 'yarn' }],
+  ['yarnpkg', { command: 'yarn', manager: 'yarn' }],
+]);
+
+function corepackProxyInfo(word) {
+  const binary = /^(npm|npx|pnpm|pnpx|yarn|yarnpkg)(?:@.*)?$/u.exec(word)?.[1];
+  return COREPACK_PROXY_INFO.get(binary) ?? null;
+}
+
 const UNMODELED_EXECUTION_WRAPPER_OPTIONS = {
   sudo: {
     long: [
@@ -782,53 +798,75 @@ function hasRuntimeScriptBehindUnmodeledWrapper(command, depth = 0) {
 function directoryOptionTargets(segment) {
   const words = scopeWords(segment);
   const targets = [];
+  const envReachedExecutables = new WeakSet();
   for (let index = 0; index < words.length; index += 1) {
     const executable = words[index].value.split('/').at(-1);
-    const corepackProxy = index > 0 && words[index - 1].value.split('/').at(-1) === 'corepack' && prefixReaches(words, index - 1);
+    const corepackProxy =
+      index > 0 &&
+      words[index - 1].value.split('/').at(-1) === 'corepack' &&
+      (prefixReaches(words, index - 1) || envReachedExecutables.has(words[index - 1]))
+        ? corepackProxyInfo(words[index].value)
+        : null;
+    const packageExecutable = corepackProxy?.manager ?? executable;
     if (executable === 'env' && prefixReaches(words, index)) {
-      let envTarget;
-      for (let optionAt = index + 1; optionAt < words.length; optionAt += 1) {
-        const option = words[optionAt].value;
-        const parsedOption = envOption(option);
-        const splitString = envSplitStringOption(option);
-        if (parsedOption?.name === '--chdir' && parsedOption.value === null) {
-          if (words[optionAt + 1]) envTarget = words[++optionAt].value;
-        } else if (parsedOption?.name === '--chdir') {
-          envTarget = parsedOption.value;
-        } else if (
-          ['--argv0', '--env0-from', '--path', '--unset'].includes(parsedOption?.name) &&
-          parsedOption.value === null
-        ) {
-          optionAt += 1;
-        } else if (splitString?.value === null) {
-          const operand = words[optionAt + 1];
-          if (!operand) break;
-          const splitWords = scopeWords(operand.value).map((part) => ({
-            index: operand.index + part.index / 100_000,
-            value: part.value,
-          }));
-          words.splice(optionAt, 2, ...splitWords);
-          optionAt -= 1;
-        } else if (splitString !== null) {
-          const splitWords = scopeWords(splitString.value).map((part) => ({
-            index: words[optionAt].index + part.index / 100_000,
-            value: part.value,
-          }));
-          words.splice(optionAt, 1, ...splitWords);
-          optionAt -= 1;
-        } else if (option === '--') {
-          break;
-        } else if (!option.startsWith('-') && !/^\w+=/u.test(option)) {
-          break;
+      // `env -S` splices its operand into the current argv. If that argv starts
+      // another env command, its relative `-C` is resolved from the outer
+      // env's selected directory. Walk that executable chain explicitly: the
+      // synthetic words do not have faithful source offsets for prefixReaches.
+      let envAt = index;
+      while (words[envAt]?.value.split('/').at(-1) === 'env') {
+        let envTarget;
+        let commandAt = envAt + 1;
+        for (; commandAt < words.length; commandAt += 1) {
+          const option = words[commandAt].value;
+          const parsedOption = envOption(option);
+          const splitString = envSplitStringOption(option);
+          if (parsedOption?.name === '--chdir' && parsedOption.value === null) {
+            if (words[commandAt + 1]) envTarget = words[++commandAt].value;
+          } else if (parsedOption?.name === '--chdir') {
+            envTarget = parsedOption.value;
+          } else if (
+            ['--argv0', '--env0-from', '--path', '--unset'].includes(parsedOption?.name) &&
+            parsedOption.value === null
+          ) {
+            commandAt += 1;
+          } else if (splitString?.value === null) {
+            const operand = words[commandAt + 1];
+            if (!operand) break;
+            const splitWords = scopeWords(operand.value).map((part) => ({
+              index: operand.index + part.index / 100_000,
+              value: part.value,
+            }));
+            words.splice(commandAt, 2, ...splitWords);
+            commandAt -= 1;
+          } else if (splitString !== null) {
+            const splitWords = scopeWords(splitString.value).map((part) => ({
+              index: words[commandAt].index + part.index / 100_000,
+              value: part.value,
+            }));
+            words.splice(commandAt, 1, ...splitWords);
+            commandAt -= 1;
+          } else if (option === '--') {
+            commandAt += 1;
+            break;
+          } else if (!option.startsWith('-') && !/^\w+=/u.test(option)) {
+            break;
+          }
         }
+        if (envTarget) targets.push({ index: words[envAt].index, target: envTarget });
+        if (words[commandAt]) envReachedExecutables.add(words[commandAt]);
+        if (words[commandAt]?.value.split('/').at(-1) !== 'env') break;
+        envAt = commandAt;
       }
-      if (envTarget) targets.push({ index: words[index].index, target: envTarget });
     }
-    if (!['npm', 'pnpm', 'yarn', 'bun'].includes(executable) || (!prefixReaches(words, index) && !corepackProxy)) continue;
+    if (
+      !['npm', 'pnpm', 'yarn', 'bun'].includes(packageExecutable) ||
+      (!prefixReaches(words, index) && !envReachedExecutables.has(words[index]) && corepackProxy === null)
+    ) continue;
     const options =
-      executable === 'npm'
+      packageExecutable === 'npm'
         ? { equals: ['--prefix='], operands: new Set(['--prefix', '-C']) }
-        : executable === 'pnpm'
+        : packageExecutable === 'pnpm'
           ? { equals: ['--dir='], operands: new Set(['--dir', '-C']) }
           : { equals: ['--cwd='], operands: new Set(['--cwd']) };
     let packageTarget;
@@ -841,7 +879,7 @@ function directoryOptionTargets(segment) {
       }
       const equals = options.equals.find((prefix) => option.startsWith(prefix));
       if (equals) packageTarget = option.slice(equals.length);
-      if ((executable === 'npm' || executable === 'pnpm') && /^-C.+/u.test(option)) {
+      if ((packageExecutable === 'npm' || packageExecutable === 'pnpm') && /^-C.+/u.test(option)) {
         packageTarget = option.slice(2);
       }
     }
@@ -1689,7 +1727,7 @@ function isExecutableQuotedWord(scanned, word) {
     if (/^\w+=\S*$/u.test(word) && followsEnvCommand(scanned)) return true;
     return true;
   }
-  if (tokens[0]?.split('/').at(-1) === 'corepack' && /^(?:pnpm|yarn)(?:@.+)?$/u.test(word)) return true;
+  if (tokens[0]?.split('/').at(-1) === 'corepack' && corepackProxyInfo(word) !== null) return true;
   if (tokens[0]?.split('/').at(-1) === 'find') {
     if (/^-exec(?:dir)?$|^-ok(?:dir)?$/u.test(word)) return true;
     const actionAt = tokens.findLastIndex((token) => /^-exec(?:dir)?$|^-ok(?:dir)?$/u.test(token));
@@ -2442,9 +2480,9 @@ function commandAfterPrefixes(segment) {
       continue;
     }
     if (command === 'corepack') {
-      const proxy = /^(?:pnpm|yarn)(?:@.+)?$/u.exec(tokens[index + 1]?.split('/').at(-1) ?? '')?.[0];
+      const proxy = corepackProxyInfo(tokens[index + 1] ?? '');
       if (!proxy) break;
-      tokens[index + 1] = proxy.split('@')[0];
+      tokens[index + 1] = proxy.command;
       index += 1;
       continue;
     }
