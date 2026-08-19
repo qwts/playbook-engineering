@@ -7,7 +7,10 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { GOVERNED_HARNESS_FILES } from './baseline-files.mjs';
+import {
+  GOVERNED_FORMAT_EXEMPT_FILES,
+  GOVERNED_HARNESS_FILES,
+} from './baseline-files.mjs';
 
 export const CODEX_SYNC_BRANCH = 'governance/harness-sync';
 export const CODEX_SYNC_BOT = 'chores-dumb';
@@ -16,6 +19,12 @@ export const COPILOT_REVIEW_BOT = 'copilot-pull-request-reviewer[bot]';
 export const CODEX_SOURCE_REPO = 'playbook-engineering';
 export const CODEX_SYNC_TITLE = 'governance: sync managed agent harness files';
 export const CODEX_SYNC_COMMIT_PREFIX = `governance: sync agent harness from ${CODEX_SOURCE_REPO}@`;
+export const MANAGED_TEXT_BLOCKS = new Map([
+  ['.prettierignore', {
+    begin: '# governed:agent-harness-format:start',
+    end: '# governed:agent-harness-format:end',
+  }],
+]);
 // Paths governance owns inside a downstream JSON file; everything else in that
 // file belongs to the repo and survives a sync untouched. `hooks.PreToolUse`
 // joined the list with ENG-0138: the memory guard is only a fleet control if
@@ -162,11 +171,106 @@ function parseJsonObject(path, content, owner) {
   return value;
 }
 
+function decodeText(path, content, owner) {
+  try {
+    // `ignoreBOM` keeps a downstream BOM in the decoded text for byte-for-byte composition.
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(content);
+  } catch (error) {
+    throw new Error(`${path}: invalid UTF-8 in ${owner} text (${error.message})`);
+  }
+}
+
+function markerLineRanges(source, marker) {
+  const ranges = [];
+  let start = 0;
+  while (start <= source.length) {
+    const newline = source.indexOf('\n', start);
+    const end = newline === -1 ? source.length : newline;
+    const contentEnd = end > start && source[end - 1] === '\r' ? end - 1 : end;
+    if (source.slice(start, contentEnd) === marker) {
+      ranges.push({ start, end: newline === -1 ? end : end + 1 });
+    }
+    if (newline === -1) break;
+    start = newline + 1;
+  }
+  return ranges;
+}
+
+function managedTextBlock(path, source, owner) {
+  const markers = MANAGED_TEXT_BLOCKS.get(path);
+  const begins = markerLineRanges(source, markers.begin);
+  const ends = markerLineRanges(source, markers.end);
+  if (begins.length !== 1 || ends.length !== 1 || begins[0].start >= ends[0].start) {
+    throw new Error(
+      `${path}: ${owner} text must contain exactly one ordered ${markers.begin} / ${markers.end} block`,
+    );
+  }
+  return {
+    begin: begins[0],
+    end: ends[0],
+    content: `${source.slice(begins[0].start, ends[0].end).replace(/\r?\n?$/u, '')}\n`,
+  };
+}
+
+function appendManagedTextBlock(repositoryText, block) {
+  const separator = repositoryText.length === 0
+    ? ''
+    : repositoryText.endsWith('\n\n')
+      ? ''
+      : repositoryText.endsWith('\n')
+        ? '\n'
+        : '\n\n';
+  return `${repositoryText}${separator}${block}`;
+}
+
+function mergeManagedTextFile(canonicalFile, targetContent, formatExemptFiles) {
+  const canonicalText = decodeText(canonicalFile.path, canonicalFile.content, 'managed');
+  const fullBlock = managedTextBlock(canonicalFile.path, canonicalText, 'managed');
+  const canonicalBlock = formatExemptFiles === null
+    ? fullBlock
+    : {
+        ...fullBlock,
+        content: fullBlock.content
+          .split('\n')
+          .filter((line) => (
+            !GOVERNED_FORMAT_EXEMPT_FILES.includes(line) || formatExemptFiles.has(line)
+          ))
+          .join('\n'),
+      };
+  if (!targetContent) {
+    const content = Buffer.from(canonicalBlock.content);
+    return {
+      ...canonicalFile,
+      content,
+      sha: gitBlobSha(content),
+    };
+  }
+
+  const target = decodeText(canonicalFile.path, targetContent, 'downstream');
+  const markers = MANAGED_TEXT_BLOCKS.get(canonicalFile.path);
+  const begins = markerLineRanges(target, markers.begin);
+  const ends = markerLineRanges(target, markers.end);
+  let repositoryText = target;
+  if (begins.length !== 0 || ends.length !== 0) {
+    const downstreamBlock = managedTextBlock(canonicalFile.path, target, 'downstream');
+    repositoryText = `${target.slice(0, downstreamBlock.begin.start)}${target.slice(downstreamBlock.end.end)}`;
+  }
+  const content = Buffer.from(appendManagedTextBlock(repositoryText, canonicalBlock.content));
+  return {
+    ...canonicalFile,
+    content,
+    sha: gitBlobSha(content),
+  };
+}
+
 export function mergeManagedFile(
   canonicalFile,
   targetContent,
-  { preserveArrayEntriesContaining = [] } = {},
+  { preserveArrayEntriesContaining = [], formatExemptFiles = null } = {},
 ) {
+  if (MANAGED_TEXT_BLOCKS.has(canonicalFile.path)) {
+    return mergeManagedTextFile(canonicalFile, targetContent, formatExemptFiles);
+  }
   const ownedPaths = MANAGED_JSON_OVERLAYS.get(canonicalFile.path);
   if (!ownedPaths && preserveArrayEntriesContaining.length === 0) return canonicalFile;
   const managed = parseJsonObject(canonicalFile.path, canonicalFile.content, 'managed');
@@ -207,6 +311,7 @@ export async function materializeManagedFiles(
   managedPaths,
   readTargetContent,
   preserveJsonArrayEntries = {},
+  formatExemptFiles = null,
 ) {
   const files = new Map();
   for (const path of managedPaths) {
@@ -214,11 +319,14 @@ export async function materializeManagedFiles(
     if (!canonical) throw new Error(`${path}: canonical managed file is missing`);
     const target = targetTree.get(path);
     const markers = preserveJsonArrayEntries[path] ?? [];
-    const content = target && (MANAGED_JSON_OVERLAYS.has(path) || markers.length)
+    const content = target && (
+      MANAGED_JSON_OVERLAYS.has(path) || MANAGED_TEXT_BLOCKS.has(path) || markers.length
+    )
       ? await readTargetContent(target)
       : null;
     files.set(path, mergeManagedFile(canonical, content, {
       preserveArrayEntriesContaining: markers,
+      formatExemptFiles: formatExemptFiles === null ? null : new Set(formatExemptFiles),
     }));
   }
   return files;
@@ -272,7 +380,7 @@ export function syncPullBody({ owner, sourceSha, paths }) {
   const sourceUrl = `https://github.com/${owner}/${CODEX_SOURCE_REPO}/commit/${sourceSha}`;
   const managed = paths.map((path) => `- \`${path}\``).join('\n');
   return [
-    `Synchronizes the centrally managed agent-harness environment (\`.codex/\`, \`.claude/\`) from [\`${sourceSha.slice(0, 12)}\`](${sourceUrl}).`,
+    `Synchronizes the centrally managed agent-harness environment and its consumer compatibility metadata from [\`${sourceSha.slice(0, 12)}\`](${sourceUrl}).`,
     '',
     'Managed files:',
     '',
