@@ -7,7 +7,10 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { GOVERNED_HARNESS_FILES } from './baseline-files.mjs';
+import {
+  GOVERNED_FORMAT_EXEMPT_FILES,
+  GOVERNED_HARNESS_FILES,
+} from './baseline-files.mjs';
 
 export const CODEX_SYNC_BRANCH = 'governance/harness-sync';
 export const CODEX_SYNC_BOT = 'chores-dumb';
@@ -208,9 +211,20 @@ function managedTextBlock(path, source, owner) {
   };
 }
 
-function mergeManagedTextFile(canonicalFile, targetContent) {
+function mergeManagedTextFile(canonicalFile, targetContent, formatExemptFiles) {
   const canonicalText = decodeText(canonicalFile.path, canonicalFile.content, 'managed');
-  const canonicalBlock = managedTextBlock(canonicalFile.path, canonicalText, 'managed');
+  const fullBlock = managedTextBlock(canonicalFile.path, canonicalText, 'managed');
+  const canonicalBlock = formatExemptFiles === null
+    ? fullBlock
+    : {
+        ...fullBlock,
+        content: fullBlock.content
+          .split('\n')
+          .filter((line) => (
+            !GOVERNED_FORMAT_EXEMPT_FILES.includes(line) || formatExemptFiles.has(line)
+          ))
+          .join('\n'),
+      };
   if (!targetContent) {
     const content = Buffer.from(canonicalBlock.content);
     return {
@@ -250,10 +264,10 @@ function mergeManagedTextFile(canonicalFile, targetContent) {
 export function mergeManagedFile(
   canonicalFile,
   targetContent,
-  { preserveArrayEntriesContaining = [] } = {},
+  { preserveArrayEntriesContaining = [], formatExemptFiles = null } = {},
 ) {
   if (MANAGED_TEXT_BLOCKS.has(canonicalFile.path)) {
-    return mergeManagedTextFile(canonicalFile, targetContent);
+    return mergeManagedTextFile(canonicalFile, targetContent, formatExemptFiles);
   }
   const ownedPaths = MANAGED_JSON_OVERLAYS.get(canonicalFile.path);
   if (!ownedPaths && preserveArrayEntriesContaining.length === 0) return canonicalFile;
@@ -295,6 +309,7 @@ export async function materializeManagedFiles(
   managedPaths,
   readTargetContent,
   preserveJsonArrayEntries = {},
+  formatExemptFiles = null,
 ) {
   const files = new Map();
   for (const path of managedPaths) {
@@ -309,6 +324,7 @@ export async function materializeManagedFiles(
       : null;
     files.set(path, mergeManagedFile(canonical, content, {
       preserveArrayEntriesContaining: markers,
+      formatExemptFiles: formatExemptFiles === null ? null : new Set(formatExemptFiles),
     }));
   }
   return files;

@@ -155,6 +155,7 @@ export async function syncRepository(client, {
     paths,
     (entry) => readBlob(client, owner, repo, entry),
     entry.codexSync?.preserveJsonArrayEntries,
+    paths,
   );
   const baseDiff = diffManagedFiles(desiredFiles, baseTree, paths);
 

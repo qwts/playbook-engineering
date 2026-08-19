@@ -126,10 +126,11 @@ The root `.prettierignore` is also composed rather than replaced. Its marked
 governance block is aligned with `GOVERNED_FORMAT_EXEMPT_FILES`, the managed
 payload within the same harness inventory that drives synchronization and
 `lint:synced`; every repository-owned line outside the block survives
-byte-for-byte. This keeps consumer formatters from rewriting managed files
-while language and syntax validation remains at the governance source. Missing
-markers append the block once; duplicated, partial, or reversed markers fail
-closed.
+byte-for-byte. A manifest exclusion removes that path from the repository's
+managed block too, so its local formatter continues to own the excluded file.
+This keeps consumer formatters from rewriting managed files while language and
+syntax validation remains at the governance source. Missing markers append the
+block once; duplicated, partial, or reversed markers fail closed.
 
 Drift uses the stable `governance/harness-sync` branch and a `chores-dumb` pull
 request; default branches stay protected. Existing PRs are reconciled even

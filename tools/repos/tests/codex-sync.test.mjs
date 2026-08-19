@@ -417,6 +417,34 @@ test('manifest exclusions remove files from the managed set', () => {
   assert.deepEqual(managedCodexPaths({ codexSync: { enabled: false } }), []);
 });
 
+test('manifest exclusions remove repository-owned files from the formatter block', async () => {
+  const pathname = '.prettierignore';
+  const excluded = '.codex/config.toml';
+  const formatExemptFiles = managedCodexPaths({ codexSync: { exclude: [excluded] } });
+  const source = canonical(pathname, readFileSync(pathname, 'utf8'));
+  const targetContent = Buffer.from('dist/\n');
+  const target = new Map([[pathname, {
+    path: pathname,
+    type: 'blob',
+    sha: gitBlobSha(targetContent),
+    mode: '100644',
+  }]]);
+
+  const files = await materializeManagedFiles(
+    new Map([[pathname, source]]),
+    target,
+    [pathname],
+    async () => targetContent,
+    {},
+    formatExemptFiles,
+  );
+  const merged = files.get(pathname).content.toString('utf8');
+
+  assert.match(merged, /^dist\//u, 'repository-owned rules survive composition');
+  assert.doesNotMatch(merged, /^\.codex\/config\.toml$/mu);
+  assert.match(merged, /^\.codex\/environments\/environment\.toml$/mu);
+});
+
 test('an open stable-branch pull request is reused without resetting its branch', () => {
   const pull = {
     number: 12,
