@@ -26,6 +26,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { performance } from 'node:perf_hooks';
 import process from 'node:process';
 
 import { clampCeiling, decideAdmission, deriveBudgetForMemory, laneReservationMb } from './lib/budget.mjs';
@@ -155,7 +156,13 @@ export function guardedInvocation(command) {
   };
 }
 
-export function recordProcessTreeSample(state, psOutput, rootPid) {
+export function eligibleLanePeakMb(state) {
+  return state.targetWindowObserved === true && Number.isFinite(state.peakRssMb) && state.peakRssMb > 0
+    ? state.peakRssMb
+    : null;
+}
+
+export function recordProcessTreeSample(state, psOutput, rootPid, sampledAt = performance.now()) {
   const { totalKb, processCount } = collectTreeRssKb(psOutput, rootPid);
   // `ps` reports KB, but the public record is whole MB. A real one-process
   // tree must never round down to the same zero used for "not measured".
@@ -163,7 +170,11 @@ export function recordProcessTreeSample(state, psOutput, rootPid) {
   if (state.done) return { rssMb, processCount };
   state.peakRssMb = Math.max(state.peakRssMb, rssMb);
   state.peakProcessCount = Math.max(state.peakProcessCount, processCount);
-  if (rssMb > 0 && processCount > 0) state.targetObserved = true;
+  if (rssMb > 0 && processCount > 0) {
+    state.targetObserved = true;
+    if (!Number.isFinite(state.targetFirstSampleAt)) state.targetFirstSampleAt = sampledAt;
+    else if (sampledAt - state.targetFirstSampleAt >= POLL_MS) state.targetWindowObserved = true;
+  }
   return { rssMb, processCount };
 }
 
@@ -365,7 +376,20 @@ async function main() {
     fail('failed to bind the admission lease to the guarded process group');
   }
 
-  const state = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, reason: null, termAt: null, done: false, polling: false, lastBeat: 0, monitorFailures: 0, killTimer: null };
+  const state = {
+    peakRssMb: 0,
+    peakProcessCount: 0,
+    targetObserved: false,
+    targetFirstSampleAt: null,
+    targetWindowObserved: false,
+    reason: null,
+    termAt: null,
+    done: false,
+    polling: false,
+    lastBeat: 0,
+    monitorFailures: 0,
+    killTimer: null,
+  };
 
   const killGroup = (signal) => {
     try {
@@ -393,6 +417,7 @@ async function main() {
   const sampleTree = () => {
     if (state.polling) return;
     state.polling = true;
+    const sampledAt = performance.now();
     execFile(ps, ['-axo', 'pid=,ppid=,pgid=,rss='], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => {
       state.polling = false;
       if (state.done) return;
@@ -402,7 +427,7 @@ async function main() {
         return;
       }
       state.monitorFailures = 0;
-      const sample = recordProcessTreeSample(state, stdout, child.pid);
+      const sample = recordProcessTreeSample(state, stdout, child.pid, sampledAt);
       const { rssMb } = sample;
       // Report real usage so other repos' arbiters stop counting this run's
       // reservation twice (see lib/budget.mjs unmaterializedMb).
@@ -475,10 +500,11 @@ async function main() {
       env: process.env,
       behaviorEnv: childEnvironment,
     });
+    const eligiblePeakMb = eligibleLanePeakMb(state);
     if (
       code === 0 &&
       state.targetObserved &&
-      state.peakRssMb > 0 &&
+      eligiblePeakMb !== null &&
       behaviorIdentity !== null &&
       completedIdentity === behaviorIdentity
     ) {
@@ -488,7 +514,7 @@ async function main() {
         label: options.label,
         command,
         behaviorIdentity,
-        peakRssMb: state.peakRssMb,
+        peakRssMb: eligiblePeakMb,
       });
     }
     process.exit(code ?? (signal ? 1 : 0));

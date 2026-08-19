@@ -44,6 +44,23 @@ const INDIRECT_EXECUTABLES = new Set([
   'timeout',
   'xargs',
 ]);
+const TRANSITIVE_DISPATCHERS = new Set([
+  'bun',
+  'bunx',
+  'c8',
+  'corepack',
+  'deno',
+  'electron',
+  'npm',
+  'npx',
+  'pnpm',
+  'pnpx',
+  'playwright',
+  'test-storybook',
+  'vitest',
+  'yarn',
+  'yarnpkg',
+]);
 const UNTRACKED_GUARD_DIAGNOSTICS = new Set([
   '? .guard/history.jsonl',
   '? .guard/last-run.json',
@@ -230,7 +247,12 @@ function unrecognizedExecutableStaysCold(worktree, command) {
 }
 
 function commandPayloadEvidence(worktree, command, env, repositoryRoot, executable) {
-  if (executableNames(command[0], executable).some((name) => INDIRECT_EXECUTABLES.has(name))) return null;
+  const names = executableNames(command[0], executable);
+  // These launchers can execute ignored dependencies, generated outputs,
+  // plugins, or network-selected code that their own entry bytes do not bind.
+  // Until the guard has immutable provenance for those transitive inputs,
+  // they cannot seed reusable light-lane history.
+  if (names.some((name) => INDIRECT_EXECUTABLES.has(name) || TRANSITIVE_DISPATCHERS.has(name))) return null;
   const family = interpreterFamily(command[0], executable);
   if (family === null) {
     // A copied or renamed runtime has no trustworthy family. Filesystem and
