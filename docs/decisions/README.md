@@ -62,7 +62,7 @@ principles; it does not waive the lower priorities.
 | [ENG-0001](ENG-0001-cross-repo-decision-home.md) | Cross-repo decisions live in this repository | Accepted |
 | [ENG-0002](ENG-0002-static-analysis-direction.md) | Static analysis: per-language natives now, central instrument later | Accepted |
 | [ENG-0003](ENG-0003-repo-is-documentation-source-of-truth.md) | The repository is the source of truth for documentation | Accepted |
-| [ENG-0004](ENG-0004-centralize-shared-cicd.md) | Centralize shared CI/CD and evidence-bound no-release projections | Accepted |
+| [ENG-0004](ENG-0004-centralize-shared-cicd.md) | Centralize shared CI/CD in this repository | Accepted |
 | [ENG-0005](ENG-0005-static-analysis-survey-results.md) | Static-analysis survey: close the workflow-security gap, keep natives | Proposed |
 | [ENG-0006](ENG-0006-agentic-primitives-governance.md) | Governance of agentic primitives: one canonical source, progressive disclosure, eval-gated changes | Proposed |
 | [ENG-0007](ENG-0007-feature-lifecycle-convention.md) | Feature lifecycle: open with problem/requirements/design/proposed patterns, close with the solution as built | Proposed |
@@ -86,6 +86,7 @@ principles; it does not waive the lower priorities.
 | [ENG-0151](ENG-0151-model-routing.md) | Model routing is retrieved from a registry, never recalled | Proposed |
 | [ENG-0160](ENG-0160-semantic-judge-arbitrates-size-ratchets.md) | The semantic judge arbitrates size-ratchet adjustments | Accepted |
 | [ENG-0172](ENG-0172-agent-space-is-durable-per-soul-storage.md) | Agent Space is durable per-soul storage outside bot territory | Proposed |
+| [ENG-0178](ENG-0178-evidence-bound-harness-projections.md) | Governed harness projections are evidence-bound no-release inputs | Accepted |
 
 ## Related
 

@@ -31,7 +31,10 @@ test('one document owns the generated-projection contract', () => {
   const policy = read('docs/reference/ci-execution-policy.md');
   const consumers = ['governed-ci-rollout', 'governed-ci-release-lifecycle-fleet']
     .map((name) => read(`docs/reference/${name}.md`))
-    .concat(read('docs/decisions/ENG-0004-centralize-shared-cicd.md'));
+    .concat(
+      read('docs/decisions/ENG-0004-centralize-shared-cicd.md'),
+      read('docs/decisions/ENG-0178-evidence-bound-harness-projections.md'),
+    );
 
   assert.match(policy, /`release-lifecycles\.json`/u);
   assert.match(policy, /`pull-requests: read`/u);

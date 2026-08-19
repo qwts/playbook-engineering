@@ -217,13 +217,6 @@ The operational contract is in the
 are in the
 [release-lifecycle fleet handoff](../reference/governed-ci-release-lifecycle-fleet.md).
 
-## Amendment — 2026-08-18: harness release input
-
-Resolves [#178](https://github.com/qwts/playbook-engineering/issues/178).
-Harness syncs skip release input if reviewed identity, one source SHA, and
-GitHub's full diff show only managed paths, including renames. Missing or mixed
-evidence keeps source policy; other gates stay.
-
 ## References
 
 - [ENG-0003](ENG-0003-repo-is-documentation-source-of-truth.md) established this repo as the cross-repo home for shared engineering assets; this extends that from documents to CI/CD.
