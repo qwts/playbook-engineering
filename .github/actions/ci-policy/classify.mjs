@@ -1,6 +1,7 @@
 import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { resolveReleaseOrigins } from './release-origin.mjs';
+import { GOVERNED_HARNESS_FILES } from '../../../tools/repos/lib/baseline-files.mjs';
+import { listPullRequestFiles, resolveReleaseOrigins } from './release-origin.mjs';
 
 const ROSTER_URL = new URL('../../../governance/agents.json', import.meta.url);
 const RELEASE_LIFECYCLES_URL = new URL('../../../governance/release-lifecycles.json', import.meta.url);
@@ -38,7 +39,7 @@ export function releaseLifecycleFor(catalog, repository) {
   return matches[0];
 }
 
-function matchesGeneratedProjection(pullRequest, repository, projection) {
+function matchesProjectionIdentity(pullRequest, repository, projection) {
   return (
     pullRequest.base?.ref === projection.baseRef &&
     pullRequest.head?.ref === projection.headRef &&
@@ -56,20 +57,78 @@ export function isGeneratedReleaseProjection({ repository, lifecycle, pullReques
   const projection = lifecycle.generatedProjection;
   if (!projection) return false;
   const generated = pullRequests.filter((pullRequest) =>
-    matchesGeneratedProjection(pullRequest, repository, projection));
+    matchesProjectionIdentity(pullRequest, repository, projection));
   if (generated.length === 0) return false;
   if (pullRequests.length !== 1) throw new Error('generated release projection origin is ambiguous');
   return true;
 }
 
+function sourceCommitFromBody(body, sourceRepository) {
+  if (typeof body !== 'string' || typeof sourceRepository !== 'string') return null;
+  const escapedRepository = sourceRepository.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const sourcePattern = new RegExp(
+    `https://github\\.com/${escapedRepository}/commit/([0-9a-f]{40})(?=$|[\\s)])`,
+    'giu',
+  );
+  const commits = new Set([...body.matchAll(sourcePattern)].map((match) => match[1].toLowerCase()));
+  return commits.size === 1 ? [...commits][0] : null;
+}
+
+function isPureManagedHarnessDiff(changedFiles) {
+  if (!Array.isArray(changedFiles) || changedFiles.length === 0) return false;
+  const managed = new Set(GOVERNED_HARNESS_FILES);
+  return changedFiles.every((file) => {
+    if (typeof file?.filename !== 'string' || !managed.has(file.filename)) return false;
+    return file.previous_filename === undefined || (
+      typeof file.previous_filename === 'string' && managed.has(file.previous_filename)
+    );
+  });
+}
+
+/**
+ * Harness output is trusted only as one bot-owned origin with recorded source
+ * provenance and a complete diff consisting exclusively of managed files.
+ */
+export function isGovernedHarnessProjection({
+  repository,
+  lifecycle,
+  pullRequests,
+  changedFiles,
+}) {
+  const projection = lifecycle.harnessProjection;
+  if (!projection) return false;
+  const matches = pullRequests.filter((pullRequest) =>
+    matchesProjectionIdentity(pullRequest, repository, projection));
+  if (matches.length === 0) return false;
+  if (pullRequests.length !== 1) throw new Error('governed harness projection origin is ambiguous');
+  if (!sourceCommitFromBody(matches[0].body, projection.sourceRepository)) return false;
+  return isPureManagedHarnessDiff(changedFiles);
+}
+
+export async function harnessProjectionChangedFiles(options) {
+  const projection = options.lifecycle.harnessProjection;
+  if (!projection || options.pullRequests.length !== 1) return [];
+  const [pullRequest] = options.pullRequests;
+  if (!matchesProjectionIdentity(pullRequest, options.repository, projection)) return [];
+  return listPullRequestFiles({ ...options, number: pullRequest.number });
+}
+
 export function releaseOutputs(options) {
   const generated = isGeneratedReleaseProjection(options);
+  const harness = isGovernedHarnessProjection(options);
   const { metadataSystem, sourceInputPolicy } = options.lifecycle;
   const hasOrigin = options.pullRequests.length > 0;
   return {
     pull_request_kind:
-      generated ? 'generated-release-projection' : hasOrigin ? 'change-pr' : 'not-a-pull-request',
+      generated
+        ? 'generated-release-projection'
+        : harness
+          ? 'governed-harness-projection'
+          : hasOrigin
+            ? 'change-pr'
+            : 'not-a-pull-request',
     generated_release_projection: String(generated),
+    governed_harness_projection: String(harness),
     release_metadata_system: metadataSystem,
     source_input_policy: sourceInputPolicy,
     release_gate_mode:
@@ -77,9 +136,11 @@ export function releaseOutputs(options) {
         ? 'not-applicable'
         : generated
           ? 'generated-projection'
-          : hasOrigin
-            ? 'source-policy'
-            : 'no-source-context',
+          : harness
+            ? 'harness-projection'
+            : hasOrigin
+              ? 'source-policy'
+              : 'no-source-context',
   };
 }
 
@@ -166,7 +227,14 @@ async function main() {
     apiUrl: process.env.CI_POLICY_API_URL,
     token: process.env.CI_POLICY_TOKEN,
   });
-  writeOutputs(outputsFor(mode, releaseOutputs({ ...options, lifecycle, pullRequests })));
+  const changedFiles = await harnessProjectionChangedFiles({
+    ...options,
+    lifecycle,
+    pullRequests,
+    apiUrl: process.env.CI_POLICY_API_URL,
+    token: process.env.CI_POLICY_TOKEN,
+  });
+  writeOutputs(outputsFor(mode, releaseOutputs({ ...options, lifecycle, pullRequests, changedFiles })));
 }
 
 function writeOutputs(outputs) {

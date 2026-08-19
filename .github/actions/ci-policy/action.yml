@@ -23,6 +23,9 @@ outputs:
   generated_release_projection:
     description: Whether reviewed lifecycle configuration identifies this PR as generated release output
     value: ${{ steps.classify.outputs.generated_release_projection }}
+  governed_harness_projection:
+    description: Whether reviewed identity, source provenance, and changed paths prove a pure harness projection
+    value: ${{ steps.classify.outputs.governed_harness_projection }}
   release_metadata_system:
     description: The repository's reviewed release metadata system
     value: ${{ steps.classify.outputs.release_metadata_system }}
@@ -30,7 +33,7 @@ outputs:
     description: The repository-specific source PR release-input policy identifier
     value: ${{ steps.classify.outputs.source_input_policy }}
   release_gate_mode:
-    description: not-applicable, source-policy, generated-projection, or no-source-context
+    description: not-applicable, source-policy, generated-projection, harness-projection, or no-source-context
     value: ${{ steps.classify.outputs.release_gate_mode }}
 
 runs:

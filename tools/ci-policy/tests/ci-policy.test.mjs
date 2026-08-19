@@ -6,7 +6,9 @@ import {
   allowedActorsFromRoster,
   authorizeRun,
   classifyRun,
+  harnessProjectionChangedFiles,
   isGeneratedReleaseProjection,
+  isGovernedHarnessProjection,
   isAllowedActor,
   isNativeMergeQueueMainPush,
   outputsFor,
@@ -14,10 +16,17 @@ import {
   releaseOutputs,
 } from '../../../.github/actions/ci-policy/classify.mjs';
 import {
+  listPullRequestFiles,
   listPullRequestsForCommit,
   mergeGroupHeadPullRequest,
   resolveReleaseOrigins,
 } from '../../../.github/actions/ci-policy/release-origin.mjs';
+import {
+  CODEX_SOURCE_REPO,
+  CODEX_SYNC_BOT,
+  CODEX_SYNC_BRANCH,
+  syncPullBody,
+} from '../../repos/lib/codex-sync.mjs';
 
 const pullRequest = (draft, fork = false) => ({ pull_request: { draft, head: { repo: { fork } } } });
 const roster = JSON.parse(readFileSync(new URL('../../../governance/agents.json', import.meta.url), 'utf8'));
@@ -33,8 +42,12 @@ const releasePullRequest = ({
   headRef = 'codex/feature',
   headRepository = 'qwts/overlook',
   fork = false,
+  number = 27,
+  body = '',
 } = {}) => ({
   pull_request: {
+    number,
+    body,
     draft: false,
     user: { login: author },
     base: { ref: baseRef },
@@ -229,6 +242,7 @@ test('only the reviewed projection identity classifies as generated release outp
   assert.deepEqual(releaseOutputs(releaseRun({ pullRequests: [projection] })), {
     pull_request_kind: 'generated-release-projection',
     generated_release_projection: 'true',
+    governed_harness_projection: 'false',
     release_metadata_system: 'changesets',
     source_input_policy: 'behavior-change-changeset-or-reviewed-rationale',
     release_gate_mode: 'generated-projection',
@@ -247,6 +261,115 @@ test('only the reviewed projection identity classifies as generated release outp
       `a forged ${reason} must not classify as generated`,
     );
   }
+});
+
+const harnessSource = 'e7c2c4992f8472dfced79afc258f4ad18bf226ad';
+const managedHarnessFiles = [
+  { filename: '.codex/config.toml' },
+  { filename: 'tools/agent-guard/run-guarded.mjs' },
+];
+
+const harnessPullRequest = (overrides = {}) => releasePullRequest({
+  author: 'chores-dumb[bot]',
+  headRef: 'governance/harness-sync',
+  body: syncPullBody({
+    owner: 'qwts',
+    sourceSha: harnessSource,
+    paths: managedHarnessFiles.map((file) => file.filename),
+  }),
+  ...overrides,
+}).pull_request;
+
+test('pure governed harness projections bypass release input across the Changesets fleet', () => {
+  for (const repository of ['qwts/overlook', 'qwts/image-trail', 'qwts/cartograph', 'qwts/bookmarkit']) {
+    const lifecycle = releaseLifecycleFor(releaseCatalog, repository);
+    assert.deepEqual(lifecycle.harnessProjection, {
+      baseRef: 'main',
+      headRef: CODEX_SYNC_BRANCH,
+      author: `${CODEX_SYNC_BOT}[bot]`,
+      sourceRepository: `qwts/${CODEX_SOURCE_REPO}`,
+    });
+    const pullRequest = harnessPullRequest({ headRepository: repository });
+    const options = {
+      repository,
+      lifecycle,
+      pullRequests: [pullRequest],
+      changedFiles: managedHarnessFiles,
+    };
+    assert.equal(isGovernedHarnessProjection(options), true, repository);
+    assert.deepEqual(releaseOutputs(options), {
+      pull_request_kind: 'governed-harness-projection',
+      generated_release_projection: 'false',
+      governed_harness_projection: 'true',
+      release_metadata_system: 'changesets',
+      source_input_policy: lifecycle.sourceInputPolicy,
+      release_gate_mode: 'harness-projection',
+    });
+  }
+});
+
+test('a harness sync stays no-release after an unrelated version PR consumes changesets and it rebases', () => {
+  const beforeVersion = harnessPullRequest();
+  const afterVersion = {
+    ...beforeVersion,
+    head: { ...beforeVersion.head, sha: 'f'.repeat(40) },
+  };
+  for (const pullRequest of [beforeVersion, afterVersion]) {
+    assert.equal(releaseOutputs(releaseRun({
+      pullRequests: [pullRequest],
+      changedFiles: managedHarnessFiles,
+    })).release_gate_mode, 'harness-projection');
+  }
+});
+
+test('mixed paths, renamed product files, and invalid source provenance fail closed to source policy', () => {
+  for (const [reason, pullRequest, changedFiles] of [
+    ['wrong author', harnessPullRequest({ author: 'qwts' }), managedHarnessFiles],
+    ['wrong head', harnessPullRequest({ headRef: 'codex/sync' }), managedHarnessFiles],
+    ['wrong base', harnessPullRequest({ baseRef: 'next' }), managedHarnessFiles],
+    ['wrong repository', harnessPullRequest({ headRepository: 'octocat/overlook' }), managedHarnessFiles],
+    ['no changed files', harnessPullRequest(), []],
+    ['product path', harnessPullRequest(), [...managedHarnessFiles, { filename: 'src/product.mjs' }]],
+    ['renamed product path', harnessPullRequest(), [{ filename: '.codex/config.toml', previous_filename: 'src/product.mjs' }]],
+    ['missing source', harnessPullRequest({ body: '' }), managedHarnessFiles],
+    ['short source SHA', harnessPullRequest({ body: 'https://github.com/qwts/playbook-engineering/commit/abc123' }), managedHarnessFiles],
+    ['wrong source repository', harnessPullRequest({ body: `https://github.com/qwts/other/commit/${harnessSource}` }), managedHarnessFiles],
+    ['ambiguous source', harnessPullRequest({ body: [
+      `https://github.com/qwts/playbook-engineering/commit/${harnessSource}`,
+      `https://github.com/qwts/playbook-engineering/commit/${'a'.repeat(40)}`,
+    ].join('\n') }), managedHarnessFiles],
+  ]) {
+    const options = releaseRun({ pullRequests: [pullRequest], changedFiles });
+    assert.equal(isGovernedHarnessProjection(options), false, reason);
+    assert.equal(releaseOutputs(options).release_gate_mode, 'source-policy', reason);
+  }
+
+  assert.throws(
+    () => releaseOutputs(releaseRun({
+      pullRequests: [harnessPullRequest(), source],
+      changedFiles: managedHarnessFiles,
+    })),
+    /governed harness projection origin is ambiguous/,
+  );
+});
+
+test('harness changed-file evidence comes from the complete GitHub pull-request diff', async () => {
+  const requested = [];
+  const firstPage = Array.from({ length: 100 }, (_, index) => ({ filename: `path-${index}` }));
+  const changedFiles = await harnessProjectionChangedFiles(releaseRun({
+    pullRequests: [harnessPullRequest()],
+    apiUrl: 'https://api.github.example',
+    token: 'test-token',
+    fetchImpl: async (url) => {
+      requested.push(String(url));
+      return { ok: true, json: async () => requested.length === 1 ? firstPage : managedHarnessFiles };
+    },
+  }));
+  assert.deepEqual(changedFiles, [...firstPage, ...managedHarnessFiles]);
+  assert.deepEqual(requested, [
+    'https://api.github.example/repos/qwts/overlook/pulls/27/files?per_page=100&page=1',
+    'https://api.github.example/repos/qwts/overlook/pulls/27/files?per_page=100&page=2',
+  ]);
 });
 
 test('ordinary automation and unconfigured repositories get no generated-release exception', () => {
@@ -339,6 +462,28 @@ test('release-origin lookups fail closed on missing or malformed evidence', asyn
     /token is missing/,
   );
   await assert.rejects(
+    () => listPullRequestFiles({
+      ...base,
+      number: 27,
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => [{ filename: '.codex/config.toml', previous_filename: '' }],
+      }),
+    }),
+    /malformed data/,
+  );
+  await assert.rejects(
+    () => listPullRequestFiles({
+      ...base,
+      number: 27,
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => Array.from({ length: 100 }, (_, index) => ({ filename: `path-${index}` })),
+      }),
+    }),
+    /complete-diff limit/,
+  );
+  await assert.rejects(
     () => resolveReleaseOrigins({
       ...base,
       eventName: 'merge_group',
@@ -398,6 +543,7 @@ test('the reference workflow preserves governed gates and skips draft jobs', () 
   assert.match(workflow, /uses: \.\/\.github\/workflows\/codeql\.yml/);
   assert.match(workflow, /needs\.policy\.outputs\.run_post_merge == 'true'/);
   assert.match(workflow, /generated_release_projection: \$\{\{ steps\.policy\.outputs\.generated_release_projection \}\}/);
+  assert.match(workflow, /governed_harness_projection: \$\{\{ steps\.policy\.outputs\.governed_harness_projection \}\}/);
   assert.match(workflow, /release_gate_mode: \$\{\{ steps\.policy\.outputs\.release_gate_mode \}\}/);
   assert.match(workflow, /^  pull-requests: read$/m);
   assert.match(workflow, /CODEQL: \$\{\{ needs\.codeql\.result \}\}/);

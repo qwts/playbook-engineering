@@ -34,6 +34,7 @@ jobs:
       run_post_merge: ${{ steps.policy.outputs.run_post_merge }}
       pull_request_kind: ${{ steps.policy.outputs.pull_request_kind }}
       generated_release_projection: ${{ steps.policy.outputs.generated_release_projection }}
+      governed_harness_projection: ${{ steps.policy.outputs.governed_harness_projection }}
       release_metadata_system: ${{ steps.policy.outputs.release_metadata_system }}
       source_input_policy: ${{ steps.policy.outputs.source_input_policy }}
       release_gate_mode: ${{ steps.policy.outputs.release_gate_mode }}

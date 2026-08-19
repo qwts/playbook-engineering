@@ -37,6 +37,8 @@ test('one document owns the generated-projection contract', () => {
   assert.match(policy, /`pull-requests: read`/u);
   assert.match(policy, /both `github\.actor` and `github\.triggering_actor`/u);
   assert.match(policy, /never required to retain the\s+Changesets it consumed/u);
+  assert.match(policy, /complete PR file list\s+contains only\s+paths in the managed harness inventory/u);
+  assert.match(policy, /`generated-projection` and\s+`harness-projection` modes/u);
 
   for (const consumer of consumers) {
     assert.match(consumer, /ci-execution-policy\.md/u, 'each consumer links the owning policy');
@@ -58,14 +60,18 @@ test('the release lifecycle catalog covers the governed manifest exactly once', 
   for (const repo of governed) {
     const entries = catalog.repositories.filter((entry) => entry.repository === `qwts/${repo.name}`);
     assert.equal(entries.length, 1, `${repo.name} must appear in the catalog exactly once`);
-    const [{ metadataSystem, generatedProjection }] = entries;
+    const [{ metadataSystem, generatedProjection, harnessProjection }] = entries;
     assert.ok(fleet.includes(`\`${repo.name}\``), `${repo.name} has no published disposition`);
     if (metadataSystem === 'none') {
       assert.equal(generatedProjection, null, `${repo.name} has no release system but names a projection`);
+      assert.equal(harnessProjection, null, `${repo.name} has no release gate but names a harness projection`);
       continue;
     }
     for (const field of ['baseRef', 'headRef', 'author']) {
       assert.ok(generatedProjection?.[field], `${repo.name} projection identity is missing ${field}`);
+    }
+    for (const field of ['baseRef', 'headRef', 'author', 'sourceRepository']) {
+      assert.ok(harnessProjection?.[field], `${repo.name} harness identity is missing ${field}`);
     }
   }
 });

@@ -51,6 +51,49 @@ export async function listPullRequestsForCommit({ repository, sha, apiUrl, token
   return pullRequests.map(assertPullRequest);
 }
 
+export async function listPullRequestFiles({
+  repository,
+  number,
+  apiUrl,
+  token,
+  fetchImpl = fetch,
+}) {
+  assertRepository(repository);
+  if (!Number.isSafeInteger(number) || number <= 0) {
+    throw new Error('pull request number is invalid for release-origin lookup');
+  }
+  if (!apiUrl) throw new Error('GitHub REST endpoint is missing for release-origin lookup');
+
+  const files = [];
+  // GitHub exposes at most 3,000 pull-request files. Harness projections are
+  // much smaller, but exhausting every available page keeps the trust decision
+  // bound to the complete API diff rather than a caller-controlled prefix.
+  for (let page = 1; page <= 30; page += 1) {
+    const url = new URL(`/repos/${repository}/pulls/${number}/files?per_page=100&page=${page}`, apiUrl);
+    const batch = await githubJson({ url, token, fetchImpl });
+    if (!Array.isArray(batch)) throw new Error('release-origin file lookup returned malformed data');
+    for (const file of batch) {
+      if (typeof file?.filename !== 'string' || file.filename.length === 0) {
+        throw new Error('release-origin file lookup returned malformed data');
+      }
+      if (file.previous_filename !== undefined && (
+        typeof file.previous_filename !== 'string' || file.previous_filename.length === 0
+      )) {
+        throw new Error('release-origin file lookup returned malformed data');
+      }
+      files.push({
+        filename: file.filename,
+        ...(file.previous_filename === undefined ? {} : { previous_filename: file.previous_filename }),
+      });
+    }
+    if (batch.length < 100) return files;
+    if (page === 30) {
+      throw new Error('release-origin file lookup exceeds GitHub complete-diff limit');
+    }
+  }
+  throw new Error('release-origin file lookup did not terminate');
+}
+
 /**
  * The pull requests whose release policy governs this run. `pull_request` and `merge_group`
  * resolve to exactly one; manual and post-merge lanes resolve the exact commit's associated
@@ -61,7 +104,7 @@ export async function resolveReleaseOrigins(options) {
     if (!options.event.pull_request) throw new Error('pull_request event has no pull request payload');
     return [options.event.pull_request];
   }
-  if (!options.lifecycle.generatedProjection) return [];
+  if (!options.lifecycle.generatedProjection && !options.lifecycle.harnessProjection) return [];
   if (options.eventName === 'merge_group') {
     const head = mergeGroupHeadPullRequest(options.event);
     return [await getPullRequest({ ...options, number: head.number })];
