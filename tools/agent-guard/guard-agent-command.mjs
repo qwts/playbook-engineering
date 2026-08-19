@@ -514,6 +514,11 @@ function hasUnmodeledEnvInvocation(command) {
         // but a future operand-taking option could otherwise hide the command
         // or a later cwd change from this parser. Deny instead of guessing.
         if (option === null) return true;
+        // These options change executable identity or import environment
+        // assignments from outside the reviewed command. A checked-in script
+        // cannot authenticate a substituted runtime, argv0 multicall mode, or
+        // file-sourced NODE_OPTIONS/PATH payload.
+        if (['--argv0', '--env0-from', '--path'].includes(option.name)) return true;
         if (!ENV_LONG_OPERAND_OPTIONS.has(option.name)) continue;
         let operand = word;
         if (option.value === null) {

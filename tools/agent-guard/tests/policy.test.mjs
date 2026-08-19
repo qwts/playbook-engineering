@@ -641,6 +641,9 @@ describe('command hook', () => {
       false,
     );
     assert.equal(evaluateCommand('env --future-operand ignored node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand(`env -iP${outside} node scripts/check-traceability.mjs`, local).allow, false);
+    assert.equal(evaluateCommand('env --env0-from=/tmp/evil node scripts/check-traceability.mjs', local).allow, false);
+    assert.equal(evaluateCommand('env -a alternate node scripts/check-traceability.mjs', local).allow, false);
     assert.equal(evaluateCommand(`command env -C ${outside} node scripts/check-traceability.mjs`, local).allow, false);
     assert.equal(evaluateCommand(`env -S '-C ${outside} node scripts/check-traceability.mjs'`, local).allow, false);
     assert.equal(evaluateCommand(`env --split-string='--chdir=${outside} node scripts/check-traceability.mjs'`, local).allow, false);
