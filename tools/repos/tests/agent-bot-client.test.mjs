@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,8 +12,69 @@ import {
   runMintCommand,
 } from '../lib/agent-bot-client.mjs';
 import { installationRepositories } from '../drift.mjs';
+import { renderUninstalledIdentityCommand } from '../lib/uninstalled-identity-adapter.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+
+const managedAdapters = [
+  { dialect: 'claude', path: '.claude/settings.json' },
+  { dialect: 'codex', path: '.codex/hooks.json' },
+  { dialect: 'cursor', path: '.cursor/hooks.json' },
+];
+
+function strings(value) {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.flatMap(strings);
+  if (value && typeof value === 'object') return Object.values(value).flatMap(strings);
+  return [];
+}
+
+function managedPreCommand(path) {
+  const value = JSON.parse(readFileSync(join(ROOT, path), 'utf8'));
+  const matches = strings(value).filter((candidate) => (
+    candidate.includes('agent-bot agent-hook')
+    && candidate.includes('--event pre-command')
+  ));
+  assert.equal(matches.length, 1, `${path} must have one managed pre-command adapter`);
+  return matches[0];
+}
+
+function runUninstalledAdapter(adapter, command, identity = 'human') {
+  const author = identity === 'unmanaged' ? 'ai9d' : 'Human User';
+  const login = identity === 'unmanaged' ? 'ai9d' : 'qwts';
+  return spawnSync('sh', ['-c', managedPreCommand(adapter.path)], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      AGENT_BOT_HOOK_BIN: join(ROOT, '.missing-agent-hook'),
+      AGENT_BOT_UNMANAGED_AUTHORS: 'ai9d',
+      GH_USER: login,
+      GIT_AUTHOR_EMAIL: `${login}@example.test`,
+      GIT_AUTHOR_NAME: author,
+      GIT_COMMITTER_EMAIL: `${login}@example.test`,
+      GIT_COMMITTER_NAME: author,
+    },
+    input: JSON.stringify({ command }),
+    timeout: 5000,
+  });
+}
+
+function adapterDenied(adapter, command, identity = 'human') {
+  const run = runUninstalledAdapter(adapter, command, identity);
+  assert.equal(run.status, 0, `${adapter.path} failed for ${JSON.stringify(command)}: ${run.stderr}`);
+  const payload = JSON.parse(run.stdout);
+  return adapter.dialect === 'cursor'
+    ? payload.permission === 'deny'
+    : payload.hookSpecificOutput?.permissionDecision === 'deny';
+}
+
+function adapterAllowed(adapter, command, identity = 'human') {
+  const run = runUninstalledAdapter(adapter, command, identity);
+  assert.equal(run.status, 0, `${adapter.path} failed for ${JSON.stringify(command)}: ${run.stderr}`);
+  if (adapter.dialect === 'cursor') assert.deepEqual(JSON.parse(run.stdout), {});
+  else assert.equal(run.stdout, '');
+}
 
 const grant = (token = 'secret-token') => JSON.stringify({
   schema_version: 1,
@@ -122,4 +184,90 @@ test('governed integrations use the installed CLI and the playbook suite exclude
   assert.match(workflow, /tools\/repos\/lib\/agent-bot-client\.mjs/);
   assert.ok(!pkg.scripts.test.includes(obsoleteRuntime));
   assert.equal(pkg.scripts['agent:identity'], undefined);
+});
+
+test('managed adapters render one fail-closed uninstalled classifier', () => {
+  for (const adapter of managedAdapters) {
+    assert.equal(
+      managedPreCommand(adapter.path),
+      renderUninstalledIdentityCommand(adapter.dialect),
+      `${adapter.path} must render the canonical fallback source`,
+    );
+  }
+});
+
+test('every managed adapter denies shell spelling and wrapper bypasses', () => {
+  const bypasses = [
+    'g\\it commit -m x',
+    'git pu\\sh origin HEAD',
+    '2>/tmp/agent-hook-test git commit -m x',
+    '(git commit -m x)',
+    '{ git push; }',
+    'if true; then git commit -m x; fi',
+    'env -i git push',
+    'env -C /tmp git commit -m x',
+    'env --chdir=/tmp git commit -m x',
+    "bash -c 'git commit -m x'",
+    'echo $(git commit -m x)',
+    'git status \\',
+    'gh pr create --title x --body y',
+    'gh api -XDELETE repos/qwts/example/issues/1',
+    'gh api --method DELETE repos/qwts/example/issues/1',
+    "sh -c 'gh issue close 1'",
+  ];
+  for (const adapter of managedAdapters) {
+    for (const command of bypasses) {
+      assert.equal(adapterDenied(adapter, command), true, `${adapter.path} must deny ${command}`);
+    }
+  }
+});
+
+test('every managed adapter protects commit-producing Git operations', () => {
+  const operations = [
+    'git am patch.mbox',
+    'git cherry-pick deadbeef',
+    'git commit -m x',
+    'git commit-tree deadbeef',
+    'git fast-import',
+    'git filter-branch -- --all',
+    'git merge --no-ff topic',
+    'git notes add -m x',
+    'git pull --rebase',
+    'git rebase main',
+    'git revert deadbeef',
+    'git stash push',
+  ];
+  for (const adapter of managedAdapters) {
+    for (const command of operations) {
+      assert.equal(adapterDenied(adapter, command), true, `${adapter.path} must deny ${command}`);
+    }
+  }
+});
+
+test('unambiguous reads and edits remain allowed in every managed adapter', () => {
+  const benign = [
+    'printf ok',
+    'git status',
+    'git diff --stat',
+    'git add README.md',
+    'gh pr view 1',
+    'gh api --method GET repos/qwts/example',
+    "echo 'git commit'",
+    "printf '%s' 'git push'",
+  ];
+  for (const adapter of managedAdapters) {
+    for (const command of benign) adapterAllowed(adapter, command);
+  }
+});
+
+test('the named unmanaged principal can still publish through every adapter', () => {
+  const publish = [
+    'git commit -m x',
+    'git merge --no-ff topic',
+    'git push origin HEAD',
+    'gh pr create --title x --body y',
+  ];
+  for (const adapter of managedAdapters) {
+    for (const command of publish) adapterAllowed(adapter, command, 'unmanaged');
+  }
 });
