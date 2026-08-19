@@ -20,7 +20,6 @@ import path from 'node:path';
 import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { parseGrantMinutes } from '../arbiter.mjs';
 import { evaluateCommand, evaluateHookInput } from '../guard-agent-command.mjs';
 import { clampCeiling, deriveBudget } from '../lib/budget.mjs';
 import { isCi } from '../lib/policy.mjs';
@@ -296,18 +295,14 @@ describe('agent-guard conformance (ENG-0138)', () => {
     }
   });
 
-  test('grant honors the documented --minutes flag instead of silently defaulting', () => {
-    // In-process on purpose: spawning the real arbiter would mint a real
-    // machine-wide grant — stateDir ignores env overrides for real processes.
-    assert.deepEqual(parseGrantMinutes(['grant', 'e2e', '--minutes', '5']), { ok: true, minutes: 5 });
-    assert.deepEqual(parseGrantMinutes(['grant', 'e2e', '7']), { ok: true, minutes: 7 });
-    assert.deepEqual(parseGrantMinutes(['grant', 'e2e']), { ok: true, minutes: 30 });
-    assert.deepEqual(parseGrantMinutes(['grant', 'e2e', '--minutes', '9999']), { ok: true, minutes: 240 });
-    // 0.1 is positive but rounds to zero minutes — a grant already expired at
-    // write time must be a refusal, not a reported success.
-    for (const argv of [['grant', 'e2e', '--minutes', 'soon'], ['grant', 'e2e', '--minutes'], ['grant', 'e2e', '--minutes', '-5'], ['grant', 'e2e', '--minutes', '0'], ['grant', 'e2e', '--minutes', '0.1'], ['grant', 'e2e', '0.4']]) {
-      assert.equal(parseGrantMinutes(argv).ok, false, `expected a refusal for: ${argv.join(' ')}`);
-    }
+  test('legacy grant minting fails closed even outside an identified agent session', () => {
+    const arbiter = path.join(root, 'tools', 'agent-guard', 'arbiter.mjs');
+    const run = spawnSync(process.execPath, [arbiter, 'grant', 'e2e', '--minutes', '5'], {
+      env: { PATH: process.env.PATH ?? '' },
+      encoding: 'utf8',
+    });
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /legacy grant minting is disabled/u);
   });
 
   test('ordinary work is untouched', () => {

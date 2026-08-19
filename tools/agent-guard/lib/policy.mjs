@@ -161,22 +161,14 @@ export function revokeGrant(laneId, env = process.env) {
 /**
  * The agent-vs-human gate, resolved.
  *
- * Classification stays fail-closed: every local caller is an agent until
- * proven otherwise, and no marker's absence proves otherwise. The owner path
- * is a GRANT (#180): `arbiter.mjs grant <lane>` is deniable to agents by the
- * command hook, marker scrubbing is denied by the same hook, so the pair
- * "unmarked session + live grant on disk" is evidence the owner opened this
- * window from their own terminal. A granted run stays fully guarded — lease,
- * ceiling, timeout, and admission enforcement all still apply; the grant
- * only answers WHO. Marked agent sessions are never admitted by a grant.
+ * Classification stays fail-closed: every local wrapper caller is an agent,
+ * and no missing marker or same-user file proves otherwise. Legacy grant
+ * artifacts remain readable only for cleanup; they are never authorization
+ * because an agent-controlled package script can mint them (#235).
  */
-export function evaluateLanePolicy({ label, command, env = process.env, now = Date.now() }) {
+export function evaluateLanePolicy({ label, command, env = process.env }) {
   const lane = classifyLane(label) ?? classifyLane(command);
   if (!lane) return { allowed: true, lane: null };
-  if (!isAgentSession(env)) return { allowed: true, lane, actor: 'human' };
-  if (harnessName(env) === 'human' && readGrant(lane.id, env, now) !== null) {
-    return { allowed: true, lane, actor: 'owner-grant' };
-  }
   return {
     allowed: false,
     lane,
@@ -184,6 +176,6 @@ export function evaluateLanePolicy({ label, command, env = process.env, now = Da
     message:
       `The "${lane.id}" lane is a heavy local suite (${lane.why}) and agents do not run it on this machine by default. ` +
       'Push the branch and let GitHub CI verify — the workflow invokes its underlying CI entrypoint directly. ' +
-      `If a local run is genuinely required, the owner can open a window from their own (non-agent) terminal with \`node tools/agent-guard/arbiter.mjs grant ${lane.id}\` and run this same guarded entrypoint — enforcement stays on. Agent sessions cannot mint or use grants.`,
+      'If a local run is genuinely required, the owner runs the underlying lane directly from their own non-agent terminal; same-user grant files are not authorization.',
   };
 }
