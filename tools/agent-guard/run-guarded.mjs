@@ -349,7 +349,7 @@ async function main() {
     });
   }
 
-  child.on('exit', (code, signal) => {
+  child.on('exit', async (code, signal) => {
     state.done = true;
     clearInterval(poll);
     if (timeoutTimer !== null) clearTimeout(timeoutTimer);
@@ -386,7 +386,14 @@ async function main() {
     }
     // Only a completed run's peak informs future reservations: a run killed
     // at the ceiling or timed out proves nothing about steady-state cost.
-    if (code === 0) recordLanePeak({ env: process.env, repo: repoIdentity, label: options.label, peakRssMb: state.peakRssMb });
+    if (code === 0) {
+      await recordLanePeak({
+        env: process.env,
+        repo: repoIdentity,
+        label: options.label,
+        peakRssMb: state.peakRssMb,
+      });
+    }
     process.exit(code ?? (signal ? 1 : 0));
   });
 

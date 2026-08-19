@@ -184,12 +184,24 @@ export function readLeases(env = process.env, { reap = true } = {}) {
   return live;
 }
 
+function writeFileAtomically(file, content) {
+  const temp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temp, content);
+    renameSync(temp, file);
+  } finally {
+    try {
+      rmSync(temp, { force: true });
+    } catch {
+      // The rename consumed it, or cleanup will happen with the state store.
+    }
+  }
+}
+
 function writeLeaseFile(file, lease) {
   // Write-then-rename: a reader never sees a partial lease, which would
   // otherwise be reaped as junk and free budget that is genuinely in use.
-  const temp = `${file}.${process.pid}.tmp`;
-  writeFileSync(temp, `${JSON.stringify(lease, null, 2)}\n`);
-  renameSync(temp, file);
+  writeFileAtomically(file, `${JSON.stringify(lease, null, 2)}\n`);
 }
 
 export function acquireLease({ env = process.env, label, estimatedMb, repo, worktree, harness, command, pid = process.pid }) {
@@ -294,22 +306,25 @@ const LOCK_POLL_MS = 50;
  * writes here, from RSS it measured. Kept as a small rolling window so one
  * unusually light run does not undersize the next reservation.
  */
-export function recordLanePeak({ env = process.env, repo, label, peakRssMb }) {
-  if (!Number.isFinite(peakRssMb) || peakRssMb <= 0) return;
-  const file = lanePeakFile(env, repo, label);
-  let peaks = [];
+export async function recordLanePeak({ env = process.env, repo, label, peakRssMb }) {
+  if (!Number.isFinite(peakRssMb) || peakRssMb <= 0) return false;
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8'));
-    if (Array.isArray(parsed)) peaks = parsed.filter((value) => Number.isFinite(value) && value > 0);
+    return await withAdmissionLock(env, () => {
+      const file = lanePeakFile(env, repo, label);
+      let peaks = [];
+      try {
+        const parsed = JSON.parse(readFileSync(file, 'utf8'));
+        if (Array.isArray(parsed)) peaks = parsed.filter((value) => Number.isFinite(value) && value > 0);
+      } catch {
+        // First record, or an unreadable file: start fresh.
+      }
+      peaks.push(Math.round(peakRssMb));
+      writeFileAtomically(file, `${JSON.stringify(peaks.slice(-5))}\n`);
+      return true;
+    });
   } catch {
-    // First record, or an unreadable file: start fresh.
-  }
-  peaks.push(Math.round(peakRssMb));
-  try {
-    mkdirSync(lanePeaksDir(env), { recursive: true });
-    writeFileSync(file, `${JSON.stringify(peaks.slice(-5))}\n`);
-  } catch {
-    // Peak history is an optimization; failing to record must not fail the run.
+    // Peak history is an optimization; lock or write failure must not fail the run.
+    return false;
   }
 }
 

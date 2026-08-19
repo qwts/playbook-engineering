@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
+import { Worker } from 'node:worker_threads';
 
 import {
   acquireLease,
@@ -320,7 +321,7 @@ describe('liveness probe', () => {
 });
 
 describe('lane peak store (#180)', () => {
-  test('linked worktrees share canonical history without colliding with same-basename clones (#236)', () => {
+  test('linked worktrees share canonical history without colliding with same-basename clones (#236)', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'agent-guard-repos-'));
     roots.push(root);
     const first = path.join(root, 'first', 'app');
@@ -354,29 +355,104 @@ describe('lane peak store (#180)', () => {
     );
 
     const peakEnv = scratchEnv();
-    recordLanePeak({ env: peakEnv, repo: firstIdentity, label: 'test', peakRssMb: 900 });
+    await recordLanePeak({ env: peakEnv, repo: firstIdentity, label: 'test', peakRssMb: 900 });
     assert.equal(readLanePeakMb({ env: peakEnv, repo: repositoryIdentity(sibling), label: 'test' }), 900);
     assert.equal(readLanePeakMb({ env: peakEnv, repo: repositoryIdentity(second), label: 'test' }), null);
   });
 
-  test('peaks round-trip through the protected store and keep the max of a rolling window', () => {
+  test('peaks round-trip through the protected store and keep the max of a rolling window', async () => {
     const env = { AGENT_GUARD_STATE_DIR: mkdtempSync(path.join(tmpdir(), 'agent-guard-peaks-')) };
     assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test' }), null);
-    recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 900 });
-    recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 1100 });
-    recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 700 });
+    await recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 900 });
+    await recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 1100 });
+    await recordLanePeak({ env, repo: 'overlook', label: 'test', peakRssMb: 700 });
     assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'test' }), 1100);
     // Other lanes and repos do not bleed together.
     assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'other' }), null);
     assert.equal(readLanePeakMb({ env, repo: 'cartograph', label: 'test' }), null);
-    recordLanePeak({ env, repo: '/repos/a::b', label: 'test', peakRssMb: 400 });
-    recordLanePeak({ env, repo: '/repos/a', label: 'b::test', peakRssMb: 800 });
+    await recordLanePeak({ env, repo: '/repos/a::b', label: 'test', peakRssMb: 400 });
+    await recordLanePeak({ env, repo: '/repos/a', label: 'b::test', peakRssMb: 800 });
     assert.equal(readLanePeakMb({ env, repo: '/repos/a::b', label: 'test' }), 400);
     assert.equal(readLanePeakMb({ env, repo: '/repos/a', label: 'b::test' }), 800);
     // Junk values are never recorded or returned.
-    recordLanePeak({ env, repo: 'overlook', label: 'junk', peakRssMb: Number.NaN });
-    recordLanePeak({ env, repo: 'overlook', label: 'junk', peakRssMb: -5 });
+    await recordLanePeak({ env, repo: 'overlook', label: 'junk', peakRssMb: Number.NaN });
+    await recordLanePeak({ env, repo: 'overlook', label: 'junk', peakRssMb: -5 });
     assert.equal(readLanePeakMb({ env, repo: 'overlook', label: 'junk' }), null);
     rmSync(env.AGENT_GUARD_STATE_DIR, { recursive: true, force: true });
+  });
+
+  test('concurrent writers retain the larger measured sample', async () => {
+    const laneCount = 4;
+    const samples = [320, 640, 960, 1440];
+    const writerCount = laneCount * samples.length;
+    const gateBuffer = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 2);
+    const gate = new Int32Array(gateBuffer);
+    const moduleUrl = new URL('../lib/leases.mjs', import.meta.url).href;
+    const workerUrl = new URL(`data:text/javascript,${encodeURIComponent(`
+      import { parentPort, workerData } from 'node:worker_threads';
+      const { recordLanePeak } = await import(workerData.moduleUrl);
+      const gate = new Int32Array(workerData.gateBuffer);
+      Atomics.add(gate, 0, 1);
+      Atomics.notify(gate, 0);
+      Atomics.wait(gate, 1, 0);
+      const recorded = await recordLanePeak(workerData.peak);
+      parentPort.postMessage(recorded);
+    `)}`);
+    const workers = [];
+    const completions = [];
+
+    for (let lane = 0; lane < laneCount; lane += 1) {
+      for (const peakRssMb of samples) {
+        const worker = new Worker(workerUrl, {
+          workerData: {
+            moduleUrl,
+            gateBuffer,
+            peak: {
+              env: { AGENT_GUARD_STATE_DIR: env.AGENT_GUARD_STATE_DIR },
+              repo: 'shared-checkout',
+              label: `concurrent-${lane}`,
+              peakRssMb,
+            },
+          },
+        });
+        workers.push(worker);
+        completions.push(new Promise((resolve, reject) => {
+          let recorded = false;
+          worker.once('message', (value) => {
+            recorded = value;
+          });
+          worker.once('error', reject);
+          worker.once('exit', (code) => {
+            if (code !== 0) reject(new Error(`lane-peak writer exited ${code}`));
+            else if (!recorded) reject(new Error('lane-peak writer did not record its sample'));
+            else resolve();
+          });
+        }));
+      }
+    }
+
+    try {
+      const readyDeadline = Date.now() + 10_000;
+      while (Atomics.load(gate, 0) < writerCount && Date.now() < readyDeadline) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 5);
+        });
+      }
+      assert.equal(Atomics.load(gate, 0), writerCount, 'every writer must reach the shared start gate');
+      Atomics.store(gate, 1, 1);
+      Atomics.notify(gate, 1, writerCount);
+      await Promise.all(completions);
+    } finally {
+      Atomics.store(gate, 1, 1);
+      Atomics.notify(gate, 1, writerCount);
+      await Promise.all(workers.map((worker) => worker.terminate()));
+    }
+    for (let lane = 0; lane < laneCount; lane += 1) {
+      assert.equal(
+        readLanePeakMb({ env, repo: 'shared-checkout', label: `concurrent-${lane}` }),
+        Math.max(...samples),
+        `lane ${lane} lost its larger concurrent sample`,
+      );
+    }
   });
 });
