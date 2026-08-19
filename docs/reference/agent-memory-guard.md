@@ -36,23 +36,20 @@ tree, and what admission *reserves* is smaller still when the lane has a
 recent measured peak: peak plus a conservative margin, so a lane that
 measures well under the cap no longer books the full cap against admission.
 Peak history is keyed by the checkout's canonical Git common directory, lane
-label, exact command arguments, and a versioned command-behavior identity. That
-identity requires a clean exact Git revision and binds the resolved executable
-plus the repository-relative working directory and complete effective child
-environment; environment values are authenticated with the machine token and
-are never stored. The structural `PWD`, `INIT_CWD`, and `PATH` entries rooted
-in the checkout are represented relative to it so linked worktrees at the same
-revision and relative working directory can share when all other evidence
-matches; every other environment value remains exact. A staged, dirty,
-untracked, non-Git, or otherwise unprovable state is a cold start.
-Unrelated clones remain isolated, and a cheap command, older revision,
-different top-level runtime, or different environment cannot lend its
-measurement to a heavier behavior under the same label.
-Assume-unchanged or skip-worktree index hints force a cold start too. Only the
-wrapper's exact untracked `.guard/last-run.json` and `.guard/history.jsonl`
-diagnostics at the Git worktree root are excluded from cleanliness; every cwd
-in that worktree writes to the same pair, while the same suffix beneath another
-directory and every other untracked path stay cold.
+label, exact argv, and a versioned behavior HMAC. Reuse requires a clean exact
+revision and binds the resolved executable, canonical absolute cwd, full child
+environment, and raw plus structural `PWD`, `INIT_CWD`, and `PATH` evidence.
+Linked worktrees share the protected namespace, but child-visible path
+differences keep peaks separate. Direct Node and supported sh-family files, and
+Python `-S` file forms, bind canonical entry-file metadata and SHA-256; stdin,
+inline, module, startup-path, unsupported-shell, and listed indirect-wrapper
+forms stay cold. Runtime recognition uses canonical names; a copied or renamed
+runtime stays cold for no-arg, stdin, option, or filesystem-target argv. Other
+unrecognized executables use exact native argv evidence. Package-manager and
+entry-file evidence does not claim a hermetic network or transitive-input
+closure. Dirty, staged, untracked, non-Git, assume-unchanged, skip-worktree, or
+otherwise unprovable states stay cold. Only the two root-owned `.guard`
+diagnostics are ignored.
 
 ## Admission
 
@@ -133,14 +130,13 @@ Wrapping a command:
 node tools/agent-guard/run-guarded.mjs --label test:dom -- npm run test:dom:inner
 ```
 
-The wrapper puts the command in its own process group, polls the whole
-descendant tree's RSS every 250 ms, and terminates the group on breach
-(`SIGTERM`, then `SIGKILL` after 2 s, or immediately past 1.25× the ceiling,
-because a fast runaway outruns a polite shutdown). Every run writes
-`.guard/last-run.json` and appends to `.guard/history.jsonl` at the Git worktree
-root (or at the supplied cwd outside Git); a run killed for `rss-limit` or
-`timeout` exits non-zero, so a test that "passes" while eating the machine is a
-failed test.
+The wrapper directly spawns exact argv in its own process group and starts an
+asynchronous RSS sample before the 250 ms polling interval. Only a positive
+sample of the live target tree becomes peak history; a missed fast target stays
+cold. Breaches get `SIGTERM`, then `SIGKILL` after 2 s or immediately past
+1.25× the ceiling. Diagnostics use `.guard/last-run.json` and
+`.guard/history.jsonl` at the worktree root (or cwd outside Git); `rss-limit`
+and `timeout` exit non-zero.
 
 ## Environment
 

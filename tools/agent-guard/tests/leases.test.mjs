@@ -7,7 +7,8 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { once } from 'node:events';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
@@ -31,7 +32,7 @@ import {
   withAdmissionLock,
 } from '../lib/leases.mjs';
 import { ensureStateDirs, leasesDir, machineToken } from '../lib/protocol.mjs';
-import { guardDiagnosticPaths } from '../run-guarded.mjs';
+import { guardedInvocation, guardDiagnosticPaths, POLL_MS, recordProcessTreeSample, startProcessTreeMonitor } from '../run-guarded.mjs';
 
 const roots = [];
 let env;
@@ -323,6 +324,151 @@ describe('liveness probe', () => {
   });
 });
 
+describe('process-tree peak monitoring', () => {
+  test('the guarded command is spawned directly without shell interpolation', () => {
+    const command = ['node', '-e', 'console.log("$HOME; $(whoami)")', 'argument with spaces'];
+    assert.deepEqual(guardedInvocation(command), {
+      executable: 'node',
+      args: command.slice(1),
+    });
+  });
+
+  test('monitoring records only positive target samples completed while the target is live', () => {
+    const tinyState = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
+    assert.deepEqual(
+      recordProcessTreeSample(tinyState, '701 1 701 1\n', 701),
+      { rssMb: 1, processCount: 1 },
+      'a live 1 KB process rounds up to positive whole-MB history',
+    );
+    assert.equal(tinyState.targetObserved, true);
+    const emptyState = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
+    recordProcessTreeSample(emptyState, '701 1 701 0\n', 701);
+    assert.equal(emptyState.targetObserved, false, 'zero RSS is not target measurement evidence');
+    const completedState = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: true };
+    recordProcessTreeSample(completedState, '701 1 701 8192\n', 701);
+    assert.equal(completedState.peakRssMb, 0, 'an in-flight ps result cannot measure a target after exit');
+    assert.equal(completedState.targetObserved, false);
+
+    const state = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
+    const samples = [];
+    const sample = () => {
+      const observed = recordProcessTreeSample(state, '701 1 701 1\n702 701 701 1536\n', 701);
+      samples.push(observed);
+    };
+    const scheduled = [];
+    const timer = startProcessTreeMonitor(sample, {
+      schedule(callback, intervalMs) {
+        scheduled.push({ callback, intervalMs });
+        return 'timer';
+      },
+    });
+
+    assert.equal(timer, 'timer');
+    assert.deepEqual(samples, [{ rssMb: 2, processCount: 2 }], 'the initial target sample runs synchronously before scheduling');
+    assert.equal(scheduled.length, 1);
+    assert.ok(scheduled[0].intervalMs > 0);
+    assert.equal(state.peakRssMb, 2, 'a real non-empty tree always produces a positive whole-MB peak');
+    assert.equal(state.peakProcessCount, 2);
+    assert.equal(state.targetObserved, true);
+
+    scheduled[0].callback();
+    assert.equal(state.peakRssMb, 2, 'later smaller/equal samples cannot erase the maximum');
+    recordProcessTreeSample(state, '701 1 701 8192\n', 701);
+    assert.equal(state.peakRssMb, 8, 'later larger samples still raise the maximum');
+  });
+
+  test('an observed target records its own positive peak before the first interval', async () => {
+    const command = [process.execPath, '-e', 'require("node:fs").readFileSync(3)'];
+    const invocation = guardedInvocation(command);
+    const state = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
+    const child = spawn(invocation.executable, invocation.args, {
+      detached: true,
+      env: process.env,
+      stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
+    });
+    const ps = psExecutable();
+    assert.ok(ps, 'a system ps binary is required for production-equivalent sampling');
+    try {
+      const psOutput = execFileSync(ps, ['-axo', 'pid=,ppid=,pgid=,rss='], { encoding: 'utf8' });
+      recordProcessTreeSample(state, psOutput, child.pid);
+      child.stdio[3].end();
+      const [code, signal] = await once(child, 'exit');
+      assert.equal(code, 0);
+      assert.equal(signal, null);
+      assert.equal(state.targetObserved, true);
+      assert.ok(state.peakRssMb > 0, 'history comes from the observed target process');
+
+      const recorded = await recordLanePeak({
+        env,
+        repo: 'fast-e2e',
+        label: 'test:fast-history',
+        command,
+        behaviorIdentity: 'fast-e2e-behavior',
+        peakRssMb: state.peakRssMb,
+      });
+      assert.equal(recorded, true);
+      assert.equal(
+        readLanePeakMb({ env, repo: 'fast-e2e', label: 'test:fast-history', command, behaviorIdentity: 'fast-e2e-behavior' }),
+        state.peakRssMb,
+      );
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // The fast child may have exited between the check and cleanup.
+        }
+      }
+    }
+  });
+
+  test('a missed ultra-fast target stays cold instead of borrowing launcher RSS', async () => {
+    const trueExecutable = ['/usr/bin/true', '/bin/true'].find((candidate) => existsSync(candidate));
+    const command = trueExecutable ? [trueExecutable] : [process.execPath, '-e', 'process.exit(0)'];
+    const invocation = guardedInvocation(command);
+    const state = { peakRssMb: 0, peakProcessCount: 0, targetObserved: false, done: false };
+    const child = spawn(invocation.executable, invocation.args, {
+      detached: true,
+      env: process.env,
+      stdio: 'ignore',
+    });
+    try {
+      const ps = psExecutable();
+      assert.ok(ps, 'a system ps binary is required for production-equivalent sampling');
+      const [code, signal] = await once(child, 'exit');
+      assert.equal(code, 0);
+      assert.equal(signal, null);
+      state.done = true;
+      const psOutput = execFileSync(ps, ['-axo', 'pid=,ppid=,pgid=,rss='], { encoding: 'utf8' });
+      recordProcessTreeSample(state, psOutput, child.pid);
+      assert.equal(state.targetObserved, false);
+      assert.equal(state.peakRssMb, 0);
+
+      const recorded = await recordLanePeak({
+        env,
+        repo: 'fast-e2e',
+        label: 'test:fast-history',
+        command,
+        behaviorIdentity: 'fast-e2e-behavior',
+        peakRssMb: state.peakRssMb,
+      });
+      assert.equal(recorded, false);
+      assert.equal(
+        readLanePeakMb({ env, repo: 'fast-e2e', label: 'test:fast-history', command, behaviorIdentity: 'fast-e2e-behavior' }),
+        null,
+      );
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // The fast child may have exited between the check and cleanup.
+        }
+      }
+    }
+  });
+});
+
 describe('lane peak store (#180)', () => {
   test('linked worktrees share only matching command behavior (#223, #236)', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'agent-guard-repos-'));
@@ -379,7 +525,20 @@ describe('lane peak store (#180)', () => {
       behaviorEnv: environmentFor(sibling),
     });
     assert.match(firstBehavior, /^[0-9a-f]{64}$/u);
-    assert.equal(siblingBehavior, firstBehavior, 'same revision and effective environment may share across worktrees');
+    assert.notEqual(siblingBehavior, firstBehavior, 'distinct raw PWD and INIT_CWD spellings cannot share history');
+    const firstPortableBehavior = commandBehaviorIdentity(first, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(first, { PWD: '.', INIT_CWD: '.' }),
+    });
+    const siblingPortableBehavior = commandBehaviorIdentity(sibling, command, {
+      env: peakEnv,
+      behaviorEnv: environmentFor(sibling, { PWD: '.', INIT_CWD: '.' }),
+    });
+    assert.notEqual(
+      siblingPortableBehavior,
+      firstPortableBehavior,
+      'the child-visible absolute invocation cwd keeps linked-worktree behavior distinct',
+    );
 
     const firstNested = path.join(first, 'packages', 'app');
     const siblingNested = path.join(sibling, 'packages', 'app');
@@ -400,10 +559,10 @@ describe('lane peak store (#180)', () => {
       behaviorEnv: environmentFor(firstOtherCwd),
     });
     assert.match(firstNestedBehavior, /^[0-9a-f]{64}$/u);
-    assert.equal(
+    assert.notEqual(
       siblingNestedBehavior,
       firstNestedBehavior,
-      'linked worktrees may share behavior only at the same repository-relative cwd',
+      'matching repository-relative cwd does not erase distinct raw cwd spellings',
     );
     assert.notEqual(firstNestedBehavior, firstBehavior, 'the repository-relative cwd is command behavior');
     assert.notEqual(firstOtherCwdBehavior, firstNestedBehavior, 'different repository-relative cwd values cannot share history');
@@ -487,9 +646,30 @@ describe('lane peak store (#180)', () => {
       repo: firstIdentity,
       label: 'test',
       command,
-      behaviorIdentity: firstBehavior,
+      behaviorIdentity: firstPortableBehavior,
       peakRssMb: 900,
     });
+    assert.equal(
+      readLanePeakMb({
+        env: peakEnv,
+        repo: repositoryIdentity(first),
+        label: 'test',
+        command,
+        behaviorIdentity: firstPortableBehavior,
+      }),
+      900,
+    );
+    assert.equal(
+      readLanePeakMb({
+        env: peakEnv,
+        repo: repositoryIdentity(sibling),
+        label: 'test',
+        command,
+        behaviorIdentity: siblingPortableBehavior,
+      }),
+      null,
+      'linked worktrees share the protected namespace but not child-visible behavior history',
+    );
     assert.equal(
       readLanePeakMb({
         env: peakEnv,
@@ -498,7 +678,8 @@ describe('lane peak store (#180)', () => {
         command,
         behaviorIdentity: siblingBehavior,
       }),
-      900,
+      null,
+      'an absolute sibling-worktree spelling cannot borrow portable-cwd history',
     );
     assert.equal(
       readLanePeakMb({
@@ -620,12 +801,12 @@ describe('lane peak store (#180)', () => {
     const external = path.join(root, 'external-runner');
     writeFileSync(external, '#!/bin/sh\nexit 0\n');
     chmodSync(external, 0o755);
-    const externalBefore = commandBehaviorIdentity(first, [external], {
+    const externalBefore = commandBehaviorIdentity(first, [external, 'literal-mode'], {
       env: peakEnv,
       behaviorEnv: environmentFor(first),
     });
     writeFileSync(external, '#!/bin/sh\necho changed\nexit 0\n');
-    const externalAfter = commandBehaviorIdentity(first, [external], {
+    const externalAfter = commandBehaviorIdentity(first, [external, 'literal-mode'], {
       env: peakEnv,
       behaviorEnv: environmentFor(first),
     });
@@ -696,10 +877,27 @@ describe('lane peak store (#180)', () => {
     const firstBehavior = identityFor(first);
     const siblingBehavior = identityFor(sibling);
     assert.match(firstBehavior, /^[0-9a-f]{64}$/u);
-    assert.equal(
+    assert.notEqual(
       siblingBehavior,
       firstBehavior,
-      'canonical worktree-root PWD, INIT_CWD, and PATH targets share structurally',
+      'absolute PWD, INIT_CWD, and PATH spellings remain distinct across linked worktrees',
+    );
+    const firstDot = `${first}${path.sep}.`;
+    assert.notEqual(identityFor(first, { PWD: firstDot }), firstBehavior, 'raw PWD spelling is behavior even when canonical meaning matches');
+    assert.notEqual(identityFor(first, { INIT_CWD: firstDot }), firstBehavior, 'raw INIT_CWD spelling is behavior even when canonical meaning matches');
+    assert.notEqual(
+      identityFor(first, { PATH: `${firstDot}${path.delimiter}${systemPath}` }),
+      firstBehavior,
+      'raw PATH components are behavior even when canonical meaning matches',
+    );
+    const cwdAlias = path.join(root, 'cwd-alias');
+    symlinkSync(first, cwdAlias);
+    assert.notEqual(identityFor(first, { PWD: cwdAlias }), firstBehavior, 'a PWD symlink spelling cannot borrow canonical-path history');
+    assert.notEqual(identityFor(first, { INIT_CWD: cwdAlias }), firstBehavior, 'an INIT_CWD symlink spelling cannot borrow canonical-path history');
+    assert.notEqual(
+      identityFor(first, { PATH: `${cwdAlias}${path.delimiter}${systemPath}` }),
+      firstBehavior,
+      'a PATH symlink spelling cannot borrow canonical-path history',
     );
 
     assert.notEqual(
@@ -727,15 +925,15 @@ describe('lane peak store (#180)', () => {
       firstBehavior,
       'an empty INIT_CWD remains distinct from the invocation cwd',
     );
-    assert.equal(
+    assert.notEqual(
       identityFor(sibling, { PWD: '', INIT_CWD: '' }),
       identityFor(first, { PWD: '', INIT_CWD: '' }),
-      'the same exact empty PWD and INIT_CWD values still share across linked worktrees',
+      'the same env spellings do not erase distinct absolute invocation cwd values',
     );
-    assert.equal(
+    assert.notEqual(
       identityFor(first, { PATH: `${path.delimiter}${systemPath}` }),
       firstBehavior,
-      'an empty PATH component has execvp cwd semantics',
+      'raw PATH spelling remains bound even when an empty component resolves to cwd',
     );
 
     const firstAbsoluteEscape = `${first}${path.sep}..${path.sep}toolbin`;
@@ -771,11 +969,232 @@ describe('lane peak store (#180)', () => {
       INIT_CWD: `contained-bin${path.sep}..`,
       PATH: `contained-bin${path.delimiter}${systemPath}`,
     });
-    assert.equal(
+    assert.notEqual(
       siblingContained,
       firstContained,
-      'same contained relative targets share across linked worktrees',
+      'same relative env spellings still run from distinct absolute linked-worktree cwd values',
     );
+  });
+
+  test('interpreter history binds exact payload files and rejects indirect execution', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'agent-guard-payloads-'));
+    roots.push(root);
+    const checkout = path.join(root, 'checkout');
+    const external = path.join(root, 'external');
+    mkdirSync(checkout);
+    mkdirSync(external);
+
+    const git = ['/usr/bin/git', '/bin/git'].find((candidate) => existsSync(candidate));
+    assert.ok(git, 'a system Git binary is required to resolve payload evidence');
+    execFileSync(git, ['-C', checkout, 'init', '--quiet'], { stdio: 'ignore' });
+    writeFileSync(path.join(checkout, 'README.md'), 'fixture\n');
+    writeFileSync(path.join(checkout, '.gitignore'), 'ignored/\n');
+    writeFileSync(path.join(checkout, '+O'), 'tracked option-shaped decoy\n');
+    writeFileSync(path.join(checkout, '-m'), 'raise SystemExit(0)\n');
+    execFileSync(git, ['-C', checkout, 'add', '--', '.gitignore', 'README.md', '+O', '-m'], { stdio: 'ignore' });
+    execFileSync(git, [
+      '-C', checkout,
+      '-c', 'user.name=Agent Guard Test',
+      '-c', 'user.email=guard@example.invalid',
+      'commit', '--quiet', '-m', 'fixture',
+    ], { stdio: 'ignore' });
+    mkdirSync(path.join(checkout, 'ignored'));
+    writeFileSync(path.join(checkout, 'ignored', 'job.mjs'), 'process.exit(0);\n');
+
+    const peakEnv = scratchEnv();
+    const baseBehaviorEnv = {
+      PWD: checkout,
+      INIT_CWD: checkout,
+      PATH: process.env.PATH ?? '/usr/bin:/bin',
+      AGENT_GUARDED: '<guard-lease>',
+    };
+    const identityFor = (command, overrides = {}) => commandBehaviorIdentity(checkout, command, {
+      env: peakEnv,
+      behaviorEnv: { ...baseBehaviorEnv, ...overrides },
+    });
+
+    const nodePayload = path.join(external, 'job.mjs');
+    writeFileSync(nodePayload, 'process.exit(0);\n');
+    const nodeBefore = identityFor([process.execPath, nodePayload]);
+    assert.match(nodeBefore, /^[0-9a-f]{64}$/u, 'an exact Node file payload is provable');
+    writeFileSync(nodePayload, 'process.exit(1);\n');
+    const nodeAfter = identityFor([process.execPath, nodePayload]);
+    assert.notEqual(nodeAfter, nodeBefore, 'same-length external payload mutation invalidates history');
+    assert.match(identityFor([process.execPath, '--', nodePayload]), /^[0-9a-f]{64}$/u, 'the explicit -- file form is provable');
+
+    const runtimeAlias = path.join(external, 'node-runtime');
+    symlinkSync(process.execPath, runtimeAlias);
+    assert.match(identityFor([runtimeAlias, nodePayload]), /^[0-9a-f]{64}$/u, 'canonical runtime identity recognizes a symlink alias');
+    const conflictingRuntimeAlias = path.join(external, 'node');
+    symlinkSync('/bin/sh', conflictingRuntimeAlias);
+    assert.equal(
+      identityFor([conflictingRuntimeAlias, path.join(external, 'exact.sh')]),
+      null,
+      'a requested Node name cannot disguise a canonical shell runtime',
+    );
+    const falseRuntimeAlias = path.join(external, 'python');
+    symlinkSync('/bin/echo', falseRuntimeAlias);
+    assert.equal(
+      identityFor([falseRuntimeAlias, nodePayload]),
+      null,
+      'a requested interpreter name cannot disguise an unrecognized executable',
+    );
+
+    const targetA = path.join(external, 'target-a.mjs');
+    const targetB = path.join(external, 'target-b.mjs');
+    const linkedPayload = path.join(external, 'linked.mjs');
+    writeFileSync(targetA, 'process.exit(0);\n');
+    writeFileSync(targetB, 'process.exit(0);\n');
+    symlinkSync(targetA, linkedPayload);
+    const linkedA = identityFor([process.execPath, linkedPayload]);
+    rmSync(linkedPayload);
+    symlinkSync(targetB, linkedPayload);
+    const linkedB = identityFor([process.execPath, linkedPayload]);
+    assert.notEqual(linkedB, linkedA, 'retargeting a payload symlink invalidates identical bytes');
+
+    const relativePayload = path.relative(checkout, nodePayload);
+    assert.match(identityFor([process.execPath, relativePayload]), /^[0-9a-f]{64}$/u, 'a resolvable relative payload is provable');
+    assert.equal(identityFor([process.execPath, path.join(external, 'missing.mjs')]), null, 'missing payloads stay cold');
+    assert.equal(identityFor([process.execPath, external]), null, 'directory payloads stay cold');
+
+    const exactInterpreters = [
+      [process.execPath, '.mjs', 'process.exit(0);\n'],
+      ['/bin/sh', '.sh', 'exit 0\n'],
+    ];
+    const python = ['/usr/bin/python3', '/usr/local/bin/python3', '/opt/homebrew/bin/python3'].find((candidate) => existsSync(candidate));
+    for (const [interpreter, extension, contents] of exactInterpreters) {
+      const payload = path.join(external, `exact${extension}`);
+      writeFileSync(payload, contents);
+      assert.match(identityFor([interpreter, payload]), /^[0-9a-f]{64}$/u, `${path.basename(interpreter)} exact file payload is provable`);
+    }
+    if (python) {
+      const pythonPayload = path.join(external, 'exact.py');
+      writeFileSync(pythonPayload, 'raise SystemExit(0)\n');
+      assert.match(identityFor([python, '-S', pythonPayload]), /^[0-9a-f]{64}$/u, 'Python -S file payload is provable');
+      assert.match(identityFor([python, '-S', '--', pythonPayload]), /^[0-9a-f]{64}$/u, 'Python -S -- file payload is provable');
+      assert.match(identityFor([python, '-S', '--', '-m']), /^[0-9a-f]{64}$/u, 'an explicit separator permits an option-shaped file payload');
+      assert.equal(identityFor([python, pythonPayload]), null, 'plain Python file execution stays cold because site startup is implicit');
+    }
+    if (existsSync('/bin/bash')) {
+      assert.equal(
+        identityFor(['/bin/bash', '+O', 'extglob', path.join(external, 'exact.sh')]),
+        null,
+        'leading + shell options cannot make a tracked decoy look like the executed payload',
+      );
+    }
+
+    const dynamicForms = [
+      [process.execPath],
+      [process.execPath, '-'],
+      [process.execPath, '-e', 'process.exit(0)'],
+      [process.execPath, '--eval', 'process.exit(0)'],
+      [process.execPath, '--test', nodePayload],
+      ['/bin/sh'],
+      ['/bin/sh', '-s'],
+      ['/bin/sh', '-c', 'exit 0'],
+    ];
+    if (python) dynamicForms.push(
+      [python],
+      [python, '-'],
+      [python, '-c', 'raise SystemExit(0)'],
+      [python, '-m', 'module_name'],
+      [python, '-S'],
+      [python, '-S', '-c', 'raise SystemExit(0)'],
+      [python, '-S', '-m', 'module_name'],
+    );
+    for (const command of dynamicForms) {
+      assert.equal(identityFor(command), null, `${command.join(' ')} must stay cold without a strict file payload`);
+    }
+
+    assert.equal(identityFor([process.execPath, nodePayload], { NODE_PATH: external }), null, 'NODE_PATH indirection stays cold');
+    assert.equal(identityFor([process.execPath, nodePayload], { NODE_OPTIONS: `--require=${nodePayload}` }), null, 'NODE_OPTIONS payload indirection stays cold');
+    assert.equal(identityFor([process.execPath, nodePayload], { LD_AUDIT: nodePayload }), null, 'dynamic-loader environment stays cold');
+    assert.match(
+      identityFor([process.execPath, nodePayload], { NODE_OPTIONS: '--max-old-space-size=512' }),
+      /^[0-9a-f]{64}$/u,
+      'the guard-owned heap ceiling does not make direct Node payloads permanently cold',
+    );
+    assert.equal(identityFor(['/bin/sh', path.join(external, 'exact.sh')], { ENV: nodePayload }), null, 'shell startup-file indirection stays cold');
+    if (python) {
+      const pythonPayload = path.join(external, 'exact.py');
+      assert.equal(identityFor([python, '-S', pythonPayload], { PYTHONPATH: external }), null, 'Python path indirection stays cold');
+      assert.equal(identityFor([python, '-S', pythonPayload], { PYTHONINSPECT: '1' }), null, 'Python inherited-stdin inspection stays cold');
+      assert.equal(identityFor([python, '-S', pythonPayload], { PYTHONUSERBASE: external }), null, 'Python user-base indirection stays cold');
+    }
+
+    const renamedRuntime = path.join(external, 'renamed-runtime');
+    copyFileSync('/bin/sh', renamedRuntime);
+    chmodSync(renamedRuntime, 0o755);
+    assert.equal(identityFor([renamedRuntime]), null, 'a renamed runtime with implicit stdin stays cold');
+    assert.equal(identityFor([renamedRuntime, '-']), null, 'a renamed runtime with explicit stdin stays cold');
+    assert.equal(identityFor([renamedRuntime, '--']), null, 'a renamed runtime with an option-only stdin form stays cold');
+    assert.equal(identityFor([renamedRuntime, '--no-warnings']), null, 'an unrecognized executable with option-shaped argv stays cold');
+    assert.equal(
+      identityFor([renamedRuntime, `--import=file://${nodePayload}`]),
+      null,
+      'an option-attached file URL stays cold for an unrecognized executable',
+    );
+    assert.equal(
+      identityFor([renamedRuntime, path.join(external, 'exact.sh')]),
+      null,
+      'a copied runtime with an external file operand stays cold when its family is unprovable',
+    );
+    assert.equal(identityFor([renamedRuntime, external]), null, 'a renamed runtime with a mutable directory operand stays cold');
+    assert.equal(
+      identityFor([renamedRuntime, `--require=${nodePayload}`]),
+      null,
+      'an option-attached filesystem target stays cold for an unrecognized executable',
+    );
+    assert.equal(
+      identityFor([renamedRuntime, path.join('ignored', 'job.mjs')]),
+      null,
+      'an ignored in-repository file stays cold for an unrecognized executable',
+    );
+    const guardDiagnostics = path.join(checkout, '.guard');
+    mkdirSync(guardDiagnostics);
+    writeFileSync(path.join(guardDiagnostics, 'last-run.json'), '{}\n');
+    assert.equal(
+      identityFor([renamedRuntime, path.join('.guard', 'last-run.json')]),
+      null,
+      'an exempt mutable guard diagnostic cannot become unrecognized-runtime payload evidence',
+    );
+
+    for (const unsupportedShell of [
+      '/bin/ash',
+      '/bin/csh',
+      '/bin/mksh',
+      '/bin/tcsh',
+      '/bin/zsh',
+      '/usr/bin/fish',
+      '/usr/bin/mksh',
+      '/usr/local/bin/fish',
+      '/opt/homebrew/bin/fish',
+      '/usr/local/bin/pwsh',
+      '/opt/homebrew/bin/pwsh',
+    ].filter((candidate) => existsSync(candidate))) {
+      assert.equal(
+        identityFor([unsupportedShell, path.join(external, 'exact.sh')]),
+        null,
+        `${path.basename(unsupportedShell)} stays cold without startup-file evidence`,
+      );
+    }
+
+    for (const wrapper of ['/usr/bin/env', '/bin/nice', '/usr/bin/nice', '/usr/bin/nohup', '/usr/bin/time', '/usr/bin/xargs'].filter((candidate) => existsSync(candidate))) {
+      assert.equal(
+        identityFor([wrapper, process.execPath, nodePayload]),
+        null,
+        `${path.basename(wrapper)} indirection cannot bypass interpreter payload evidence`,
+      );
+    }
+    for (const wrapperName of ['chrt', 'doas', 'env', 'flock', 'ionice', 'nice', 'nohup', 'setsid', 'stdbuf', 'strace', 'sudo', 'time', 'timeout', 'xargs']) {
+      const wrapperAlias = path.join(external, wrapperName);
+      symlinkSync(process.execPath, wrapperAlias);
+      assert.equal(
+        identityFor([wrapperAlias, process.execPath, nodePayload]),
+        null,
+        `${wrapperName} aliases stay cold rather than hiding an interpreter payload`,
+      );
+    }
   });
 
   test('peaks round-trip through the protected store and keep the max of a rolling window', async () => {
