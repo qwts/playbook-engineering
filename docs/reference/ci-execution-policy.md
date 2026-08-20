@@ -97,6 +97,10 @@ evidence falls through to the complete suite. The agent waits for the manual
 run to finish before opening or promoting the PR; an in-progress run is not
 evidence.
 
+Preflight reuse skips dependency installation, the complete suite, inventory,
+and duplicate CodeQL, but ready and updated PRs still publish required contexts
+through zero-install docs governance.
+
 Use a PR-scoped concurrency group with `cancel-in-progress: true`. Queue runs
 use their head ref, replacing obsolete builds without canceling another queue
 candidate. One lifecycle workflow prevents equivalent same-commit suites.
@@ -110,11 +114,9 @@ Advanced CodeQL runs for ready PRs lacking evidence, manual suites, every merge
 group, and every `main` push. The default-branch scan remains because queue
 analysis cannot own its alerts; language coverage and immutable pins remain.
 
-When a repository requires more than the stable `CI` context, each retained
-context must report for the merge-group candidate. PR-head or manual evidence
-may avoid a duplicate ready-PR run but cannot satisfy the queue. A rollout
-verifies this behavior in the merge box before enabling the queue; it never
-deletes an agreed validation to make branch protection pass.
+Retained contexts report on ready PRs and merge-group candidates. Manual
+evidence replaces only expensive PR suites, never independent PR contexts or
+queue runs. Rollout verifies the merge box; it does not delete gates.
 
 ## Runtime budgets and external setup
 

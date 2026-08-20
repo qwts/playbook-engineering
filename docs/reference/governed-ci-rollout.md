@@ -37,6 +37,9 @@ result in [`release-lifecycles.json`](../../governance/release-lifecycles.json):
 - Draft PR events start no jobs; local validation is recorded before promotion.
 - Ready and updated PRs validate the exact head SHA. User-owned updater changes
   receive a fresh complete suite.
+- Exact-head preflight reuse still republishes every retained independent PR
+  context. The zero-install docs-governance lane runs again; dependency setup,
+  the complete suite, inventory, and duplicate lifecycle CodeQL do not.
 - Organization queue candidates validate the exact `merge_group` SHA.
 - A new `main` SHA without successful evidence for that same SHA runs the
   complete-suite fallback. PR-head success, tree equivalence, and an earlier
