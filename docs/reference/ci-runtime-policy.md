@@ -63,3 +63,7 @@ does not exceed the declared maximum; an annotation alone waives nothing.
 Exceptions are for bootstrap or platform constraints, not convenience.
 Synthetic hung-process tests and workflow fixtures gate changes to the shared
 runner and checker.
+
+Dependency download reuse is layered around the same bounded cold path by the
+[dependency reuse policy](dependency-reuse-policy.md); a cache hit never removes
+the installer deadline or lockfile verification.
