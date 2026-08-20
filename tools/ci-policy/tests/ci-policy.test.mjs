@@ -609,6 +609,17 @@ test('the reference workflow preserves governed gates and skips draft jobs', () 
   assert.match(workflow, /queue\|manual\)/);
   assert.match(workflow, /name: CI\n/);
   assert.doesNotMatch(workflow, /name: Draft checks/);
+
+  const docsJob = workflow.match(/^  docs-gov:\n[\s\S]*?(?=^  dependency-inventory:$)/m)?.[0];
+  const fullJob = workflow.match(/^  full:\n[\s\S]*?(?=^  docs-gov:$)/m)?.[0];
+  const inventoryJob = workflow.match(/^  dependency-inventory:\n[\s\S]*?(?=^  codeql:$)/m)?.[0];
+  assert.ok(docsJob, 'docs governance job is missing');
+  assert.ok(fullJob, 'complete-suite job is missing');
+  assert.ok(inventoryJob, 'dependency-inventory job is missing');
+  assert.match(docsJob, /needs\.policy\.outputs\.run_full == 'true'/u);
+  assert.doesNotMatch(docsJob, /preflight-evidence\.outputs\.validated/u);
+  assert.match(fullJob, /preflight-evidence\.outputs\.validated != 'true'/u);
+  assert.match(inventoryJob, /preflight-evidence\.outputs\.validated != 'true'/u);
 });
 
 test('every direct non-CI workflow entrypoint enforces authorization first', () => {

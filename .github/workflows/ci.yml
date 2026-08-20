@@ -119,10 +119,10 @@ jobs:
         run: npm test
 
   docs-gov:
-    needs: [policy, merge-evidence, preflight-evidence]
+    needs: [policy, merge-evidence]
     if: >-
       always() && needs.policy.result == 'success' &&
-      ((needs.policy.outputs.run_full == 'true' && needs.preflight-evidence.outputs.validated != 'true') ||
+      (needs.policy.outputs.run_full == 'true' ||
       (needs.policy.outputs.run_post_merge == 'true' && needs.merge-evidence.outputs.validated != 'true'))
     uses: ./.github/workflows/docs-governance.yml
     with:
