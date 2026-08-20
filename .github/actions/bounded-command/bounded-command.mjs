@@ -89,6 +89,9 @@ export async function executeBounded({
   stdio = 'inherit',
   onAttempt = () => {},
 }) {
+  if (!Number.isInteger(attempts) || attempts < 1 || attempts > 10) {
+    throw new TypeError('attempts must be an integer between 1 and 10');
+  }
   const startedAt = Date.now();
   let result;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {

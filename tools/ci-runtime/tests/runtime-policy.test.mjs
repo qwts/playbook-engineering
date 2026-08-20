@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { inspectWorkflow } from '../runtime-policy.mjs';
+import { inspectWorkflow, parseRootArgument } from '../runtime-policy.mjs';
 
 test('runner jobs require a literal whole-job timeout', () => {
   const findings = inspectWorkflow(`name: CI
@@ -13,6 +13,18 @@ jobs:
 `);
   assert.deepEqual(findings.map(({ message }) => message), [
     'runner job build has no timeout-minutes',
+  ]);
+});
+
+test('runner jobs are parsed with valid alternate indentation and quoted identifiers', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+    "build-job":
+      runs-on: ubuntu-latest
+      steps: []
+`);
+  assert.deepEqual(findings.map(({ message }) => message), [
+    'runner job build-job has no timeout-minutes',
   ]);
 });
 
@@ -82,6 +94,21 @@ jobs:
   assert.equal(findings.length, 1);
 });
 
+test('a timeout for an earlier shell command does not bound a later installer', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - run: |
+          # ci-runtime: exception owner=release max=10m review=tool-change reason=bootstrap owns cleanup
+          timeout 30s curl https://example.invalid/tool && npm ci
+`);
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /raw dependency installer/u);
+});
+
 test('timeout expressions and values beyond GitHub limits fail closed', () => {
   for (const timeout of ['${{ inputs.timeout }}', '361']) {
     const findings = inspectWorkflow(`name: CI
@@ -92,6 +119,11 @@ jobs:
     steps: []
 `);
     assert.equal(findings.length, 1);
-    assert.match(findings[0].message, /timeout-minutes/u);
+    assert.match(findings[0].message, /must be a literal integer between 1 and 360/u);
   }
+});
+
+test('--root requires a following path', () => {
+  assert.throws(() => parseRootArgument(['--root']), /--root requires a path/u);
+  assert.equal(parseRootArgument([], { cwd: '/workspace' }), '/workspace');
 });

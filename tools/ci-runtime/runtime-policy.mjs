@@ -5,9 +5,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const JOB_KEY = /^  ([A-Za-z0-9_-]+):\s*(?:#.*)?$/u;
-const RUNNER = /^    runs-on:\s*\S+/mu;
-const TIMEOUT = /^    timeout-minutes:\s*(\d+)\s*(?:#.*)?$/mu;
+const MAPPING_KEY = /^(\s*)(?:(["'])([A-Za-z0-9_-]+)\2|([A-Za-z0-9_-]+)):\s*(.*)$/u;
 const INSTALLERS = [
   /\bapt-get\s+(?:update|install)\b/u,
   /\bplaywright\s+install\b/u,
@@ -35,24 +33,66 @@ function workflowFiles(root) {
     .map((name) => join(directory, name));
 }
 
+function mappingLine(line) {
+  const match = MAPPING_KEY.exec(line);
+  if (!match) return null;
+  return {
+    indent: match[1].length,
+    key: match[3] ?? match[4],
+    value: match[5],
+  };
+}
+
+function emptyMappingValue(value) {
+  return /^(?:#.*)?$/u.test(value.trim());
+}
+
 function jobBlocks(lines) {
-  const jobsLine = lines.findIndex((line) => /^jobs:\s*(?:#.*)?$/u.test(line));
+  const jobsLine = lines.findIndex((line) => {
+    const mapping = mappingLine(line);
+    return mapping?.key === 'jobs' && emptyMappingValue(mapping.value);
+  });
   if (jobsLine < 0) return [];
-  const blocks = [];
-  let current;
+  const jobsIndent = mappingLine(lines[jobsLine]).indent;
+  let end = lines.length;
   for (let index = jobsLine + 1; index < lines.length; index += 1) {
     const line = lines[index];
-    if (/^\S/u.test(line) && !/^\s*#/u.test(line)) break;
-    const match = JOB_KEY.exec(line);
-    if (match) {
+    if (!line.trim() || /^\s*#/u.test(line)) continue;
+    if (/^\s*/u.exec(line)[0].length <= jobsIndent) {
+      end = index;
+      break;
+    }
+  }
+  const jobIndent = lines.slice(jobsLine + 1, end)
+    .map(mappingLine)
+    .filter((mapping) => mapping && mapping.indent > jobsIndent && emptyMappingValue(mapping.value))
+    .reduce((minimum, mapping) => Math.min(minimum, mapping.indent), Number.POSITIVE_INFINITY);
+  if (!Number.isFinite(jobIndent)) return [];
+  const blocks = [];
+  let current;
+  for (let index = jobsLine + 1; index < end; index += 1) {
+    const line = lines[index];
+    const mapping = mappingLine(line);
+    if (mapping?.indent === jobIndent && emptyMappingValue(mapping.value)) {
       if (current) blocks.push(current);
-      current = { name: match[1], line: index + 1, lines: [line] };
+      current = { name: mapping.key, line: index + 1, indent: jobIndent, lines: [line] };
     } else if (current) {
       current.lines.push(line);
     }
   }
   if (current) blocks.push(current);
   return blocks;
+}
+
+function directJobFields(job) {
+  const mappings = job.lines.slice(1)
+    .map(mappingLine)
+    .filter((mapping) => mapping && mapping.indent > job.indent);
+  const fieldIndent = mappings.reduce(
+    (minimum, mapping) => Math.min(minimum, mapping.indent),
+    Number.POSITIVE_INFINITY,
+  );
+  return mappings.filter((mapping) => mapping.indent === fieldIndent);
 }
 
 function runSegments(lines) {
@@ -86,12 +126,14 @@ function durationSeconds(value, unit) {
 function enforcedException(segment, installerText) {
   const exception = segment.map(({ text }) => EXCEPTION.exec(text)).find(Boolean);
   if (!exception) return false;
-  const installerIndex = INSTALLERS.map((pattern) => installerText.search(pattern))
+  const command = installerText.trim();
+  const installerIndex = INSTALLERS.map((pattern) => command.search(pattern))
     .filter((index) => index >= 0)
     .sort((left, right) => left - right)[0];
-  const timeoutIndex = installerText.search(/\btimeout\b/u);
-  if (timeoutIndex < 0 || timeoutIndex > installerIndex) return false;
-  const durations = [...installerText.slice(timeoutIndex, installerIndex).matchAll(/\b(\d+)([smh])\b/gu)];
+  if (!/^timeout(?:\s|$)/u.test(command)) return false;
+  const timeoutPrefix = command.slice(0, installerIndex);
+  if (/[;&|]/u.test(timeoutPrefix)) return false;
+  const durations = [...timeoutPrefix.matchAll(/\b(\d+)([smh])\b/gu)];
   if (!durations.length) return false;
   const [, actualValue, actualUnit] = durations.at(-1);
   const [, maximumValue, maximumUnit] = exception;
@@ -111,19 +153,20 @@ export function inspectWorkflow(text, { file = '<workflow>' } = {}) {
   const lines = text.split('\n');
   const findings = [];
   for (const job of jobBlocks(lines)) {
-    const body = job.lines.join('\n');
-    if (!RUNNER.test(body)) continue;
-    const timeout = TIMEOUT.exec(body);
+    const fields = directJobFields(job);
+    if (!fields.some(({ key }) => key === 'runs-on')) continue;
+    const timeout = fields.find(({ key }) => key === 'timeout-minutes');
     if (!timeout) {
       findings.push({ file, line: job.line, message: `runner job ${job.name} has no timeout-minutes` });
       continue;
     }
-    const minutes = Number(timeout[1]);
-    if (minutes < 1 || minutes > 360) {
+    const literal = /^(\d+)\s*(?:#.*)?$/u.exec(timeout.value);
+    const minutes = literal ? Number(literal[1]) : Number.NaN;
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 360) {
       findings.push({
         file,
         line: job.line,
-        message: `runner job ${job.name} timeout-minutes must be a literal between 1 and 360`,
+        message: `runner job ${job.name} timeout-minutes must be a literal integer between 1 and 360`,
       });
     }
   }
@@ -150,9 +193,16 @@ export function checkRuntimePolicy({ root = process.cwd() } = {}) {
   return findings;
 }
 
+export function parseRootArgument(args, { cwd = process.cwd() } = {}) {
+  const rootIndex = args.indexOf('--root');
+  if (rootIndex < 0) return cwd;
+  const value = args[rootIndex + 1];
+  if (!value || value.startsWith('--')) throw new Error('--root requires a path');
+  return resolve(cwd, value);
+}
+
 async function main() {
-  const rootIndex = process.argv.indexOf('--root');
-  const root = rootIndex >= 0 ? resolve(process.argv[rootIndex + 1]) : process.cwd();
+  const root = parseRootArgument(process.argv.slice(2));
   const findings = checkRuntimePolicy({ root });
   if (!findings.length) {
     process.stdout.write('all workflow runner jobs and dependency installers are bounded\n');
