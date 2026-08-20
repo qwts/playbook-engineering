@@ -119,8 +119,77 @@ function runSegments(lines) {
   return segments;
 }
 
-function durationSeconds(value, unit) {
-  return Number(value) * { s: 1, m: 60, h: 3_600 }[unit];
+function durationSeconds(value, unit = '') {
+  return Number(value) * { '': 1, s: 1, m: 60, h: 3_600, d: 86_400 }[unit];
+}
+
+function parsedDuration(token) {
+  const match = /^(\d+(?:\.\d+)?)([smhd]?)$/u.exec(token);
+  if (!match) return null;
+  const seconds = durationSeconds(match[1], match[2]);
+  return Number.isFinite(seconds) ? seconds : null;
+}
+
+function parsedDeadline(token) {
+  const seconds = parsedDuration(token);
+  return seconds !== null && seconds > 0 ? seconds : null;
+}
+
+function timeoutDeadlineSeconds(prefix) {
+  const tokens = prefix.trim().split(/\s+/u);
+  if (tokens.shift() !== 'timeout') return null;
+  while (tokens.length) {
+    const token = tokens.shift();
+    if (token === '--') return tokens.length ? parsedDeadline(tokens[0]) : null;
+    if (['--foreground', '--preserve-status', '--verbose', '-v'].includes(token)) continue;
+    if (['--kill-after', '-k'].includes(token)) {
+      if (!tokens.length || parsedDuration(tokens.shift()) === null) return null;
+      continue;
+    }
+    if (['--signal', '-s'].includes(token)) {
+      if (!tokens.shift()) return null;
+      continue;
+    }
+    if (token.startsWith('--kill-after=')) {
+      if (parsedDuration(token.slice('--kill-after='.length)) === null) return null;
+      continue;
+    }
+    if (token.startsWith('--signal=')) {
+      if (!token.slice('--signal='.length)) return null;
+      continue;
+    }
+    if (/^-k.+/u.test(token)) {
+      if (parsedDuration(token.slice(2)) === null) return null;
+      continue;
+    }
+    if (/^-s.+/u.test(token)) continue;
+    if (token.startsWith('-')) return null;
+    return parsedDeadline(token);
+  }
+  return null;
+}
+
+function logicalShellCommands(segment) {
+  const commands = [];
+  let current;
+  for (const entry of segment) {
+    const trailingBackslashes = /\\+$/u.exec(entry.text)?.[0].length ?? 0;
+    const continued = trailingBackslashes % 2 === 1;
+    const text = continued ? entry.text.slice(0, -1) : entry.text;
+    if (current) {
+      current.text += text.trimStart();
+    } else {
+      current = { line: entry.line, text };
+    }
+    if (continued) {
+      current.text += ' ';
+    } else {
+      commands.push(current);
+      current = undefined;
+    }
+  }
+  if (current) commands.push(current);
+  return commands;
 }
 
 function enforcedException(segment, installerText) {
@@ -133,15 +202,14 @@ function enforcedException(segment, installerText) {
   if (!/^timeout(?:\s|$)/u.test(command)) return false;
   const timeoutPrefix = command.slice(0, installerIndex);
   if (/[;&|]/u.test(timeoutPrefix)) return false;
-  const durations = [...timeoutPrefix.matchAll(/\b(\d+)([smh])\b/gu)];
-  if (!durations.length) return false;
-  const [, actualValue, actualUnit] = durations.at(-1);
+  const actualSeconds = timeoutDeadlineSeconds(timeoutPrefix);
+  if (actualSeconds === null) return false;
   const [, maximumValue, maximumUnit] = exception;
-  return durationSeconds(actualValue, actualUnit) <= durationSeconds(maximumValue, maximumUnit);
+  return actualSeconds <= durationSeconds(maximumValue, maximumUnit);
 }
 
 function installerFinding(segment) {
-  for (const { line, text } of segment) {
+  for (const { line, text } of logicalShellCommands(segment)) {
     if (INSTALLERS.some((pattern) => pattern.test(text)) && !enforcedException(segment, text)) {
       return { line, command: text.trim() };
     }

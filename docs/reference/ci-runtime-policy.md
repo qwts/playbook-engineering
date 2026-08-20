@@ -24,7 +24,8 @@ dependency and tool setup uses the shared `bounded-command` action from
 
 - launches an explicit executable and JSON arguments without a shell;
 - applies a per-attempt deadline, finite attempt count, and finite retry delay;
-- terminates the process tree; and
+- captures and terminates the process tree, including POSIX descendants that
+  detach into another process group or session; and
 - reports the task, attempt, elapsed time, deadline, and stable classification.
 
 A dependency stall therefore fails at the named setup step in minutes instead
@@ -55,7 +56,10 @@ review trigger, and reason beside the command:
 timeout --kill-after=10s 600s tool install
 ```
 
-The checker verifies that the enforced timeout does not exceed the declared
-maximum; an annotation alone waives nothing. Exceptions are for bootstrap or
-platform constraints, not convenience. Synthetic hung-process tests and
-workflow fixtures gate changes to the shared runner and checker.
+The checker reconstructs backslash-continued shell commands before inspection
+and parses the GNU `timeout` option operands separately from its deadline
+operand. Unitless deadlines are seconds. It verifies that the enforced timeout
+does not exceed the declared maximum; an annotation alone waives nothing.
+Exceptions are for bootstrap or platform constraints, not convenience.
+Synthetic hung-process tests and workflow fixtures gate changes to the shared
+runner and checker.
