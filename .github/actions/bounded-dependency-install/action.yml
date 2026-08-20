@@ -1,0 +1,137 @@
+name: Bounded dependency install
+description: Restore a lockfile-bound cache, run a bounded installer, and save verified stores only from main pushes
+
+inputs:
+  ecosystem:
+    description: Cache ecosystem (npm, cargo, playwright, or apt)
+    required: true
+  cache-paths:
+    description: Newline-delimited download-store paths under runner.temp/ci-dependency-cache/<ecosystem>
+    required: true
+  lockfiles:
+    description: Newline-delimited exact repository-relative files that define dependency identity
+    required: true
+  toolchain-version:
+    description: Exact toolchain or browser version included in the cache identity
+    required: true
+  task:
+    description: Human-readable installer task name
+    required: true
+  executable:
+    description: Installer executable
+    required: true
+  arguments-json:
+    description: Installer arguments as a JSON array of strings
+    required: false
+    default: '[]'
+  working-directory:
+    description: Installer working directory, relative to the caller workspace unless absolute
+    required: false
+    default: .
+  timeout-seconds:
+    description: Per-attempt installer deadline in seconds
+    required: true
+  attempts:
+    description: Finite installer attempt count
+    required: false
+    default: '1'
+  retry-delay-seconds:
+    description: Delay between installer attempts
+    required: false
+    default: '0'
+  termination-grace-seconds:
+    description: Grace between TERM and KILL for the installer process tree
+    required: false
+    default: '10'
+
+outputs:
+  cache-key:
+    description: Exact cache identity used for restore and possible trusted save
+    value: ${{ steps.identity.outputs.key }}
+  cache-hit:
+    description: Whether the exact dependency cache was restored
+    value: ${{ steps.restore.outputs.cache-hit }}
+  cache-write-outcome:
+    description: Outcome of the trusted-main save step (success or skipped)
+    value: ${{ steps.save.outcome }}
+  classification:
+    description: Stable bounded-command classification
+    value: ${{ steps.install.outputs.classification }}
+  attempts-used:
+    description: Installer attempts consumed
+    value: ${{ steps.install.outputs.attempts-used }}
+  elapsed-ms:
+    description: Total installer elapsed time
+    value: ${{ steps.install.outputs.elapsed-ms }}
+
+runs:
+  using: composite
+  steps:
+    - id: identity
+      name: Derive immutable dependency cache identity
+      shell: bash
+      env:
+        CACHE_ECOSYSTEM: ${{ inputs.ecosystem }}
+        CACHE_PATHS: ${{ inputs.cache-paths }}
+        CACHE_LOCKFILES: ${{ inputs.lockfiles }}
+        CACHE_TOOLCHAIN_VERSION: ${{ inputs.toolchain-version }}
+        CACHE_RUNNER_OS: ${{ runner.os }}
+        CACHE_RUNNER_ARCH: ${{ runner.arch }}
+        CACHE_RUNNER_TEMP: ${{ runner.temp }}
+      run: node "$GITHUB_ACTION_PATH/cache-key.mjs"
+
+    - id: restore
+      name: Restore exact dependency download cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.cache-paths }}
+        key: ${{ steps.identity.outputs.key }}
+
+    - name: Report dependency cache provenance
+      shell: bash
+      env:
+        CACHE_ECOSYSTEM: ${{ inputs.ecosystem }}
+        CACHE_HIT: ${{ steps.restore.outputs.cache-hit }}
+        CACHE_KEY: ${{ steps.identity.outputs.key }}
+      run: |
+        printf 'dependency-cache ecosystem=%s key=%s hit=%s write-policy=default-branch-push-only\n' \
+          "$CACHE_ECOSYSTEM" "$CACHE_KEY" "${CACHE_HIT:-false}"
+
+    - id: install
+      name: Run bounded dependency installer
+      shell: bash
+      env:
+        BOUNDED_TASK: ${{ inputs.task }}
+        BOUNDED_EXECUTABLE: ${{ inputs.executable }}
+        BOUNDED_ARGUMENTS_JSON: ${{ inputs.arguments-json }}
+        BOUNDED_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        BOUNDED_TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+        BOUNDED_ATTEMPTS: ${{ inputs.attempts }}
+        BOUNDED_RETRY_DELAY_SECONDS: ${{ inputs.retry-delay-seconds }}
+        BOUNDED_TERMINATION_GRACE_SECONDS: ${{ inputs.termination-grace-seconds }}
+      run: node "$GITHUB_ACTION_PATH/../bounded-command/bounded-command.mjs"
+
+    - name: Revalidate dependency cache identity and path custody
+      shell: bash
+      env:
+        CACHE_ECOSYSTEM: ${{ inputs.ecosystem }}
+        CACHE_PATHS: ${{ inputs.cache-paths }}
+        CACHE_LOCKFILES: ${{ inputs.lockfiles }}
+        CACHE_TOOLCHAIN_VERSION: ${{ inputs.toolchain-version }}
+        CACHE_RUNNER_OS: ${{ runner.os }}
+        CACHE_RUNNER_ARCH: ${{ runner.arch }}
+        CACHE_RUNNER_TEMP: ${{ runner.temp }}
+        CACHE_REQUIRE_PATHS_PRESENT: 'true'
+        CACHE_EXPECTED_KEY: ${{ steps.identity.outputs.key }}
+      run: node "$GITHUB_ACTION_PATH/cache-key.mjs"
+
+    - id: save
+      name: Save revalidated dependency cache from trusted main push
+      if: >-
+        ${{ success() && steps.restore.outputs.cache-hit != 'true' &&
+        github.event_name == 'push' &&
+        github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.cache-paths }}
+        key: ${{ steps.identity.outputs.key }}
