@@ -44,7 +44,9 @@ A merge-queue candidate validates the exact combined commit, but its cache is
 scoped to the temporary queue ref. After that evidence succeeds, the bounded
 post-merge smoke lane installs from the same exact key and seeds a miss in the
 default-branch scope. This is not a second complete suite. A new key may require
-one default-branch origin download; later identical jobs restore the cache.
+one default-branch origin download; later identical jobs restore the cache. The
+job timeout encloses the complete installer retry and termination budget plus
+at least one minute for checkout, setup, cache custody checks, save, and smoke.
 
 ## Consequences
 

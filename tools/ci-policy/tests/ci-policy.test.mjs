@@ -625,6 +625,27 @@ test('the reference workflow preserves governed gates and skips draft jobs', () 
   assert.match(postMergeJob, /merge-evidence\.outputs\.validated == 'true'/u);
   assert.match(postMergeJob, /uses: \.\/\.github\/actions\/bounded-dependency-install/u);
   assert.match(postMergeJob, /Seed trusted default-branch npm cache/u);
+
+  const valueFor = (pattern, label) => {
+    const value = Number(postMergeJob.match(pattern)?.[1]);
+    assert.ok(Number.isFinite(value), `${label} is missing from the post-merge job`);
+    return value;
+  };
+  const jobTimeoutSeconds = valueFor(/timeout-minutes: (\d+)/u, 'job timeout') * 60;
+  const attemptTimeoutSeconds = valueFor(/timeout-seconds: '(\d+)'/u, 'attempt timeout');
+  const attempts = valueFor(/attempts: '(\d+)'/u, 'attempt count');
+  const retryDelaySeconds = valueFor(/retry-delay-seconds: '(\d+)'/u, 'retry delay');
+  const terminationGraceSeconds = valueFor(
+    /termination-grace-seconds: '(\d+)'/u,
+    'termination grace',
+  );
+  const maximumInstallerSeconds =
+    attempts * (attemptTimeoutSeconds + terminationGraceSeconds) +
+    (attempts - 1) * retryDelaySeconds;
+  assert.ok(
+    jobTimeoutSeconds >= maximumInstallerSeconds + 60,
+    'post-merge job must leave at least 60 seconds beyond the installer retry budget',
+  );
 });
 
 test('every direct non-CI workflow entrypoint enforces authorization first', () => {
