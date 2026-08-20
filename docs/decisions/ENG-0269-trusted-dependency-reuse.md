@@ -40,6 +40,14 @@ one through the shared action. Every run logs the key, hit state, and write
 policy. Browser and OS pilots must additionally prove their package or browser
 revision verification and keep a bounded origin-download fallback.
 
+A merge-queue candidate validates the exact combined commit, but its cache is
+scoped to the temporary queue ref. After that evidence succeeds, the bounded
+post-merge smoke lane installs from the same exact key and seeds a miss in the
+default-branch scope. This is not a second complete suite. A new key may require
+one default-branch origin download; later identical jobs restore the cache. The
+job timeout encloses the complete installer retry and termination budget plus
+at least one minute for checkout, setup, cache custody checks, save, and smoke.
+
 ## Consequences
 
 - Warm identical jobs restore from GitHub instead of stampeding package origins.
@@ -51,6 +59,8 @@ revision verification and keep a bounded origin-download fallback.
   installed tree, or another ecosystem's store.
 - Default-branch pushes become the only cache writers and may race harmlessly
   on the same immutable key.
+- The validated post-merge lane seeds default-branch scope when merge-queue
+  evidence lets the complete `main` suite skip.
 - A future organization migration may reconsider a larger-runner custom image
   with explicit cost, image custody, SBOM, scan, provenance, and rollback.
 

@@ -46,6 +46,12 @@ npm and Cargo then perform a clean lockfile installation with their integrity
 checks. Pull requests restore only; the action never saves from a PR, manual
 dispatch, fork, or feature push.
 
+Merge-group caches are scoped to their temporary refs. When exact merge-group
+evidence lets the complete `main` suite skip, the bounded post-merge smoke lane
+runs the installer with the same key and seeds a miss in default-branch scope.
+That lane does not repeat the complete suite. A new key can require one
+default-branch origin download; unchanged keys restore from GitHub.
+
 Allowed browser or OS caches require a pilot-specific immutable package list or
 browser revision, trusted-main write evidence, and the same bounded cold path.
 Do not share caches across OS, architecture, toolchain, browser revision, or
