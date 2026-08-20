@@ -32,6 +32,7 @@ jobs:
   context-footprint:
     name: context-footprint
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,7 +54,9 @@ jobs:
           node-version: 24
 
       - name: Install pinned analyzer dependencies
-        run: npm --prefix .aca clean-install
+        run: |
+          # ci-runtime: exception owner=semantic-ratchet max=10m review=analyzer-runtime-change reason=bootstrap-cannot-pin-the-new-shared-action-before-merge
+          timeout --signal=TERM --kill-after=10s 600s npm --prefix .aca clean-install
 
       # A pull request can commit a file under .cache/aca whose name matches a
       # real content-addressed verdict. Remove caller-controlled entries before

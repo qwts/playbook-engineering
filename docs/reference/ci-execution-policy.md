@@ -116,6 +116,14 @@ may avoid a duplicate ready-PR run but cannot satisfy the queue. A rollout
 verifies this behavior in the merge box before enabling the queue; it never
 deletes an agreed validation to make branch protection pass.
 
+## Runtime budgets and external setup
+
+Every runner job has a finite whole-job backstop; external dependency setup has
+a shorter task deadline that names and kills the stalled process tree. The
+[CI runtime policy](ci-runtime-policy.md) owns profiles, exceptions, enforcement,
+and the shared action contract under
+[ENG-0267](../decisions/ENG-0267-bounded-ci-runtime.md).
+
 ## Changesets, version PRs, and releases
 
 A source PR keeps its repository's reviewed release-input contract; this policy

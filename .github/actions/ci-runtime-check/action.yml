@@ -1,0 +1,17 @@
+name: CI runtime policy check
+description: Reject unbounded runner jobs and raw unbounded dependency installers.
+
+inputs:
+  root:
+    description: Repository root to inspect
+    required: false
+    default: '.'
+
+runs:
+  using: composite
+  steps:
+    - name: Check workflow runtime policy
+      shell: bash
+      env:
+        CI_RUNTIME_ROOT: ${{ inputs.root }}
+      run: node "${{ github.action_path }}/../../../tools/ci-runtime/runtime-policy.mjs" --root "$CI_RUNTIME_ROOT"
