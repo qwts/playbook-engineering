@@ -130,12 +130,17 @@ function parsedDuration(token) {
   return Number.isFinite(seconds) ? seconds : null;
 }
 
+function parsedDeadline(token) {
+  const seconds = parsedDuration(token);
+  return seconds !== null && seconds > 0 ? seconds : null;
+}
+
 function timeoutDeadlineSeconds(prefix) {
   const tokens = prefix.trim().split(/\s+/u);
   if (tokens.shift() !== 'timeout') return null;
   while (tokens.length) {
     const token = tokens.shift();
-    if (token === '--') return tokens.length ? parsedDuration(tokens[0]) : null;
+    if (token === '--') return tokens.length ? parsedDeadline(tokens[0]) : null;
     if (['--foreground', '--preserve-status', '--verbose', '-v'].includes(token)) continue;
     if (['--kill-after', '-k'].includes(token)) {
       if (!tokens.length || parsedDuration(tokens.shift()) === null) return null;
@@ -159,7 +164,7 @@ function timeoutDeadlineSeconds(prefix) {
     }
     if (/^-s.+/u.test(token)) continue;
     if (token.startsWith('-')) return null;
-    return parsedDuration(token);
+    return parsedDeadline(token);
   }
   return null;
 }

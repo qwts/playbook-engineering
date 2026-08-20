@@ -123,6 +123,21 @@ jobs:
   assert.deepEqual(findings, []);
 });
 
+test('a zero GNU timeout deadline cannot waive an installer boundary', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - run: |
+          # ci-runtime: exception owner=release max=10m review=tool-change reason=bootstrap owns cleanup
+          timeout 0 npm ci
+`);
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /raw dependency installer/u);
+});
+
 test('installer checks reconstruct shell backslash continuations', () => {
   const findings = inspectWorkflow(`name: CI
 jobs:
