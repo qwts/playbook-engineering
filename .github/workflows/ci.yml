@@ -28,6 +28,7 @@ jobs:
     name: Action Policy
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       mode: ${{ steps.policy.outputs.mode }}
       run_full: ${{ steps.policy.outputs.run_full }}
@@ -47,6 +48,7 @@ jobs:
     needs: policy
     if: needs.policy.outputs.run_post_merge == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       validated: ${{ steps.evidence.outputs.validated }}
     steps:
@@ -64,6 +66,7 @@ jobs:
     needs: policy
     if: github.event_name == 'pull_request' && needs.policy.outputs.run_full == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       validated: ${{ steps.evidence.outputs.validated }}
     steps:
@@ -90,6 +93,7 @@ jobs:
       ((needs.policy.outputs.run_full == 'true' && needs.preflight-evidence.outputs.validated != 'true') ||
       (needs.policy.outputs.run_post_merge == 'true' && needs.merge-evidence.outputs.validated != 'true'))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,9 +102,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - name: Install locked dependencies
+        uses: ./.github/actions/bounded-command
+        with:
+          task: Install locked dependencies
+          executable: npm
+          arguments-json: '["ci"]'
+          timeout-seconds: '300'
+          attempts: '2'
+          retry-delay-seconds: '5'
       - name: Lint and configuration checks
-        run: npm run lint:markdown && npm run lint:synced && npm run docs:gov && npm run repos:check && npm run pins:check
+        run: npm run lint:markdown && npm run lint:synced && npm run docs:gov && npm run repos:check && npm run ci-runtime:check && npm run pins:check
         env:
           GH_DRIFT_TOKEN: ${{ github.token }}
       - name: Unit and workflow-tooling tests
@@ -145,6 +157,7 @@ jobs:
     needs: [policy, merge-evidence]
     if: needs.policy.outputs.run_post_merge == 'true' && needs.merge-evidence.outputs.validated == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -160,6 +173,7 @@ jobs:
     needs: [policy, merge-evidence, preflight-evidence, full, docs-gov, dependency-inventory, codeql, post-merge]
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Enforce the selected lifecycle lane
         env:

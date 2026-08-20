@@ -1,0 +1,61 @@
+name: Bounded command
+description: Run one explicit command with a deadline, finite retries, and process-tree cleanup.
+
+inputs:
+  task:
+    description: Human-readable task name used in diagnostics
+    required: true
+  executable:
+    description: Executable to launch without an intermediate shell
+    required: true
+  arguments-json:
+    description: JSON array of literal command arguments
+    required: false
+    default: '[]'
+  working-directory:
+    description: Absolute path or path relative to the caller workspace
+    required: false
+    default: '.'
+  timeout-seconds:
+    description: Deadline for each attempt
+    required: true
+  attempts:
+    description: Total finite attempt count
+    required: false
+    default: '1'
+  retry-delay-seconds:
+    description: Delay between attempts
+    required: false
+    default: '0'
+  termination-grace-seconds:
+    description: Grace between polite and forced process-tree termination
+    required: false
+    default: '10'
+
+outputs:
+  classification:
+    description: success, exit, signal, spawn-error, or timeout
+    value: ${{ steps.run.outputs.classification }}
+  attempts-used:
+    description: Number of attempts consumed
+    value: ${{ steps.run.outputs.attempts-used }}
+  elapsed-ms:
+    description: Total elapsed wall-clock time
+    value: ${{ steps.run.outputs.elapsed-ms }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      name: Run bounded task
+      shell: bash
+      env:
+        BOUNDED_TASK: ${{ inputs.task }}
+        BOUNDED_EXECUTABLE: ${{ inputs.executable }}
+        BOUNDED_ARGUMENTS_JSON: ${{ inputs.arguments-json }}
+        BOUNDED_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        BOUNDED_TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+        BOUNDED_ATTEMPTS: ${{ inputs.attempts }}
+        BOUNDED_RETRY_DELAY_SECONDS: ${{ inputs.retry-delay-seconds }}
+        BOUNDED_TERMINATION_GRACE_SECONDS: ${{ inputs.termination-grace-seconds }}
+      run: node "${{ github.action_path }}/bounded-command.mjs"

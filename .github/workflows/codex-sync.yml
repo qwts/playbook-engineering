@@ -46,6 +46,7 @@ concurrency:
 jobs:
   policy:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: qwts/playbook-engineering/.github/actions/ci-policy@4e70c773155c2c804e52a487352627010bea1897
         with:
@@ -54,6 +55,7 @@ jobs:
   sync:
     needs: policy
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Mint the chores-dumb token
         id: chores
