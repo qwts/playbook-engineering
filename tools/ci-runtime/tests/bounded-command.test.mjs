@@ -97,3 +97,27 @@ test('a timed-out command kills its stubborn descendant process', async () => {
   const descendantPid = Number(readFileSync(pidFile, 'utf8').trim());
   assert.equal(processIsRunning(descendantPid), false, `descendant ${descendantPid} survived timeout`);
 });
+
+test('a timed-out command kills a descendant in a detached session', async () => {
+  if (process.platform === 'win32') return;
+  const directory = mkdtempSync(join(tmpdir(), 'bounded-command-detached-'));
+  const pidFile = join(directory, 'descendant.pid');
+  const result = await executeBounded({
+    task: 'detached process tree',
+    executable: process.execPath,
+    args: [fixture, 'detached-parent', pidFile],
+    timeoutMs: 250,
+    graceMs: 50,
+    stdio: 'ignore',
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.classification, 'timeout');
+  assert.equal(result.exitCode, TIMEOUT_EXIT_CODE);
+  await pause(100);
+  const descendantPid = Number(readFileSync(pidFile, 'utf8').trim());
+  assert.equal(
+    processIsRunning(descendantPid),
+    false,
+    `detached descendant ${descendantPid} survived timeout`,
+  );
+});

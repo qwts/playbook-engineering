@@ -20,15 +20,81 @@ function killPosixGroup(pid, signal) {
   }
 }
 
+function killPosixPid(pid, signal) {
+  try {
+    process.kill(pid, signal);
+    return true;
+  } catch (error) {
+    if (error?.code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+function posixDescendants(rootPid) {
+  const psExecutable = process.platform === 'darwin' ? '/bin/ps' : '/usr/bin/ps';
+  const result = spawnSync(psExecutable, ['-axo', 'pid=,ppid='], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  if (result.error) {
+    throw new Error(`cannot enumerate the POSIX process tree: ${result.error.message}`, {
+      cause: result.error,
+    });
+  }
+  if (result.status !== 0) {
+    throw new Error(`cannot enumerate the POSIX process tree: ps exited ${result.status}`);
+  }
+  const children = new Map();
+  for (const line of result.stdout.split('\n')) {
+    const match = /^\s*(\d+)\s+(\d+)\s*$/u.exec(line);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const parentPid = Number(match[2]);
+    const siblings = children.get(parentPid) ?? [];
+    siblings.push(pid);
+    children.set(parentPid, siblings);
+  }
+  const descendants = [];
+  const pending = [...(children.get(rootPid) ?? [])];
+  while (pending.length) {
+    const pid = pending.pop();
+    descendants.push(pid);
+    pending.push(...(children.get(pid) ?? []));
+  }
+  return descendants.reverse();
+}
+
+function signalPosixTree(rootPid, descendants, signal) {
+  let signaled = killPosixGroup(rootPid, signal);
+  for (const pid of descendants) {
+    signaled = killPosixPid(pid, signal) || signaled;
+  }
+  return signaled;
+}
+
 async function terminateProcessTree(child, graceMs, platform = process.platform) {
   if (!child.pid) return;
   if (platform === 'win32') {
     spawnSync('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' });
     return;
   }
-  if (!killPosixGroup(child.pid, 'SIGTERM')) return;
+  let discoveryError;
+  let descendants = [];
+  try {
+    descendants = posixDescendants(child.pid);
+  } catch (error) {
+    discoveryError = error;
+  }
+  if (!signalPosixTree(child.pid, descendants, 'SIGTERM') && !discoveryError) return;
   await delay(graceMs);
-  killPosixGroup(child.pid, 'SIGKILL');
+  try {
+    descendants = [...new Set([...descendants, ...posixDescendants(child.pid)])];
+  } catch (error) {
+    discoveryError ??= error;
+  }
+  const remaining = descendants;
+  signalPosixTree(child.pid, remaining, 'SIGKILL');
+  if (discoveryError) throw discoveryError;
 }
 
 function runAttempt({ executable, args, cwd, timeoutMs, graceMs, stdio }) {
@@ -196,7 +262,7 @@ async function main() {
     'error',
     `${task} failed`,
     `classification=${result.classification}; attempts=${result.attemptsUsed}; elapsed=${result.totalElapsedMs}ms; ` +
-      `per-attempt-deadline=${timeoutSeconds}s`,
+      `per-attempt-deadline=${timeoutSeconds}s; cleanup=${result.error ? 'incomplete' : 'complete'}`,
   );
   process.exitCode = result.exitCode;
 }
