@@ -120,6 +120,13 @@
       "sourceInputPolicy": "not-applicable",
       "generatedProjection": null,
       "harnessProjection": null
+    },
+    {
+      "repository": "qwts/diagram-dreamer",
+      "metadataSystem": "none",
+      "sourceInputPolicy": "not-applicable",
+      "generatedProjection": null,
+      "harnessProjection": null
     }
   ]
 }

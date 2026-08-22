@@ -85,4 +85,5 @@ Cloning, drift detection, reconciliation, and harness synchronization are in
 | `agentic-code-analysis` | public | active | no | managed | — |
 | `localnotes` | public | active | no | managed | — |
 | `universal-agentic-workflow` | private | onboarding | no | managed | — |
+| `diagram-dreamer` | public | onboarding | no | managed | Playwright gates per ?state= fixture, axe-core at WCAG 2.1 AA, and a pseudo-localization build. |
 <!-- END GENERATED governed-repos -->
