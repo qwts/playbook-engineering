@@ -217,6 +217,13 @@ The operational contract is in the
 are in the
 [release-lifecycle fleet handoff](../reference/governed-ci-release-lifecycle-fleet.md).
 
+## Amendment — 2026-08-22: pinning superseded by immutable releases
+
+The moving `@v1` tag is retired by
+[ENG-0279](ENG-0279-immutable-releases-and-repo-lockfiles.md): consumers pin
+exact immutable releases, bumped by bot-authored align PRs. Everything else
+above stands, per amend-don't-rewrite.
+
 ## References
 
 - [ENG-0003](ENG-0003-repo-is-documentation-source-of-truth.md) established this repo as the cross-repo home for shared engineering assets; this extends that from documents to CI/CD.

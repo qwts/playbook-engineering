@@ -89,6 +89,7 @@ principles; it does not waive the lower priorities.
 | [ENG-0178](ENG-0178-evidence-bound-harness-projections.md) | Governed harness projections are evidence-bound no-release inputs | Accepted |
 | [ENG-0267](ENG-0267-bounded-ci-runtime.md) | Bound CI jobs and external setup tasks centrally | Proposed |
 | [ENG-0269](ENG-0269-trusted-dependency-reuse.md) | Reuse immutable dependency downloads on standard hosted runners | Proposed |
+| [ENG-0279](ENG-0279-immutable-releases-and-repo-lockfiles.md) | Playbook updates ship as immutable releases; repos align by lockfile | Proposed |
 
 ## Related
 
