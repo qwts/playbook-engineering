@@ -37,13 +37,20 @@ files, workflow pins, and the lockfile together. No tool rewrites a repository
 outside that PR; the repo adopts by review and merge. A `repository_dispatch`
 fast path may be added later without changing this contract.
 
+The align PR is a per-repository singleton. When a newer release publishes
+while one is open, the aligner refreshes that PR to the newest non-yanked
+release rather than opening a second; an align PR targeting any other version
+is stale and the aligner closes it. Releases may overlap; alignment never
+does, so no repo can be downgraded by a stale PR merging late.
+
 Until the align PR merges, the repository is out of date by definition and
 visibly so: the dashboard compares each repo's lockfile on `main` against the
 latest release — one version per repo with staleness age. Per-file provenance
 ("which SHA was this file aligned to") comes from the manifest hashes; the pin
 is per repository, never per file.
 
-**The fleet runs one version: the latest release.** There is no supported
+**The fleet runs one version: the latest release** — defined as the newest
+non-yanked release. There is no supported
 version range — being behind latest is a drift state to converge out of, not a
 position to hold. An `active` repo behind latest fails the drift gate the same
 way a missing baseline file does today; the only lag tolerated is the review
@@ -64,6 +71,15 @@ Two file classes, so distribution and repo state never conflict:
 
 This is the same split the repositories already live with for dependencies,
 so the lockfile introduces no new kind of in-repo state.
+
+One migration falls out of the whole-file hash requirement: files that today
+compose repo-owned entries into managed content — the manifest's
+`preserveJsonArrayEntries` for `.claude/settings.json` and agent hook files,
+and the marked `AGENTS.md` block — cannot be bitwise identical to a template.
+Where the tool supports it, preserved entries move to a repo-owned companion
+file so the distributed file becomes wholly playbook-owned; where it does not
+(`AGENTS.md`), the manifest hashes the playbook-owned projection and drift
+verifies that projection. Rollout tracks this migration per repository.
 
 This supersedes the moving-tag pinning model of ENG-0004, which receives an
 amendment pointing here. `reconcile.mjs` narrows to its settings and human
@@ -87,8 +103,12 @@ stops being the file-distribution channel.
 - Every repo's playbook state becomes auditable: version → SHA → file hashes,
   verifiable by `drift.mjs` (which learns hash conformance) and displayed by
   the dashboard.
-- Rollback is a repo-side pin revert. Because releases are immutable,
-  reverting the lockfile provably restores the prior content.
+- Rollback is an align PR in reverse: one atomic PR restores the prior
+  release's files, workflow pins, and lockfile together. A lone lockfile
+  revert is never rollback — it would misrecord the version while leaving
+  defective content in place, and hash verification would flag the mismatch.
+  Yanking the defective release makes the prior release latest again, so
+  rolled-back repos conform until the fixed release ships.
 - New surface to build and keep green: release manifest tooling, the lockfile
   schema, the shared aligner workflow, the tag ruleset, and the dashboard
   staleness view.
