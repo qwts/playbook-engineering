@@ -351,6 +351,9 @@ describe('agent-guard conformance (ENG-0138)', () => {
       'node tools/agent-guard/run-guarded.mjs --rss-mb 512 ruby -e payload',
       'node --eval=payload tools/agent-guard/run-guarded.mjs -- true',
       'node --require=payload tools/agent-guard/run-guarded.mjs -- true',
+      'node tools/agent-guard/run-guarded.mjs --label x env node -e payload',
+      'node tools/agent-guard/run-guarded.mjs -- command node -e payload',
+      'node tools/agent-guard/run-guarded.mjs -- env MODE=test python3 -c payload',
     ]) {
       assert.equal(evaluateCommand(command, { env }).allow, false, `expected the guard to deny: ${command}`);
     }
@@ -359,6 +362,7 @@ describe('agent-guard conformance (ENG-0138)', () => {
     for (const command of [
       'node tools/agent-guard/run-guarded.mjs --label test:e2e -- cargo test -p app -j 2',
       'node tools/agent-guard/run-guarded.mjs --label test:e2e cargo test -p app -j 2',
+      'node tools/agent-guard/run-guarded.mjs -- env MODE=test cargo test -p app -j 2',
     ]) {
       assert.equal(evaluateCommand(command, { env }).allow, true, `expected the guard to allow: ${command}`);
     }

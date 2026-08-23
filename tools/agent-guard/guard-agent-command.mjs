@@ -2946,6 +2946,9 @@ export function evaluateCommand(command, { cwd = process.cwd(), depth = 0 } = {}
     }
     return false;
   };
+  const inlineRuntimeTokens = (tokens) => commandAfterPrefixes(tokens.join(' '))
+    .split(/\s+/u)
+    .filter(Boolean);
   // Parse the wrapper with the same grammar as run-guarded.mjs. `--` is
   // optional: the wrapper treats its first non-option argument as the command,
   // so looking only behind a separator would exempt `run-guarded.mjs node -e`.
@@ -2989,7 +2992,8 @@ export function evaluateCommand(command, { cwd = process.cwd(), depth = 0 } = {}
     const executableSegment = commandAfterPrefixes(segment);
     const wrapped = wrappedInvocationTokens(executableSegment);
     if (wrapped !== null) {
-      return inlineRuntimeDenied(wrapped.launcher) || inlineRuntimeDenied(wrapped.command);
+      return inlineRuntimeDenied(inlineRuntimeTokens(wrapped.launcher)) ||
+        inlineRuntimeDenied(inlineRuntimeTokens(wrapped.command));
     }
     return inlineRuntimeDenied(executableSegment.split(/\s+/u).filter(Boolean));
   })) {
