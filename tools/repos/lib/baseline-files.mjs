@@ -16,6 +16,14 @@ export const GOVERNED_CLAUDE_FILES = ['.claude/settings.json'];
 
 export const GOVERNED_CURSOR_FILES = ['.cursor/hooks.json'];
 
+// Copilot (CLI and coding agent) loads repository hooks from .github/hooks/;
+// Windsurf (Devin desktop) loads Cascade hooks from .windsurf/hooks.json.
+// Both exist so the guard reaches every harness that can run shell commands
+// in a governed checkout, not only the three original ones (#290).
+export const GOVERNED_COPILOT_FILES = ['.github/hooks/agent-guard.json'];
+
+export const GOVERNED_WINDSURF_FILES = ['.windsurf/hooks.json'];
+
 // JSON composition is intentionally narrower than the governed harness: only
 // hook adapters may retain repository-generated entries. Canonical registries
 // and other governed JSON must remain byte-identical across the fleet.
@@ -23,6 +31,8 @@ export const GOVERNED_HOOK_ADAPTER_FILES = [
   ...GOVERNED_CODEX_HOOK_FILES,
   ...GOVERNED_CLAUDE_FILES,
   ...GOVERNED_CURSOR_FILES,
+  ...GOVERNED_COPILOT_FILES,
+  ...GOVERNED_WINDSURF_FILES,
 ];
 
 // The machine memory guard (ENG-0138). Shipped as governed files rather than

@@ -146,7 +146,14 @@ exit non-zero.
 
 ## Adopting it in a repo
 
-The files arrive by harness sync. A consuming repo then:
+The files arrive by harness sync, including the hook adapters that wire the
+guard into each harness: `.claude/settings.json` (Claude Code),
+`.codex/hooks.json` (Codex), `.cursor/hooks.json` (Cursor),
+`.github/hooks/agent-guard.json` (Copilot CLI and coding agent), and
+`.windsurf/hooks.json` (Windsurf / Devin desktop Cascade). Known variance:
+Devin Local, Cascade's successor, reads a different hooks format and is not
+yet wired — a session there runs unguarded until an adapter exists (#290).
+A consuming repo then:
 
 1. Points its guarded npm scripts at `tools/agent-guard/run-guarded.mjs` and
    deletes any local fork of the old guard.
