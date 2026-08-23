@@ -383,6 +383,19 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label test:dom -- npm run test:dom:inner', opts()).allow, true);
   });
 
+  // #237: the wrapped command's argv is not node's. Cargo's `-p <crate>`
+  // package flag collided with node's `-p` (print mode) eval-flag pattern, so
+  // narrowing a test selection classified as heavier than the full run.
+  test('wrapped command flags are not runtime eval options (#237)', () => {
+    assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label test:e2e -- cargo test -p app -j 2', opts()).allow, true);
+    assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label test:e2e -- cargo test -p app adapter_inventory -j 2', opts()).allow, true);
+    assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label test:e2e -- cargo test --workspace -j 2', opts()).allow, true);
+    // The carve-out covers the wrapper's own segment only: a real inline
+    // program beside it still denies.
+    assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label x -- npm run lint; node -e "require(\'child_process\')"', opts()).allow, false);
+    assert.equal(evaluateCommand('node -p "npm run ci"', opts()).allow, false);
+  });
+
   // PR #139 review, P1: the wrapper allowlist vouched for the whole command
   // line, so anything sharing it rode along.
   test('a wrapper invocation does not vouch for its neighbours', () => {
@@ -485,6 +498,19 @@ describe('command hook', () => {
     assert.equal(evaluateCommand("gh pr create --body 'blocked npm run ci locally'", opts()).allow, true);
     assert.equal(evaluateCommand('git commit -m "ci"', opts()).allow, true);
     assert.equal(evaluateCommand('gh pr create --body "vitest"', opts()).allow, true);
+  });
+
+  // #237: a separator inside a quoted argument must not open a phantom
+  // segment whose first token looks executable (`a; \`x\`` → segment head
+  // "`x`"). Text inside quotes is data for the segment splitter; only real
+  // control operators split segments.
+  test('quoted separators do not open phantom segments (#237)', () => {
+    assert.equal(evaluateCommand('gh pr create --body "pushed `450f9b6`; `npm run test:version` passes"', opts()).allow, true);
+    assert.equal(evaluateCommand('echo "a; `x`"', opts()).allow, true);
+    assert.equal(evaluateCommand("gh api repos/O/R --jq '{sha: .sha[0:12]}'; gh api repos/O/R2 --jq '{status: .status}'", opts()).allow, true);
+    // A structural separator outside quotes still splits, and the second
+    // segment is still classified.
+    assert.equal(evaluateCommand('echo "hi"; npm run ci', opts()).allow, false);
   });
 
   test('direct-binary names in non-executable positions remain ordinary text', () => {

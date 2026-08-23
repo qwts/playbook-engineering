@@ -2745,6 +2745,14 @@ export function evaluateCommand(command, { cwd = process.cwd(), depth = 0 } = {}
     };
   }
   const dynamicCommand = maskNonShellHeredocs(command);
+  // splitSegments is quote-unaware; a separator inside a quoted argument would
+  // open a phantom segment whose first token can look executable — a jq
+  // program, or a backticked mention in a PR body (`a; \`x\``). Blank
+  // quoted separators up front so the dynamic-execution scans below see
+  // structural separators only (#237); maskQuotedSeparators already did this
+  // for the assignment scan, and the same correctness argument applies: text
+  // inside quotes is data, not control syntax.
+  const segmentedCommand = maskQuotedSeparators(dynamicCommand);
   const wrapperShellPayloads = unmodeledWrapperShellPayloads(dynamicCommand);
   if (hasUnmodeledEnvCommand(dynamicCommand)) {
     return {
@@ -2781,8 +2789,8 @@ export function evaluateCommand(command, { cwd = process.cwd(), depth = 0 } = {}
     };
   }
   if (
-    hasDynamicPackageScript(dynamicCommand) ||
-    hasDynamicExecutionPosition(dynamicCommand) ||
+    hasDynamicPackageScript(segmentedCommand) ||
+    hasDynamicExecutionPosition(segmentedCommand) ||
     wrapperShellPayloads.some((payload) => hasRuntimeShellExpansion(payload))
   ) {
     return {
@@ -2854,8 +2862,17 @@ export function evaluateCommand(command, { cwd = process.cwd(), depth = 0 } = {}
   // commands whose strings are not shell syntax. Static shell classification
   // cannot authenticate their contents, so agent commands must use checked-in
   // scripts rather than executable-program options.
+  // The sanctioned wrapper's own segment is carved out here, exactly as in
+  // the final per-segment loop below: everything after `run-guarded.mjs --`
+  // is the wrapped command's argv, not node's. Without the carve-out, a
+  // wrapped `cargo test -p app` was misread as `node -p` (print mode)
+  // because cargo's package flag collides with node's eval-flag pattern
+  // (#237) — making a narrower test selection classify as heavier than the
+  // full workspace run.
   if (splitSegments(effective).some((segment) => {
-    const tokens = commandAfterPrefixes(segment).split(/\s+/u).filter(Boolean);
+    const executableSegment = commandAfterPrefixes(segment);
+    if (ANY_WRAPPER_SEGMENT.test(executableSegment)) return false;
+    const tokens = executableSegment.split(/\s+/u).filter(Boolean);
     const runtime = tokens[0]?.split('/').at(-1) ?? '';
     const options = tokens.slice(1);
     if (runtime === 'node') {
