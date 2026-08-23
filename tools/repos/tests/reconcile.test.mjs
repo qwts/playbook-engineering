@@ -58,6 +58,7 @@ test('failed checks route to the right lane', () => {
       'feature issue template',
       'LICENSE',
       'app: qwts-codex-agent',
+      'retired .codex/scripts/setup.sh removed',
     ],
   });
   assert.deepEqual(
@@ -68,9 +69,13 @@ test('failed checks route to the right lane', () => {
     p.seeds.map((s) => s.target),
     ['AGENTS.md', '.codex/config.toml', '.github/ISSUE_TEMPLATE/feature.yml'],
   );
-  assert.equal(p.human.length, 2); // LICENSE decision + App install
+  assert.equal(p.human.length, 3); // LICENSE decision + App install + retraction pointer
   assert.match(p.human.join('\n'), /LICENSE/);
   assert.match(p.human.join('\n'), /qwts-codex-agent/);
+  // Retraction is the harness sync's lane, never "converge manually" — the
+  // reconciler carries the pointer to the automated fix.
+  assert.match(p.human.join('\n'), /retired \.codex\/scripts\/setup\.sh removed: delivered by the harness sync/);
+  assert.doesNotMatch(p.human.join('\n'), /converge manually/);
 });
 
 test('a missing repo is a single human bootstrap step', () => {

@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { codeqlFreshness, codeqlSetupFrom } from '../drift.mjs';
-import { plan } from '../lib/reconcile-plan.mjs';
+import { codeqlFreshness, codeqlSetupFrom, retiredDriftChecks } from '../drift.mjs';
+import { plan, promotionPlan } from '../lib/reconcile-plan.mjs';
+import { RETIRED_HARNESS_FILES } from '../lib/baseline-files.mjs';
 
 const CODEQL_CHECK = 'code scanning (CodeQL, own workflow, current)';
 
@@ -132,4 +133,24 @@ test('a conformant repo produces no code-scanning action', () => {
   assert.deepEqual(out.human, []);
   assert.deepEqual(out.seeds, []);
   assert.deepEqual(out.settings, []);
+});
+
+test('retired-file drift is audited on active repos only', () => {
+  // The sync opens retraction PRs solely for active entries, so auditing an
+  // onboarding repo on retired files would deadlock --promote: promotion
+  // refuses any failed check, and no automated lane could clear this one. The
+  // promotion itself pushes governance/repos.json — a sync trigger path — so
+  // the retraction PR opens the moment the repo turns active.
+  assert.deepEqual(retiredDriftChecks({ status: 'active' }), RETIRED_HARNESS_FILES);
+  assert.deepEqual(retiredDriftChecks({ status: 'onboarding' }), []);
+  assert.deepEqual(
+    retiredDriftChecks({ status: 'active', codexSync: { exclude: ['.codex/scripts/setup.sh'] } }),
+    RETIRED_HARNESS_FILES.filter((path) => path !== '.codex/scripts/setup.sh'),
+  );
+  const stranded = promotionPlan({
+    name: 'newcomer',
+    status: 'onboarding',
+    failed: retiredDriftChecks({ status: 'onboarding' }),
+  });
+  assert.equal(stranded.eligible, true, 'a stranded retired file never blocks promotion');
 });

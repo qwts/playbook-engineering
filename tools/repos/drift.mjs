@@ -170,6 +170,17 @@ export function codeqlFreshness({ analyses, headSha, headCommittedAt, now, grace
   return now - headAt < graceMs ? 'current' : 'stale';
 }
 
+// Which retired paths a repo's audit demands gone. Active repos only: the sync
+// opens retraction PRs solely for active entries, so auditing an onboarding
+// repo on retired files would deadlock `reconcile.mjs --promote` — promotion
+// refuses any failed check, and no automated lane could clear this one. A
+// promoted repo is not left carrying the file: flipping its manifest status
+// pushes governance/repos.json, a sync-workflow trigger path, so the
+// retraction PR opens with the promotion itself.
+export function retiredDriftChecks(entry) {
+  return entry.status === 'active' ? retiredCodexPaths(entry) : [];
+}
+
 async function reviewRequired(owner, name, branch, token) {
   const rules = (await api(`/repos/${owner}/${name}/rules/branches/${branch}`, token)) ?? [];
   const rule = rules.find((r) => r.type === 'pull_request');
@@ -198,7 +209,7 @@ export async function checkRepo(owner, entry, coverage, token, {
   // still live, which for .codex/scripts/setup.sh meant still rewriting PATHs.
   // Scoped per entry so a manifest exclusion (the retraction opt-out) is not
   // reported as drift.
-  for (const file of retiredCodexPaths(entry)) {
+  for (const file of retiredDriftChecks(entry)) {
     const path = file.split('/').map(encodeURIComponent).join('/');
     const contents = await api(`/repos/${owner}/${entry.name}/contents/${path}`, token);
     checks[`retired ${file} removed`] = contents === null;

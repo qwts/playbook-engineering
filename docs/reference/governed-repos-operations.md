@@ -142,7 +142,9 @@ recorded paths are ever deleted, approval validation refuses any other
 deletion, and a manifest exclusion opts a repository out, keeping its copy as
 repo-owned. Entries are durable — a path returns to management only by moving
 back to the governed inventory — and drift reports a still-present retired
-file until the retraction merges.
+file on active repositories until the retraction merges. Onboarding repos are
+not audited on retired files, so promotion never deadlocks on a deletion only
+the post-promotion sync can deliver.
 
 Drift uses the stable `governance/harness-sync` branch and a `chores-dumb` pull
 request; default branches stay protected. Existing PRs are reconciled even
