@@ -209,15 +209,38 @@ test('ordinary missing seeds retain their canonical bytes', () => {
 test('the Codex environment stays project-scoped and the trust rules stay narrow', () => {
   const env = readFileSync(join(ROOT, '.codex/environments/environment.toml'), 'utf8');
   // Setup asserts and uses what the host provides; it never installs tooling,
-  // edits shell profiles, or writes outside the worktree.
+  // edits shell profiles, or writes outside the worktree. The only PATH export
+  // is the win32 launcher scoping /usr/bin:/bin into its Git Bash process.
   assert.doesNotMatch(env, /codex-agent-dev/);
   assert.doesNotMatch(env, /\.zshrc|\.zprofile|\.bash_profile|\.bashrc|\.profile\b/);
-  assert.doesNotMatch(env, /export PATH=/);
+  assert.doesNotMatch(env, /opt\/homebrew/);
+  assert.doesNotMatch(env, /export PATH=(?!"\/usr\/bin:\/bin:\$PATH")/);
   assert.doesNotMatch(env, /nvm alias default/);
   assert.doesNotMatch(env, /\.codex\/scripts\//);
-  assert.match(env, /agent-bot setup-worktree/);
+  // Identity resolution honors AGENT_BOT_BIN, then PATH, then the installed
+  // location; installs follow the repository's own lockfile.
+  assert.match(env, /AGENT_BOT_BIN/);
+  assert.match(env, /setup-worktree/);
+  assert.match(env, /\$HOME\/\.local\/bin\/agent-bot/);
   assert.match(env, /npm ci --no-audit --no-fund/);
+  assert.match(env, /corepack pnpm install --frozen-lockfile/);
+  assert.match(env, /corepack yarn install --immutable/);
+  assert.match(env, /bun install --frozen-lockfile/);
   assert.match(env, /npm run --if-present harness:setup/);
+  // Both platform sections must run the same POSIX bodies: every win32 script
+  // wraps a verbatim copy of its POSIX sibling in a Git Bash launcher.
+  const posixBodies = [...env.matchAll(/^\[(setup|cleanup)\]\nscript = '''\n([\s\S]*?)'''/gmu)];
+  const win32Bodies = [...env.matchAll(/^\[(setup|cleanup)\.win32\]\nscript = '''\n[\s\S]*?@'\n([\s\S]*?)'@/gmu)];
+  assert.equal(posixBodies.length, 2);
+  assert.equal(win32Bodies.length, 2);
+  for (const [index, [, table, body]] of posixBodies.entries()) {
+    assert.equal(win32Bodies[index][1], table, `win32 tables must mirror POSIX order`);
+    assert.equal(
+      win32Bodies[index][2],
+      `export PATH="/usr/bin:/bin:$PATH"\n${body}`,
+      `[${table}.win32] must embed the [${table}] body verbatim`,
+    );
+  }
 
   const directRule = readFileSync(join(ROOT, '.codex/rules/environment.rules'), 'utf8')
     .split('# Trust standalone, non-destructive GitHub CLI development operations.')[0];
