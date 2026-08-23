@@ -58,7 +58,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           validated=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&per_page=100" \
-            --jq 'any(.workflow_runs[]; .name == "CI" and (.event == "pull_request" or .event == "merge_group") and .conclusion == "success")')
+            --jq 'any(.workflow_runs[]; .path == ".github/workflows/ci.yml" and (.event == "pull_request" or .event == "merge_group") and .conclusion == "success")')
           echo "validated=$validated" >> "$GITHUB_OUTPUT"
 
   preflight-evidence:

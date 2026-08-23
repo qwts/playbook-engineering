@@ -648,6 +648,51 @@ test('the reference workflow preserves governed gates and skips draft jobs', () 
   );
 });
 
+
+test('merge-evidence selects the canonical workflow by immutable path', () => {
+  const workflow = readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const mergeEvidenceJob = workflow.match(/^  merge-evidence:\n[\s\S]*?(?=^  preflight-evidence:$)/m)?.[0];
+  assert.ok(mergeEvidenceJob, 'merge-evidence job is missing');
+  const query = mergeEvidenceJob.match(/--jq '([^']+)'/u)?.[1];
+  assert.ok(query, 'merge-evidence jq query is missing');
+  assert.match(query, /\.path == "\.github\/workflows\/ci\.yml"/u);
+  assert.match(query, /\.event == "pull_request" or \.event == "merge_group"/u);
+  assert.match(query, /\.conclusion == "success"/u);
+  assert.doesNotMatch(query, /\.name == "CI"/u);
+
+  const select = (runs) =>
+    runs.some(
+      (run) =>
+        run.path === '.github/workflows/ci.yml' &&
+        (run.event === 'pull_request' || run.event === 'merge_group') &&
+        run.conclusion === 'success',
+    );
+  assert.equal(
+    select([
+      {
+        name: 'Not CI',
+        path: '.github/workflows/ci.yml',
+        event: 'pull_request',
+        conclusion: 'success',
+      },
+    ]),
+    true,
+    'a display-name rename of the canonical file must still count',
+  );
+  assert.equal(
+    select([
+      {
+        name: 'CI',
+        path: '.github/workflows/impostor.yml',
+        event: 'pull_request',
+        conclusion: 'success',
+      },
+    ]),
+    false,
+    'a CI-named workflow at another path must not count',
+  );
+});
+
 test('every direct non-CI workflow entrypoint enforces authorization first', () => {
   for (const path of ['codex-sync.yml', 'inventory-catalog.yml']) {
     const workflow = readFileSync(new URL(`../../../.github/workflows/${path}`, import.meta.url), 'utf8');
