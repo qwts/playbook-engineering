@@ -76,3 +76,32 @@ export const BASELINE_FILES = [
   '.github/CODEOWNERS',
   ...GOVERNED_HARNESS_FILES,
 ];
+
+// Paths the sync previously managed and has stopped managing (#287). The sync
+// only ever added and updated files downstream, so a path leaving the governed
+// inventory stranded a stale copy in every governed repo — the retired
+// .codex/scripts/setup.sh kept rewriting shell profiles for weeks after #286
+// deleted it here. This list is the durable record that lets retraction
+// distinguish "we stopped managing this" from "the repo created this itself":
+// the sync deletes a downstream file only when its path is recorded here.
+//
+// A path stays on this list forever once managed files stop shipping it; if it
+// ever returns to management it moves back to the governed inventory above and
+// off this list (the two must stay disjoint — retiredCodexPaths fails closed
+// on overlap).
+export const RETIRED_HARNESS_FILES = [
+  // #286: .codex/ became purely Codex-specific; the harness scripts installed
+  // tooling, rewrote shell profiles, and prepended /opt/homebrew/bin to PATH.
+  '.codex/scripts/cleanup.sh',
+  '.codex/scripts/ensure-identity.sh',
+  '.codex/scripts/gh.zsh',
+  '.codex/scripts/git-with-nvm.zsh',
+  '.codex/scripts/nvm.zsh',
+  '.codex/scripts/setup.sh',
+  // Managed briefly between "require OIDC for hosted CI bypass" and "remove
+  // replayable CI exemption"; any sync in that window shipped it downstream.
+  'tools/agent-guard/lib/hosted-ci.mjs',
+  // #284: the model routing registry moved to agent-bot-identity.
+  'governance/agent-models.json',
+  'tools/models/registry.mjs',
+];

@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-// Fleet synchronization for the centrally managed agent harness files.
+// Fleet synchronization for the centrally managed agent harness files. Adds
+// and updates the governed inventory downstream, and deletes paths recorded
+// as retired (RETIRED_HARNESS_FILES) — files the sync once delivered and has
+// stopped managing (#287).
 //
 //   node tools/repos/sync-codex.mjs [--apply] [--repo <name>] [--json]
 //
@@ -25,8 +28,11 @@ import {
   loadCanonicalFiles,
   materializeManagedFiles,
   managedCodexPaths,
+  retiredCodexPaths,
+  staleRetiredPaths,
   syncPullBody,
   treeByPath,
+  withdrawnPathResets,
 } from './lib/codex-sync.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -112,6 +118,8 @@ async function writeManagedCommit(client, {
   parentSha,
   sourceSha,
   files,
+  removals = [],
+  resets = [],
 }) {
   const parent = await client.call('GET', `/repos/${owner}/${repo}/git/commits/${parentSha}`);
   const entries = [];
@@ -122,6 +130,12 @@ async function writeManagedCommit(client, {
     });
     entries.push({ path: file.path, mode: file.mode, type: 'blob', sha: blob.sha });
   }
+  // A null sha atop base_tree is the Git data API's file deletion.
+  for (const path of removals) {
+    entries.push({ path, mode: '100644', type: 'blob', sha: null });
+  }
+  // Prebuilt tree entries that return withdrawn paths to base state.
+  entries.push(...resets);
   const tree = await client.call('POST', `/repos/${owner}/${repo}/git/trees`, {
     base_tree: parent.tree.sha,
     tree: entries,
@@ -142,7 +156,10 @@ export async function syncRepository(client, {
 }) {
   const repo = entry.name;
   const paths = managedCodexPaths(entry);
-  if (paths.length === 0) return { name: repo, status: 'excluded', changed: [] };
+  const retired = retiredCodexPaths(entry);
+  if (paths.length === 0 && retired.length === 0) {
+    return { name: repo, status: 'excluded', changed: [], removed: [] };
+  }
 
   const metadata = await client.call('GET', `/repos/${owner}/${repo}`);
   const base = metadata.default_branch;
@@ -158,6 +175,7 @@ export async function syncRepository(client, {
     paths,
   );
   const baseDiff = diffManagedFiles(desiredFiles, baseTree, paths);
+  const baseRemovals = staleRetiredPaths(baseTree, retired);
 
   const head = encodeURIComponent(`${owner}:${CODEX_SYNC_BRANCH}`);
   const branchPulls = await client.call(
@@ -184,19 +202,24 @@ export async function syncRepository(client, {
     branchOwned,
     pulls: branchPulls,
   });
-  if (baseDiff.length === 0 && !choice.pull) {
-    return { name: repo, status: 'current', changed: [] };
+  if (baseDiff.length === 0 && baseRemovals.length === 0 && !choice.pull) {
+    return { name: repo, status: 'current', changed: [], removed: [] };
   }
 
   let changed = baseDiff;
+  let removed = baseRemovals;
+  let resets = [];
   if (choice.pull) {
     const branchTree = await commitTree(client, owner, repo, choice.parentSha);
     changed = diffManagedFiles(desiredFiles, branchTree, paths);
-    if (changed.length === 0) {
+    removed = staleRetiredPaths(branchTree, retired);
+    resets = withdrawnPathResets(entry, baseTree, branchTree);
+    if (changed.length === 0 && removed.length === 0 && resets.length === 0) {
       return {
         name: repo,
         status: 'pull-current',
         changed: baseDiff.map((file) => file.path),
+        removed: baseRemovals,
         pull: choice.pull.html_url,
       };
     }
@@ -206,6 +229,8 @@ export async function syncRepository(client, {
     name: repo,
     status: apply ? 'pending' : 'planned',
     changed: changed.map((file) => file.path),
+    removed,
+    restored: resets.map((reset) => reset.path),
     pull: choice.pull?.html_url,
   };
   if (!apply) return result;
@@ -216,6 +241,8 @@ export async function syncRepository(client, {
     parentSha: choice.parentSha,
     sourceSha,
     files: changed,
+    removals: removed,
+    resets,
   });
   if (choice.pull) {
     await client.call(
@@ -236,7 +263,7 @@ export async function syncRepository(client, {
     });
   }
 
-  const body = syncPullBody({ owner, sourceSha, paths });
+  const body = syncPullBody({ owner, sourceSha, paths, removed: baseRemovals });
   if (choice.pull) {
     const pull = await client.call('PATCH', `/repos/${owner}/${repo}/pulls/${choice.pull.number}`, {
       title: CODEX_SYNC_TITLE,
@@ -306,9 +333,11 @@ async function main() {
   }
   for (const result of results) {
     const files = result.changed.length ? ` (${result.changed.join(', ')})` : '';
+    const removed = result.removed?.length ? ` (removes ${result.removed.join(', ')})` : '';
+    const restored = result.restored?.length ? ` (restores withdrawn ${result.restored.join(', ')})` : '';
     const pull = result.pull ? ` — ${result.pull}` : '';
     const error = result.error ? ` — ${result.error}` : '';
-    process.stdout.write(`${result.name}: ${result.status}${files}${pull}${error}\n`);
+    process.stdout.write(`${result.name}: ${result.status}${files}${removed}${restored}${pull}${error}\n`);
   }
   if (!apply) process.stdout.write('\ndry run — pass --apply to open or update synchronization pull requests\n');
 }

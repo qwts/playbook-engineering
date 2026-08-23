@@ -262,6 +262,25 @@ function checkOrphans(docs, docSet, indexes, findings) {
   }
 }
 
+// The line ranges a doc's generator owns, fenced by BEGIN/END GENERATED
+// markers. Generated content is a projection of governed data validated by
+// its own generator, so stale-path must not judge it against this checkout:
+// the governed-repos table renders retired-path sync exclusions that the
+// manifest schema requires to *not* exist here (#287) — a contradiction, not
+// staleness.
+function generatedLineRanges(lines) {
+  const ranges = [];
+  let start = null;
+  lines.forEach((line, index) => {
+    if (start === null && line.includes('<!-- BEGIN GENERATED')) start = index;
+    else if (start !== null && line.includes('<!-- END GENERATED')) {
+      ranges.push([start, index]);
+      start = null;
+    }
+  });
+  return ranges;
+}
+
 // Only spans that unambiguously look like repo paths are judged: at least one
 // slash, path-safe characters, no glob/placeholder syntax, and a first
 // segment that names a real top-level entry (or a configured root). Anything
@@ -271,7 +290,9 @@ function checkStalePaths(docs, docSet, rootsConfig, findings) {
   const topLevel = new Set(rootsConfig ?? readdirNames(docSet.root));
   const pathLike = /^\.?\/?[\w@.-]+(\/[\w@.-]+)+$/;
   for (const [rel, doc] of docs) {
+    const generated = generatedLineRanges(doc.lines);
     doc.codeSpans.forEach((spans, lineIndex) => {
+      if (generated.some(([begin, end]) => lineIndex >= begin && lineIndex <= end)) return;
       for (const span of spans) {
         let candidate = span.text.trim();
         candidate = candidate.replace(/:\d+(?:-\d+)?$/, ''); // strip :line refs

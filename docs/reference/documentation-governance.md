@@ -10,7 +10,7 @@ Every rule must name the agent failure it prevents; a rule that cannot is not ad
 | --- | --- | --- |
 | `link-resolution` | Relative links and `#anchors` resolve | Following a dead link fails the task or invites fabricating the target |
 | `orphan-doc` | Every doc reachable from an index | Unreachable guidance is never loaded by link-following retrieval |
-| `stale-path` | Backticked repo paths exist | The doc sends the agent to a file that moved or was deleted |
+| `stale-path` | Backticked repo paths exist (generated blocks exempt — their generator validates them) | The doc sends the agent to a file that moved or was deleted |
 | `heading-structure` | One H1 first, no skipped levels, bounded depth | Heading-based chunking misparents sections, so chunks carry wrong context |
 | `front-loaded-summary` | Prose states the point in the first N tokens | Truncated reads keep the preamble and lose the conclusion |
 | `required-fields` | Machine-read fields (ADR `Status`) exist and parse | Field-reading gates silently pass or hard-fail on free-form values |

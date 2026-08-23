@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import {
   GOVERNED_HARNESS_FILES,
   GOVERNED_HOOK_ADAPTER_FILES,
+  RETIRED_HARNESS_FILES,
 } from './baseline-files.mjs';
 
 export const VALID_VISIBILITY = ['public', 'private'];
@@ -106,7 +107,9 @@ export function validateManifest(manifest) {
           } else {
             const excluded = new Set();
             for (const path of repo.codexSync.exclude) {
-              if (!GOVERNED_HARNESS_FILES.includes(path)) {
+              // A retired path is a valid exclusion: it opts the repo out of
+              // retraction, keeping its copy as repo-owned (#287).
+              if (!GOVERNED_HARNESS_FILES.includes(path) && !RETIRED_HARNESS_FILES.includes(path)) {
                 errors.push(`${where}.codexSync.exclude contains unmanaged path ${JSON.stringify(path)}`);
               } else if (excluded.has(path)) {
                 errors.push(`${where}.codexSync.exclude contains duplicate path ${JSON.stringify(path)}`);

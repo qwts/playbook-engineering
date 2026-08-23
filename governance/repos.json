@@ -76,7 +76,10 @@
       "sharedCi": false,
       "codexSync": {
         "enabled": true,
-        "exclude": [],
+        "exclude": [
+          "governance/agent-models.json",
+          "tools/models/registry.mjs"
+        ],
         "preserveJsonArrayEntries": {
           ".claude/settings.json": [
             "agent-bot agent-hook"
@@ -89,7 +92,7 @@
           ]
         }
       },
-      "delta": "",
+      "delta": "Canonical ENG-0151 home of the model registry pair, so the retired registry paths are excluded from sync retraction — deleting them here would delete the originals.",
       "note": "Standalone source of truth for agent identity runtime code and operational mechanics (ENG-0128)."
     },
     {

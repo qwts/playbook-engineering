@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
+  BASELINE_FILES,
   GOVERNED_FORMAT_EXEMPT_FILES,
   GOVERNED_HARNESS_FILES,
+  RETIRED_HARNESS_FILES,
 } from '../lib/baseline-files.mjs';
 import {
   CODEX_REVIEW_BOT,
@@ -22,8 +24,11 @@ import {
   mergeManagedFile,
   managedCodexPaths,
   preferredMergeFlag,
+  retiredCodexPaths,
+  staleRetiredPaths,
   syncPullBody,
   validateSyncApprovalCandidate,
+  withdrawnPathResets,
 } from '../lib/codex-sync.mjs';
 import { parseArgs, reviewRepository } from '../approve-codex-sync.mjs';
 import { installationToken, syncRepository } from '../sync-codex.mjs';
@@ -519,6 +524,81 @@ test('managed JSON overlays reject canonical keys without declared ownership', (
   );
 });
 
+test('the retired inventory is disjoint from every currently managed path', () => {
+  // A path on both lists would make one sync commit ship and delete the same
+  // file; retiredCodexPaths fails closed rather than resolving the tie.
+  assert.deepEqual(RETIRED_HARNESS_FILES.filter((path) => BASELINE_FILES.includes(path)), []);
+  assert.throws(
+    () => retiredCodexPaths({}, [BASELINE_FILES[0]]),
+    /retired paths still in the baseline inventory/,
+  );
+});
+
+test('retirement stays a durable record of every path the sync stopped managing', () => {
+  // The stranded copies from #284 and #286 — and hosted-ci.mjs, managed for a
+  // window between two agent-guard fixes — must never silently leave the list;
+  // dropping an entry would orphan downstream copies again.
+  for (const path of [
+    '.codex/scripts/setup.sh',
+    '.codex/scripts/gh.zsh',
+    'governance/agent-models.json',
+    'tools/models/registry.mjs',
+    'tools/agent-guard/lib/hosted-ci.mjs',
+  ]) {
+    assert.ok(RETIRED_HARNESS_FILES.includes(path), `${path} left the retired inventory`);
+  }
+});
+
+test('retired paths honor the same manifest scoping as managed paths', () => {
+  assert.deepEqual(retiredCodexPaths({}), RETIRED_HARNESS_FILES);
+  assert.deepEqual(retiredCodexPaths({ codexSync: { enabled: false } }), []);
+  const kept = '.codex/scripts/setup.sh';
+  const paths = retiredCodexPaths({ codexSync: { exclude: [kept] } });
+  assert.equal(paths.length, RETIRED_HARNESS_FILES.length - 1);
+  assert.ok(!paths.includes(kept), 'an excluded retired path is repo-owned, never deleted');
+});
+
+test('stale retired paths are the retired files a target tree still carries', () => {
+  const present = canonical('.codex/scripts/setup.sh');
+  const tree = [
+    { path: present.path, type: 'blob', sha: present.sha, mode: '100755' },
+    { path: '.codex/scripts', type: 'tree', sha: 'tree-sha' },
+  ];
+  assert.deepEqual(
+    staleRetiredPaths(tree, ['.codex/scripts/setup.sh', 'tools/models/registry.mjs']),
+    ['.codex/scripts/setup.sh'],
+  );
+});
+
+test('withdrawn paths are returned to base state, planned paths are left to their lanes', () => {
+  const managedPath = GOVERNED_HARNESS_FILES[0];
+  const deleted = '.codex/scripts/setup.sh';
+  const added = 'governance/agent-models.json';
+  const entry = { codexSync: { exclude: [managedPath, deleted, added] } };
+  const baseManaged = canonical(managedPath, 'repo-owned\n');
+  const baseDeleted = canonical(deleted, 'kept by exclusion\n', '100755');
+  const base = new Map([
+    [managedPath, { path: managedPath, type: 'blob', sha: baseManaged.sha, mode: '100644' }],
+    [deleted, { path: deleted, type: 'blob', sha: baseDeleted.sha, mode: '100755' }],
+  ]);
+  // The stale branch deleted one withdrawn path, rewrote another, and added a
+  // third the base never had.
+  const branch = new Map([
+    [managedPath, { path: managedPath, type: 'blob', sha: gitBlobSha('stale sync bytes\n'), mode: '100644' }],
+    [added, { path: added, type: 'blob', sha: gitBlobSha('{}\n'), mode: '100644' }],
+  ]);
+
+  assert.deepEqual(withdrawnPathResets(entry, base, branch), [
+    { path: managedPath, mode: '100644', type: 'blob', sha: baseManaged.sha },
+    { path: deleted, mode: '100755', type: 'blob', sha: baseDeleted.sha },
+    { path: added, mode: '100644', type: 'blob', sha: null },
+  ]);
+  // A planned retired path missing from the branch is the retraction lane's
+  // business, never a reset; a branch matching base needs nothing at all.
+  assert.deepEqual(withdrawnPathResets(entry, base, new Map(base)), []);
+  assert.deepEqual(withdrawnPathResets({ codexSync: {} }, base, new Map()), []);
+});
+
 test('manifest exclusions remove files from the managed set', () => {
   const excluded = GOVERNED_HARNESS_FILES[2];
   const paths = managedCodexPaths({ codexSync: { exclude: [excluded] } });
@@ -780,6 +860,186 @@ test('an open sync pull repairs a JSON overlay from the target default branch', 
   assert.equal(merged.hooks.WorktreeCreate[0].hooks[0].command, 'managed');
 });
 
+test('a stale retired file becomes a deletion in the synchronization pull request', async () => {
+  const retiredPath = '.codex/scripts/setup.sh';
+  const stale = canonical(retiredPath, 'export PATH="/opt/homebrew/bin:$PATH"\n', '100755');
+  const writes = [];
+  let treeBody = null;
+  let pullBody = null;
+  const client = {
+    async call(method, requestPath, body) {
+      if (method !== 'GET') writes.push([method, requestPath]);
+      if (method === 'GET' && requestPath === '/repos/qwts/target') {
+        return { default_branch: 'main' };
+      }
+      if (method === 'GET' && requestPath.endsWith('/git/ref/heads/main')) {
+        return { object: { sha: 'base-sha' } };
+      }
+      if (method === 'GET' && requestPath.endsWith('/git/commits/base-sha')) {
+        return { tree: { sha: 'base-tree' } };
+      }
+      if (method === 'GET' && requestPath.endsWith('/git/trees/base-tree?recursive=1')) {
+        return {
+          truncated: false,
+          tree: [{ path: retiredPath, type: 'blob', sha: stale.sha, mode: stale.mode }],
+        };
+      }
+      if (method === 'GET' && requestPath.includes('/pulls?state=all')) return [];
+      if (method === 'GET' && requestPath.endsWith('/git/ref/heads/governance/harness-sync')) {
+        return null; // allow404 — no stable branch yet
+      }
+      if (method === 'POST' && requestPath.endsWith('/git/trees')) {
+        treeBody = body;
+        return { sha: 'retract-tree' };
+      }
+      if (method === 'POST' && requestPath.endsWith('/git/commits')) {
+        assert.deepEqual(body.parents, ['base-sha']);
+        return { sha: 'retract-commit' };
+      }
+      if (method === 'POST' && requestPath.endsWith('/git/refs')) {
+        assert.equal(body.ref, `refs/heads/${CODEX_SYNC_BRANCH}`);
+        return {};
+      }
+      if (method === 'POST' && requestPath.endsWith('/pulls')) {
+        pullBody = body;
+        return { html_url: 'https://example.test/pr/9' };
+      }
+      throw new Error(`unexpected request: ${method} ${requestPath}`);
+    },
+  };
+  const options = {
+    owner: 'qwts',
+    entry: { name: 'target', codexSync: { exclude: [...GOVERNED_HARNESS_FILES] } },
+    canonicalFiles: new Map(),
+    sourceSha: 'a'.repeat(40),
+  };
+
+  const planned = await syncRepository(client, { ...options, apply: false });
+  assert.equal(planned.status, 'planned');
+  assert.deepEqual(planned.changed, []);
+  assert.deepEqual(planned.removed, [retiredPath]);
+  assert.deepEqual(writes, [], 'a dry run never writes');
+
+  const applied = await syncRepository(client, { ...options, apply: true });
+  assert.equal(applied.status, 'pull-opened');
+  assert.deepEqual(applied.removed, [retiredPath]);
+  // The deletion is a null-sha entry over the base tree — never a blob upload.
+  assert.deepEqual(treeBody, {
+    base_tree: 'base-tree',
+    tree: [{ path: retiredPath, mode: '100644', type: 'blob', sha: null }],
+  });
+  assert.ok(!writes.some(([, requestPath]) => requestPath.endsWith('/git/blobs')));
+  assert.match(pullBody.body, /Retired files removed/u);
+  assert.match(pullBody.body, /\.codex\/scripts\/setup\.sh/u);
+});
+
+test('an open pull request carrying a withdrawn deletion is repaired, not left current', async () => {
+  const path = GOVERNED_HARNESS_FILES[0];
+  const source = canonical(path);
+  const kept = '.codex/scripts/setup.sh';
+  const keptBlob = canonical(kept, 'repo-owned since the exclusion\n', '100755');
+  // The exclusion arrived while the retraction pull request was open: its
+  // branch still deletes the file the manifest now calls repo-owned.
+  const entry = {
+    name: 'target',
+    codexSync: { exclude: [kept, ...GOVERNED_HARNESS_FILES.filter((candidate) => candidate !== path)] },
+  };
+  let treeBody = null;
+  const writes = [];
+  const client = {
+    async call(method, requestPath, body) {
+      if (method !== 'GET') writes.push([method, requestPath]);
+      if (method === 'GET' && requestPath === '/repos/qwts/target') return { default_branch: 'main' };
+      if (method === 'GET' && requestPath.endsWith('/git/ref/heads/main')) return { object: { sha: 'base-sha' } };
+      if (method === 'GET' && requestPath.endsWith('/git/commits/base-sha')) return { tree: { sha: 'base-tree' } };
+      if (method === 'GET' && requestPath.endsWith('/git/trees/base-tree?recursive=1')) {
+        return {
+          truncated: false,
+          tree: [
+            { path, type: 'blob', sha: source.sha, mode: source.mode },
+            { path: kept, type: 'blob', sha: keptBlob.sha, mode: keptBlob.mode },
+          ],
+        };
+      }
+      if (method === 'GET' && requestPath.includes('/pulls?state=all')) {
+        return [{
+          number: 7,
+          state: 'open',
+          title: CODEX_SYNC_TITLE,
+          html_url: 'https://example.test/pr/7',
+          head: { ref: CODEX_SYNC_BRANCH },
+        }];
+      }
+      if (method === 'GET' && requestPath.endsWith('/git/ref/heads/governance/harness-sync')) {
+        return { object: { sha: 'branch-sha' } };
+      }
+      if (method === 'GET' && requestPath.endsWith('/git/commits/branch-sha')) return { tree: { sha: 'branch-tree' } };
+      if (method === 'GET' && requestPath.endsWith('/git/trees/branch-tree?recursive=1')) {
+        return {
+          truncated: false,
+          tree: [{ path, type: 'blob', sha: source.sha, mode: source.mode }],
+        };
+      }
+      if (method === 'POST' && requestPath.endsWith('/git/trees')) {
+        treeBody = body;
+        return { sha: 'repair-tree' };
+      }
+      if (method === 'POST' && requestPath.endsWith('/git/commits')) {
+        assert.deepEqual(body.parents, ['branch-sha']);
+        return { sha: 'repair-commit' };
+      }
+      if (method === 'PATCH' && requestPath.endsWith('/git/refs/heads/governance/harness-sync')) return {};
+      if (method === 'PATCH' && requestPath.endsWith('/pulls/7')) {
+        return { html_url: 'https://example.test/pr/7' };
+      }
+      throw new Error(`unexpected request: ${method} ${requestPath}`);
+    },
+  };
+
+  const result = await syncRepository(client, {
+    owner: 'qwts',
+    entry,
+    canonicalFiles: new Map([[path, source]]),
+    sourceSha: 'a'.repeat(40),
+    apply: true,
+  });
+  assert.equal(result.status, 'pull-updated');
+  assert.deepEqual(result.changed, []);
+  assert.deepEqual(result.removed, []);
+  assert.deepEqual(result.restored, [kept]);
+  // The repair re-points the path at the base blob — no upload, no deletion.
+  assert.deepEqual(treeBody, {
+    base_tree: 'branch-tree',
+    tree: [{ path: kept, mode: '100755', type: 'blob', sha: keptBlob.sha }],
+  });
+  assert.ok(!writes.some(([, requestPath]) => requestPath.endsWith('/git/blobs')));
+});
+
+test('a repository with nothing to retract and current content stays untouched', async () => {
+  const client = {
+    async call(method, requestPath) {
+      if (method !== 'GET') throw new Error(`unexpected write: ${method} ${requestPath}`);
+      if (requestPath === '/repos/qwts/target') return { default_branch: 'main' };
+      if (requestPath.endsWith('/git/ref/heads/main')) return { object: { sha: 'base-sha' } };
+      if (requestPath.endsWith('/git/commits/base-sha')) return { tree: { sha: 'base-tree' } };
+      if (requestPath.endsWith('/git/trees/base-tree?recursive=1')) {
+        return { truncated: false, tree: [] };
+      }
+      if (requestPath.includes('/pulls?state=all')) return [];
+      if (requestPath.endsWith('/git/ref/heads/governance/harness-sync')) return null;
+      throw new Error(`unexpected request: ${method} ${requestPath}`);
+    },
+  };
+  const result = await syncRepository(client, {
+    owner: 'qwts',
+    entry: { name: 'target', codexSync: { exclude: [...GOVERNED_HARNESS_FILES] } },
+    canonicalFiles: new Map(),
+    sourceSha: 'a'.repeat(40),
+    apply: true,
+  });
+  assert.deepEqual(result, { name: 'target', status: 'current', changed: [], removed: [] });
+});
+
 test('pull body records source provenance and every managed path', () => {
   const body = syncPullBody({
     owner: 'qwts',
@@ -789,6 +1049,16 @@ test('pull body records source provenance and every managed path', () => {
   assert.match(body, /playbook-engineering\/commit\/a{40}/);
   assert.match(body, /playbook-engineering#60/);
   for (const path of GOVERNED_HARNESS_FILES) assert.match(body, new RegExp(path.replaceAll('.', '\\.')));
+  assert.doesNotMatch(body, /Retired files removed/u, 'no retraction section without removals');
+
+  const retracting = syncPullBody({
+    owner: 'qwts',
+    sourceSha: 'a'.repeat(40),
+    paths: GOVERNED_HARNESS_FILES,
+    removed: ['.codex/scripts/setup.sh'],
+  });
+  assert.match(retracting, /Retired files removed \(previously managed, no longer governed\):/u);
+  assert.match(retracting, /- `\.codex\/scripts\/setup\.sh`/u);
 });
 
 function approvalFixture(overrides = {}) {
@@ -834,6 +1104,40 @@ test('approval validation accepts only the exact bot-owned managed sync shape', 
   });
   assert.ok(errors.some((error) => error.includes(`author must be ${CODEX_SYNC_BOT}[bot]`)));
   assert.ok(errors.some((error) => error.includes('unmanaged changed path')));
+});
+
+test('approval validation accepts retraction and refuses every other deletion', () => {
+  const fixture = approvalFixture();
+  assert.deepEqual(validateSyncApprovalCandidate({
+    ...fixture,
+    files: [
+      { filename: GOVERNED_HARNESS_FILES[0], status: 'modified' },
+      { filename: '.codex/scripts/setup.sh', status: 'removed' },
+    ],
+  }), []);
+
+  // Deleting a path the retired inventory does not record is not retraction —
+  // whatever else the pull request looks like.
+  const errors = validateSyncApprovalCandidate({
+    ...fixture,
+    files: [{ filename: GOVERNED_HARNESS_FILES[0], status: 'removed' }],
+  });
+  assert.ok(errors.some((error) => error.includes('removed path is not retired')));
+
+  // The inverse is just as invalid: the sync never ships a retired path back.
+  const reshipped = validateSyncApprovalCandidate({
+    ...fixture,
+    files: [{ filename: '.codex/scripts/setup.sh', status: 'added' }],
+  });
+  assert.ok(reshipped.some((error) => error.includes('unmanaged changed path')));
+
+  // A manifest exclusion keeps the file repo-owned, so its deletion is refused.
+  const excluded = validateSyncApprovalCandidate({
+    ...fixture,
+    entry: { name: 'target', codexSync: { exclude: ['.codex/scripts/setup.sh'] } },
+    files: [{ filename: '.codex/scripts/setup.sh', status: 'removed' }],
+  });
+  assert.ok(excluded.some((error) => error.includes('removed path is not retired')));
 });
 
 test('human identity and repository merge method selection fail closed', () => {

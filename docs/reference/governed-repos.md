@@ -79,7 +79,7 @@ Cloning, drift detection, reconciliation, and harness synchronization are in
 | `cartograph` | public | active | no | managed | Branch prefixes feat/ fix/ chore/ docs/; issue-before-branch; Rust gate (fmt, clippy -D warnings, test); spec/traceability artifacts in the same PR. |
 | `bookmarkit` | public | active | no | managed | — |
 | `quorum` | public | active | no | managed | — |
-| `agent-bot-identity` | public | active | no | managed | — |
+| `agent-bot-identity` | public | active | no | managed except `governance/agent-models.json`, `tools/models/registry.mjs` | Canonical ENG-0151 home of the model registry pair, so the retired registry paths are excluded from sync retraction — deleting them here would delete the originals. |
 | `codex-rules-editor` | public | active | no | managed | — |
 | `playbook-dashboard` | public | active | no | managed | — |
 | `agentic-code-analysis` | public | active | no | managed | — |
