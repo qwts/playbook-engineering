@@ -401,6 +401,32 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label x -- python -c "import os"', opts()).allow, false);
   });
 
+  // #293 / agent-bot-identity#132 review: run-guarded accepts its first
+  // non-option argument as the command, so `--` is not an authorization
+  // boundary. The wrapper exemption also must not cover executable-program
+  // flags on the Node process that loads the wrapper script.
+  test('wrapper grammar never exempts inline runtime programs (#293)', () => {
+    for (const command of [
+      'node tools/agent-guard/run-guarded.mjs node -e payload',
+      'node tools/agent-guard/run-guarded.mjs --label x python3 -c payload',
+      'node tools/agent-guard/run-guarded.mjs --rss-mb 512 ruby -e payload',
+      'node --eval=payload tools/agent-guard/run-guarded.mjs -- true',
+      'node --require=payload tools/agent-guard/run-guarded.mjs -- true',
+      'node tools/agent-guard/run-guarded.mjs --label x env node -e payload',
+      'node tools/agent-guard/run-guarded.mjs -- command node -e payload',
+      'node tools/agent-guard/run-guarded.mjs -- env MODE=test python3 -c payload',
+    ]) {
+      assert.equal(evaluateCommand(command, opts()).allow, false, `expected the hook to deny: ${command}`);
+    }
+    for (const command of [
+      'node tools/agent-guard/run-guarded.mjs --label test:e2e -- cargo test -p app -j 2',
+      'node tools/agent-guard/run-guarded.mjs --label test:e2e cargo test -p app -j 2',
+      'node tools/agent-guard/run-guarded.mjs -- env MODE=test cargo test -p app -j 2',
+    ]) {
+      assert.equal(evaluateCommand(command, opts()).allow, true, `expected the hook to allow: ${command}`);
+    }
+  });
+
   // PR #139 review, P1: the wrapper allowlist vouched for the whole command
   // line, so anything sharing it rode along.
   test('a wrapper invocation does not vouch for its neighbours', () => {

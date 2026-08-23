@@ -306,7 +306,11 @@ test('manifest-declared composition preserves generated hook adapters exactly on
   const generated = (event) => ({
     hooks: [{ type: 'command', command: `agent-hook --event ${event} # ${marker}` }],
   });
-  const options = { preserveArrayEntriesContaining: [marker] };
+  const manifest = JSON.parse(readFileSync(
+    new URL('../../../governance/repos.json', import.meta.url),
+    'utf8',
+  ));
+  const agentBot = manifest.repos.find((repo) => repo.name === 'agent-bot-identity');
   const cases = [
     {
       path: '.codex/hooks.json',
@@ -348,11 +352,34 @@ test('manifest-declared composition preserves generated hook adapters exactly on
       sharedEvent: 'beforeShellExecution',
       sharedCommand: 'current-cursor-guard',
     },
+    {
+      path: '.windsurf/hooks.json',
+      source: {
+        description: 'current shared policy',
+        hooks: { pre_run_command: [{ command: 'current-windsurf-guard' }] },
+      },
+      target: {
+        description: 'stale shared policy',
+        hooks: {
+          pre_run_command: [
+            { command: 'stale-windsurf-guard' },
+            { command: `agent-hook --event pre-command # ${marker}` },
+            { command: `agent-hook --event pre-command # ${marker}` },
+          ],
+          post_setup_worktree: [{ command: `agent-hook --event session-start # ${marker}` }],
+        },
+      },
+      sharedEvent: 'pre_run_command',
+      sharedCommand: 'current-windsurf-guard',
+    },
   ];
 
   for (const fixture of cases) {
+    const markers = agentBot?.codexSync?.preserveJsonArrayEntries?.[fixture.path];
+    assert.deepEqual(markers, [marker], fixture.path);
     const source = canonical(fixture.path, `${JSON.stringify(fixture.source, null, 2)}\n`);
     const target = Buffer.from(`${JSON.stringify(fixture.target, null, 2)}\n`);
+    const options = { preserveArrayEntriesContaining: markers };
     const first = mergeManagedFile(source, target, options);
     const second = mergeManagedFile(source, first.content, options);
     const merged = JSON.parse(first.content.toString('utf8'));
