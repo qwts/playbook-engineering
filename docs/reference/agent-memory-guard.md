@@ -126,9 +126,11 @@ The wrapper directly spawns exact argv in its own process group and starts an
 asynchronous RSS sample before the 250 ms polling interval. Samples enforce the
 ceiling, heartbeat leases, and populate per-run diagnostics only; they never
 seed admission history. Breaches get `SIGTERM`, then `SIGKILL` after 2 s or
-immediately past 1.25× the ceiling. Diagnostics use `.guard/last-run.json` and
-`.guard/history.jsonl` at the worktree root (or cwd outside Git); `rss-limit`
-and `timeout` exit non-zero.
+immediately past 1.25× the ceiling. Diagnostics use `last-run.json` and
+`history.jsonl` under the machine state directory's `journal/` subdirectory,
+keyed by repository identity so every worktree of a clone shares one journal;
+nothing is ever written into the checkout (#239). `rss-limit` and `timeout`
+exit non-zero.
 
 ## Environment
 
