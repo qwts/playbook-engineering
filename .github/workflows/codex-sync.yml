@@ -16,6 +16,8 @@ on:
       - '.codex/**'
       - '.claude/settings.json'
       - '.cursor/hooks.json'
+      - '.github/hooks/agent-guard.json'
+      - '.windsurf/hooks.json'
       - '.github/workflows/codex-sync.yml'
       - 'governance/repos.json'
       - 'tools/agent-guard/**'
