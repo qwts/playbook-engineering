@@ -11,7 +11,12 @@ directives, shipped with executable scripts, reviewed as code, and owned in
 
 None currently. The signed-commit skill moved to
 [agent-bot-identity](https://github.com/qwts/agent-bot-identity), which owns
-bot commit signing.
+bot commit signing (`signed-commit.mjs`). A machine that installed it from
+here has a dangling symlink; remove it:
+
+```bash
+rm -f ~/.claude/skills/signed-commit
+```
 
 ## Installing
 
