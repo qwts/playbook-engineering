@@ -12,7 +12,7 @@
         "exclude": []
       },
       "delta": "",
-      "note": "This repository \u2014 source of the governance it describes."
+      "note": "This repository — source of the governance it describes."
     },
     {
       "name": "overlook",
@@ -57,7 +57,7 @@
       "status": "active",
       "sharedCi": false,
       "delta": "",
-      "note": "Pure consumer \u2014 inherits every baseline, proving the inheritance model."
+      "note": "Pure consumer — inherits every baseline, proving the inheritance model."
     },
     {
       "name": "quorum",
@@ -95,7 +95,7 @@
           ]
         }
       },
-      "delta": "Canonical ENG-0151 home of the model registry pair, so the retired registry paths are excluded from sync retraction \u2014 deleting them here would delete the originals.",
+      "delta": "Canonical ENG-0151 home of the model registry pair, so the retired registry paths are excluded from sync retraction — deleting them here would delete the originals.",
       "note": "Standalone source of truth for agent identity runtime code and operational mechanics (ENG-0128)."
     },
     {
