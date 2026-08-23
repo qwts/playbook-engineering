@@ -89,6 +89,9 @@
           ],
           ".cursor/hooks.json": [
             "agent-bot agent-hook"
+          ],
+          ".windsurf/hooks.json": [
+            "agent-bot agent-hook"
           ]
         }
       },
