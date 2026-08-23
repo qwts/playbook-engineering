@@ -32,6 +32,7 @@ import {
   staleRetiredPaths,
   syncPullBody,
   treeByPath,
+  withdrawnPathResets,
 } from './lib/codex-sync.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -118,6 +119,7 @@ async function writeManagedCommit(client, {
   sourceSha,
   files,
   removals = [],
+  resets = [],
 }) {
   const parent = await client.call('GET', `/repos/${owner}/${repo}/git/commits/${parentSha}`);
   const entries = [];
@@ -132,6 +134,8 @@ async function writeManagedCommit(client, {
   for (const path of removals) {
     entries.push({ path, mode: '100644', type: 'blob', sha: null });
   }
+  // Prebuilt tree entries that return withdrawn paths to base state.
+  entries.push(...resets);
   const tree = await client.call('POST', `/repos/${owner}/${repo}/git/trees`, {
     base_tree: parent.tree.sha,
     tree: entries,
@@ -204,11 +208,13 @@ export async function syncRepository(client, {
 
   let changed = baseDiff;
   let removed = baseRemovals;
+  let resets = [];
   if (choice.pull) {
     const branchTree = await commitTree(client, owner, repo, choice.parentSha);
     changed = diffManagedFiles(desiredFiles, branchTree, paths);
     removed = staleRetiredPaths(branchTree, retired);
-    if (changed.length === 0 && removed.length === 0) {
+    resets = withdrawnPathResets(entry, baseTree, branchTree);
+    if (changed.length === 0 && removed.length === 0 && resets.length === 0) {
       return {
         name: repo,
         status: 'pull-current',
@@ -224,6 +230,7 @@ export async function syncRepository(client, {
     status: apply ? 'pending' : 'planned',
     changed: changed.map((file) => file.path),
     removed,
+    restored: resets.map((reset) => reset.path),
     pull: choice.pull?.html_url,
   };
   if (!apply) return result;
@@ -235,6 +242,7 @@ export async function syncRepository(client, {
     sourceSha,
     files: changed,
     removals: removed,
+    resets,
   });
   if (choice.pull) {
     await client.call(
@@ -326,9 +334,10 @@ async function main() {
   for (const result of results) {
     const files = result.changed.length ? ` (${result.changed.join(', ')})` : '';
     const removed = result.removed?.length ? ` (removes ${result.removed.join(', ')})` : '';
+    const restored = result.restored?.length ? ` (restores withdrawn ${result.restored.join(', ')})` : '';
     const pull = result.pull ? ` — ${result.pull}` : '';
     const error = result.error ? ` — ${result.error}` : '';
-    process.stdout.write(`${result.name}: ${result.status}${files}${removed}${pull}${error}\n`);
+    process.stdout.write(`${result.name}: ${result.status}${files}${removed}${restored}${pull}${error}\n`);
   }
   if (!apply) process.stdout.write('\ndry run — pass --apply to open or update synchronization pull requests\n');
 }

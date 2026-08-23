@@ -52,7 +52,9 @@ test('violations fixture: every rule fires where expected', () => {
     // definition in README confers no reachability, while docs/reflinked.md is
     // reachable through a *used* reference link and must not appear here.
     ['orphan-doc docs/orphan.md', 1],
-    ['stale-path docs/broken.md', 1], // src/gone.mjs; src/present.mjs must not fire
+    // src/gone.mjs only; src/present.mjs must not fire, and src/also-gone.mjs
+    // sits inside a BEGIN/END GENERATED block whose generator owns its paths.
+    ['stale-path docs/broken.md', 1],
     ['heading-structure docs/structure.md', 3], // second H1, level skip, depth
     ['heading-structure docs/orphan.md', 1], // first heading is H2
     ['front-loaded-summary docs/structure.md', 1],

@@ -28,6 +28,7 @@ import {
   staleRetiredPaths,
   syncPullBody,
   validateSyncApprovalCandidate,
+  withdrawnPathResets,
 } from '../lib/codex-sync.mjs';
 import { parseArgs, reviewRepository } from '../approve-codex-sync.mjs';
 import { installationToken, syncRepository } from '../sync-codex.mjs';
@@ -569,6 +570,35 @@ test('stale retired paths are the retired files a target tree still carries', ()
   );
 });
 
+test('withdrawn paths are returned to base state, planned paths are left to their lanes', () => {
+  const managedPath = GOVERNED_HARNESS_FILES[0];
+  const deleted = '.codex/scripts/setup.sh';
+  const added = 'governance/agent-models.json';
+  const entry = { codexSync: { exclude: [managedPath, deleted, added] } };
+  const baseManaged = canonical(managedPath, 'repo-owned\n');
+  const baseDeleted = canonical(deleted, 'kept by exclusion\n', '100755');
+  const base = new Map([
+    [managedPath, { path: managedPath, type: 'blob', sha: baseManaged.sha, mode: '100644' }],
+    [deleted, { path: deleted, type: 'blob', sha: baseDeleted.sha, mode: '100755' }],
+  ]);
+  // The stale branch deleted one withdrawn path, rewrote another, and added a
+  // third the base never had.
+  const branch = new Map([
+    [managedPath, { path: managedPath, type: 'blob', sha: gitBlobSha('stale sync bytes\n'), mode: '100644' }],
+    [added, { path: added, type: 'blob', sha: gitBlobSha('{}\n'), mode: '100644' }],
+  ]);
+
+  assert.deepEqual(withdrawnPathResets(entry, base, branch), [
+    { path: managedPath, mode: '100644', type: 'blob', sha: baseManaged.sha },
+    { path: deleted, mode: '100755', type: 'blob', sha: baseDeleted.sha },
+    { path: added, mode: '100644', type: 'blob', sha: null },
+  ]);
+  // A planned retired path missing from the branch is the retraction lane's
+  // business, never a reset; a branch matching base needs nothing at all.
+  assert.deepEqual(withdrawnPathResets(entry, base, new Map(base)), []);
+  assert.deepEqual(withdrawnPathResets({ codexSync: {} }, base, new Map()), []);
+});
+
 test('manifest exclusions remove files from the managed set', () => {
   const excluded = GOVERNED_HARNESS_FILES[2];
   const paths = managedCodexPaths({ codexSync: { exclude: [excluded] } });
@@ -901,6 +931,88 @@ test('a stale retired file becomes a deletion in the synchronization pull reques
   assert.ok(!writes.some(([, requestPath]) => requestPath.endsWith('/git/blobs')));
   assert.match(pullBody.body, /Retired files removed/u);
   assert.match(pullBody.body, /\.codex\/scripts\/setup\.sh/u);
+});
+
+test('an open pull request carrying a withdrawn deletion is repaired, not left current', async () => {
+  const path = GOVERNED_HARNESS_FILES[0];
+  const source = canonical(path);
+  const kept = '.codex/scripts/setup.sh';
+  const keptBlob = canonical(kept, 'repo-owned since the exclusion\n', '100755');
+  // The exclusion arrived while the retraction pull request was open: its
+  // branch still deletes the file the manifest now calls repo-owned.
+  const entry = {
+    name: 'target',
+    codexSync: { exclude: [kept, ...GOVERNED_HARNESS_FILES.filter((candidate) => candidate !== path)] },
+  };
+  let treeBody = null;
+  const writes = [];
+  const client = {
+    async call(method, requestPath, body) {
+      if (method !== 'GET') writes.push([method, requestPath]);
+      if (method === 'GET' && requestPath === '/repos/qwts/target') return { default_branch: 'main' };
+      if (method === 'GET' && requestPath.endsWith('/git/ref/heads/main')) return { object: { sha: 'base-sha' } };
+      if (method === 'GET' && requestPath.endsWith('/git/commits/base-sha')) return { tree: { sha: 'base-tree' } };
+      if (method === 'GET' && requestPath.endsWith('/git/trees/base-tree?recursive=1')) {
+        return {
+          truncated: false,
+          tree: [
+            { path, type: 'blob', sha: source.sha, mode: source.mode },
+            { path: kept, type: 'blob', sha: keptBlob.sha, mode: keptBlob.mode },
+          ],
+        };
+      }
+      if (method === 'GET' && requestPath.includes('/pulls?state=all')) {
+        return [{
+          number: 7,
+          state: 'open',
+          title: CODEX_SYNC_TITLE,
+          html_url: 'https://example.test/pr/7',
+          head: { ref: CODEX_SYNC_BRANCH },
+        }];
+      }
+      if (method === 'GET' && requestPath.endsWith('/git/ref/heads/governance/harness-sync')) {
+        return { object: { sha: 'branch-sha' } };
+      }
+      if (method === 'GET' && requestPath.endsWith('/git/commits/branch-sha')) return { tree: { sha: 'branch-tree' } };
+      if (method === 'GET' && requestPath.endsWith('/git/trees/branch-tree?recursive=1')) {
+        return {
+          truncated: false,
+          tree: [{ path, type: 'blob', sha: source.sha, mode: source.mode }],
+        };
+      }
+      if (method === 'POST' && requestPath.endsWith('/git/trees')) {
+        treeBody = body;
+        return { sha: 'repair-tree' };
+      }
+      if (method === 'POST' && requestPath.endsWith('/git/commits')) {
+        assert.deepEqual(body.parents, ['branch-sha']);
+        return { sha: 'repair-commit' };
+      }
+      if (method === 'PATCH' && requestPath.endsWith('/git/refs/heads/governance/harness-sync')) return {};
+      if (method === 'PATCH' && requestPath.endsWith('/pulls/7')) {
+        return { html_url: 'https://example.test/pr/7' };
+      }
+      throw new Error(`unexpected request: ${method} ${requestPath}`);
+    },
+  };
+
+  const result = await syncRepository(client, {
+    owner: 'qwts',
+    entry,
+    canonicalFiles: new Map([[path, source]]),
+    sourceSha: 'a'.repeat(40),
+    apply: true,
+  });
+  assert.equal(result.status, 'pull-updated');
+  assert.deepEqual(result.changed, []);
+  assert.deepEqual(result.removed, []);
+  assert.deepEqual(result.restored, [kept]);
+  // The repair re-points the path at the base blob — no upload, no deletion.
+  assert.deepEqual(treeBody, {
+    base_tree: 'branch-tree',
+    tree: [{ path: kept, mode: '100755', type: 'blob', sha: keptBlob.sha }],
+  });
+  assert.ok(!writes.some(([, requestPath]) => requestPath.endsWith('/git/blobs')));
 });
 
 test('a repository with nothing to retract and current content stays untouched', async () => {

@@ -364,6 +364,32 @@ export function staleRetiredPaths(targetTree, paths) {
   return paths.filter((path) => target.has(path));
 }
 
+// An open sync pull request must stop touching a path the manifest has since
+// withdrawn from its plan (an exclusion added while the pull request was
+// open). Worst case is a withdrawn retraction: the branch still deletes a copy
+// the manifest now calls repo-owned, and the pull request stays mergeable.
+// For every globally known sync path that is neither managed nor retired for
+// this entry, the branch must match the base; returns the tree entries that
+// restore base state — the base blob where the branch diverged from it, a
+// deletion where the branch added what the base never had.
+export function withdrawnPathResets(entry, baseTree, branchTree) {
+  const planned = new Set([...managedCodexPaths(entry), ...retiredCodexPaths(entry)]);
+  const base = baseTree instanceof Map ? baseTree : treeByPath(baseTree);
+  const branch = branchTree instanceof Map ? branchTree : treeByPath(branchTree);
+  const resets = [];
+  for (const path of new Set([...GOVERNED_HARNESS_FILES, ...RETIRED_HARNESS_FILES])) {
+    if (planned.has(path)) continue;
+    const baseEntry = base.get(path);
+    const branchEntry = branch.get(path);
+    if (baseEntry && (!branchEntry || branchEntry.sha !== baseEntry.sha || branchEntry.mode !== baseEntry.mode)) {
+      resets.push({ path, mode: baseEntry.mode, type: 'blob', sha: baseEntry.sha });
+    } else if (!baseEntry && branchEntry) {
+      resets.push({ path, mode: '100644', type: 'blob', sha: null });
+    }
+  }
+  return resets;
+}
+
 export function treeByPath(tree) {
   return new Map(
     (tree ?? [])
