@@ -124,13 +124,9 @@ export function validateManifest(manifest) {
               Array.isArray(repo.codexSync.exclude) ? repo.codexSync.exclude : [],
             );
             for (const [path, markers] of Object.entries(compositions)) {
-              if (!GOVERNED_HARNESS_FILES.includes(path) || !path.endsWith('.json')) {
+              if (!GOVERNED_HOOK_ADAPTER_FILES.includes(path) || !path.endsWith('.json')) {
                 errors.push(
                   `${where}.codexSync.preserveJsonArrayEntries contains unmanaged JSON path ${JSON.stringify(path)}`,
-                );
-              } else if (!GOVERNED_HOOK_ADAPTER_FILES.includes(path)) {
-                errors.push(
-                  `${where}.codexSync.preserveJsonArrayEntries contains non-hook-adapter JSON path ${JSON.stringify(path)}`,
                 );
               }
               if (excluded.has(path)) {
