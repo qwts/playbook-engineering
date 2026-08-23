@@ -1,56 +1,39 @@
 # Shared Codex development environment for governed repositories. Keep changes
 # in review like any other agent-facing configuration.
+#
+# Project-scoped and Codex-specific only: machine and harness installation is
+# managed-machine's job, identity is agent-bot-identity's. Setup asserts and
+# uses what the host provides; it never installs tooling or writes outside the
+# worktree. A repository with extra setup needs owns them in its own
+# `harness:setup` npm script.
 version = 1
 name = "agent-developer"
 
 [setup]
 script = '''
-bash .codex/scripts/setup.sh
-'''
-
-[setup.win32]
-script = '''
-$gitExe = (Get-Command git -ErrorAction Stop).Source
-$gitRoot = Split-Path -Parent (Split-Path -Parent $gitExe)
-$gitExecPath = & $gitExe --exec-path
-$bash = @(
-  (Join-Path $gitRoot 'bin\bash.exe')
-  (Join-Path $gitExecPath '..\..\..\bin\bash.exe')
-) |
-  Where-Object { Test-Path -LiteralPath $_ } |
-  ForEach-Object { (Get-Item -LiteralPath $_).FullName } |
-  Select-Object -First 1
-
-if (-not $bash) {
-  throw "Git Bash was not found from git.exe ($gitExe) or git --exec-path ($gitExecPath)"
-}
-
-& $bash --noprofile --norc -c 'export PATH="/usr/bin:/bin:$PATH"; exec bash .codex/scripts/setup.sh'
-exit $LASTEXITCODE
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+if [ -f .nvmrc ]; then
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  [ -s "$NVM_DIR/nvm.sh" ] || { echo "ERROR: .nvmrc exists but nvm is missing — bootstrap the machine first"; exit 1; }
+  . "$NVM_DIR/nvm.sh"
+  nvm install && nvm use
+fi
+if command -v agent-bot >/dev/null 2>&1; then
+  agent-bot setup-worktree
+else
+  echo "agent-bot unavailable; worktree identity not configured"
+fi
+if [ -f package.json ]; then
+  npm ci --no-audit --no-fund
+  npm run --if-present harness:setup
+fi
 '''
 
 [cleanup]
 script = '''
-bash .codex/scripts/cleanup.sh
-'''
-
-[cleanup.win32]
-script = '''
-$gitExe = (Get-Command git -ErrorAction Stop).Source
-$gitRoot = Split-Path -Parent (Split-Path -Parent $gitExe)
-$gitExecPath = & $gitExe --exec-path
-$bash = @(
-  (Join-Path $gitRoot 'bin\bash.exe')
-  (Join-Path $gitExecPath '..\..\..\bin\bash.exe')
-) |
-  Where-Object { Test-Path -LiteralPath $_ } |
-  ForEach-Object { (Get-Item -LiteralPath $_).FullName } |
-  Select-Object -First 1
-
-if (-not $bash) {
-  throw "Git Bash was not found from git.exe ($gitExe) or git --exec-path ($gitExecPath)"
-}
-
-& $bash --noprofile --norc -c 'export PATH="/usr/bin:/bin:$PATH"; exec bash .codex/scripts/cleanup.sh'
-exit $LASTEXITCODE
+cd "$(git rev-parse --show-toplevel)" 2>/dev/null || exit 0
+rm -rf tmp temp .tmp dist .test-dist coverage playwright-report test-results .eslintcache tsconfig.tsbuildinfo
+find . \( -name ".DS_Store" -o -name "Thumbs.db" -o -name "*.swp" -o -name "*.swo" \) -type f -delete 2>/dev/null || true
+exit 0
 '''

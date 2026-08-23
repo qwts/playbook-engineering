@@ -206,62 +206,18 @@ test('ordinary missing seeds retain their canonical bytes', () => {
   );
 });
 
-test('the protected Git wrapper keeps destructive pushes behind normal approval', {
-  skip: !existsSync('/bin/zsh'),
-}, (t) => {
-  const temp = mkdtempSync(join(tmpdir(), 'codex-git-wrapper-'));
-  t.after(() => rmSync(temp, { recursive: true, force: true }));
-  const fakeGit = join(temp, 'git');
-  writeFileSync(fakeGit, '#!/bin/sh\nprintf "%s\\n" "$*"\n');
-  chmodSync(fakeGit, 0o755);
-
-  const run = (...args) =>
-    spawnSync('/bin/zsh', [join(ROOT, '.codex/scripts/git-with-nvm.zsh'), ...args], {
-      cwd: ROOT,
-      encoding: 'utf8',
-      env: { ...process.env, PATH: `${temp}:${process.env.PATH}`, NVM_DIR: join(temp, 'missing-nvm') },
-    });
-
-  for (const args of [
-    ['push', '--set-upstream', 'origin', 'branch'],
-    ['push', '--dry-run', 'origin', 'branch'],
-    ['push', '--atomic', '--follow-tags', 'origin', 'branch'],
-    ['push', '--push-option=ci.skip', 'origin', 'branch'],
-    ['push', '--no-force', 'origin', 'branch'],
-  ]) {
-    const result = run(...args);
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /^push /);
-  }
-
-  for (const args of [
-    ['push', '--force', 'origin', 'branch'],
-    ['push', '--force-with-lease', 'origin', 'branch'],
-    ['push', '--force-w', 'origin', 'branch'],
-    ['push', '--delete', 'origin', 'branch'],
-    ['push', '--dele', 'origin', 'branch'],
-    ['push', '--mirror', 'origin'],
-    ['push', '--mir', 'origin'],
-    ['push', '--pru', 'origin'],
-    ['push', '--exec=/tmp/receive-pack', '/tmp/remote', 'branch'],
-    ['push', '--receive-pack', '/tmp/receive-pack', '/tmp/remote', 'branch'],
-    ['rebase', '--exec', '/tmp/command', 'main'],
-    ['rebase', '--ex=/tmp/command', 'main'],
-    ['rebase', '--exe', '/tmp/command', 'main'],
-    ['rebase', '-x/tmp/command', 'main'],
-    ['clone', '--upload-pack=/tmp/program', '/tmp/remote'],
-    ['clone', '--upload-p=/tmp/program', '/tmp/remote'],
-    ['fetch', '--upload-pack', '/tmp/program', 'origin'],
-    ['push', '--future-option', 'origin', 'branch'],
-    ['push', 'origin', '+branch:branch'],
-    ['push', 'origin', ':branch'],
-    ['push', 'origin', 'branch:'],
-    ['push', '-uf', 'origin', 'branch'],
-  ]) {
-    const result = run(...args);
-    assert.equal(result.status, 64, `${args.join(' ')} unexpectedly passed`);
-    assert.match(result.stderr, /requires normal Codex approval/);
-  }
+test('the Codex environment stays project-scoped and the trust rules stay narrow', () => {
+  const env = readFileSync(join(ROOT, '.codex/environments/environment.toml'), 'utf8');
+  // Setup asserts and uses what the host provides; it never installs tooling,
+  // edits shell profiles, or writes outside the worktree.
+  assert.doesNotMatch(env, /codex-agent-dev/);
+  assert.doesNotMatch(env, /\.zshrc|\.zprofile|\.bash_profile|\.bashrc|\.profile\b/);
+  assert.doesNotMatch(env, /export PATH=/);
+  assert.doesNotMatch(env, /nvm alias default/);
+  assert.doesNotMatch(env, /\.codex\/scripts\//);
+  assert.match(env, /agent-bot setup-worktree/);
+  assert.match(env, /npm ci --no-audit --no-fund/);
+  assert.match(env, /npm run --if-present harness:setup/);
 
   const directRule = readFileSync(join(ROOT, '.codex/rules/environment.rules'), 'utf8')
     .split('# Trust standalone, non-destructive GitHub CLI development operations.')[0];
@@ -270,8 +226,6 @@ test('the protected Git wrapper keeps destructive pushes behind normal approval'
   for (const subcommand of ['clone', 'fetch', 'pull', 'rebase']) {
     assert.doesNotMatch(directRule, new RegExp(`^\\s*"${subcommand}",$`, 'mu'));
   }
-  const gitWrapper = readFileSync(join(ROOT, '.codex/scripts/git-with-nvm.zsh'), 'utf8');
-  assert.doesNotMatch(gitWrapper.split('case "$git_subcommand" in')[1].split('esac')[0], /\| grep \|/u);
 });
 
 test('the governed Codex configuration enables hooks and protects GitHub identity', () => {
@@ -296,96 +250,3 @@ test('the governed Codex configuration enables hooks and protects GitHub identit
   }
 });
 
-test('the protected GitHub wrapper preserves the installed agent-bot identity shim', {
-  skip: !existsSync('/bin/zsh'),
-}, (t) => {
-  const temp = mkdtempSync(join(tmpdir(), 'codex-gh-wrapper-'));
-  t.after(() => rmSync(temp, { recursive: true, force: true }));
-  const home = join(temp, 'home');
-  const shimDir = join(home, '.config', 'agent-bot', 'bin');
-  const zdot = join(temp, 'zdot');
-  mkdirSync(shimDir, { recursive: true });
-  mkdirSync(zdot);
-  const fakeShim = join(shimDir, 'gh');
-  writeFileSync(fakeShim, '#!/bin/sh\nprintf "agent-bot:%s\\n" "$*"\n');
-  chmodSync(fakeShim, 0o755);
-  writeFileSync(join(zdot, '.zshenv'), 'export PATH="/opt/homebrew/bin:$PATH"\n');
-
-  const result = spawnSync('/bin/zsh', [join(ROOT, '.codex/scripts/gh.zsh'), '--version'], {
-    cwd: ROOT,
-    encoding: 'utf8',
-    env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin', ZDOTDIR: zdot },
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), 'agent-bot:--version');
-
-  const source = readFileSync(join(ROOT, '.codex/scripts/gh.zsh'), 'utf8');
-  assert.doesNotMatch(source, /export PATH="\/opt\/homebrew\/bin:\$PATH"/);
-  const shimIndex = source.indexOf('.config/agent-bot/bin/gh');
-  const pathIndex = source.indexOf('command -v gh');
-  const fallbackIndex = source.indexOf('/opt/homebrew/bin/gh');
-  assert.notEqual(shimIndex, -1, 'the agent-bot shim path must be present');
-  assert.notEqual(pathIndex, -1, 'the inherited PATH lookup must be present');
-  assert.notEqual(fallbackIndex, -1, 'the Homebrew fallback must be present');
-  assert.ok(
-    shimIndex < pathIndex && pathIndex < fallbackIndex,
-    'the agent-bot shim and inherited PATH must be preferred before the Homebrew fallback',
-  );
-});
-
-test('setup respects npm, pnpm, yarn, and bun lockfile selection', (t) => {
-  const fixtures = [
-    { manager: 'npm', packageManager: null, lockfile: 'package-lock.json', expected: 'ci --no-audit --no-fund' },
-    { manager: 'pnpm', packageManager: null, lockfile: 'pnpm-lock.yaml', expected: 'install --frozen-lockfile' },
-    { manager: 'yarn', packageManager: 'yarn@4.9.0', lockfile: 'yarn.lock', expected: 'install --immutable' },
-    { manager: 'bun', packageManager: 'bun@1.2.0', lockfile: 'bun.lock', expected: 'install --frozen-lockfile' },
-  ];
-
-  for (const fixture of fixtures) {
-    const temp = mkdtempSync(join(tmpdir(), `codex-setup-${fixture.manager}-`));
-    t.after(() => rmSync(temp, { recursive: true, force: true }));
-    const bin = join(temp, 'bin');
-    const home = join(temp, 'home');
-    const log = join(temp, 'manager.log');
-    mkdirSync(bin);
-    mkdirSync(home);
-    writeFileSync(
-      join(temp, 'package.json'),
-      `${JSON.stringify({
-        name: `fixture-${fixture.manager}`,
-        private: true,
-        scripts: {},
-        ...(fixture.packageManager ? { packageManager: fixture.packageManager } : {}),
-      })}\n`,
-    );
-    writeFileSync(join(temp, fixture.lockfile), '');
-    if (fixture.manager === 'yarn') writeFileSync(join(temp, '.yarnrc.yml'), 'nodeLinker: node-modules\n');
-
-    const fakeManager = join(bin, fixture.manager);
-    writeFileSync(
-      fakeManager,
-      '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 1.0.0; exit 0; fi\nprintf "%s\\n" "$*" >> "$PM_LOG"\n',
-    );
-    chmodSync(fakeManager, 0o755);
-    const fakeGh = join(bin, 'gh');
-    writeFileSync(fakeGh, '#!/bin/sh\necho "gh version test"\n');
-    chmodSync(fakeGh, 0o755);
-
-    const result = spawnSync('bash', [join(ROOT, '.codex/scripts/setup.sh')], {
-      cwd: temp,
-      encoding: 'utf8',
-      env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, PM_LOG: log },
-    });
-    assert.equal(result.status, 0, `${fixture.manager}: ${result.stderr}\n${result.stdout}`);
-    assert.equal(readFileSync(log, 'utf8').trim(), fixture.expected);
-  }
-});
-
-test('setup selects Node per worktree without changing the global nvm default', () => {
-  const source = readFileSync(join(ROOT, '.codex/scripts/setup.sh'), 'utf8');
-  assert.doesNotMatch(source, /nvm alias default/);
-  assert.match(source, /codex_repo_root=.*git rev-parse --show-toplevel/);
-  assert.match(source, /nvm use .*codex_repo_root.*\.nvmrc/);
-  assert.match(source, /bash \.codex\/scripts\/ensure-identity\.sh/);
-  assert.doesNotMatch(source, /ensure-identity\.sh.*\|\| true/);
-});
