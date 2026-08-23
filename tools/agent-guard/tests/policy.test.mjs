@@ -389,16 +389,36 @@ describe('command hook', () => {
   // (#237 review) The carve-out covers only the wrapper's own node options:
   // an inline runtime carried AFTER `--` is still a separate executable
   // command and keeps every check.
+  // (#293) The wrapper accepts its inner command without an explicit `--`
+  // (first non-option argument), and Node options BEFORE the script path are
+  // live — both forms must classify, not inherit the exemption.
   test('wrapped command flags are not runtime eval options (#237)', () => {
     assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label test:e2e -- cargo test -p app -j 2', opts()).allow, true);
     assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label test:e2e -- cargo test -p app adapter_inventory -j 2', opts()).allow, true);
     assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label test:e2e -- cargo test --workspace -j 2', opts()).allow, true);
+    assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label x npm run lint', opts()).allow, true);
     // A real inline program — beside or behind the wrapper — still denies.
     assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label x -- npm run lint; node -e "require(\'child_process\')"', opts()).allow, false);
     assert.equal(evaluateCommand('node -p "npm run ci"', opts()).allow, false);
     assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label x -- node -e "require(\'child_process\').spawnSync(\'npm\',[\'run\',\'ci\'])"', opts()).allow, false);
     assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label x -- node --eval=require("child_process")', opts()).allow, false);
     assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label x -- python -c "import os"', opts()).allow, false);
+  });
+
+  // #293: the wrapper grammar admits its inner command without `--`, and
+  // Node options before the script path are node's own. Both shapes were
+  // exempted by the #237 carve-out and must classify.
+  test('wrapper inner command classifies with or without a separator (#293)', () => {
+    for (const command of [
+      'node tools/agent-guard/run-guarded.mjs node -e "payload"',
+      'node tools/agent-guard/run-guarded.mjs python3 -c "payload"',
+      'node tools/agent-guard/run-guarded.mjs perl -e "payload"',
+      'node --eval=payload tools/agent-guard/run-guarded.mjs -- true',
+      'node --require=./x.js tools/agent-guard/run-guarded.mjs -- true',
+      'node tools/agent-guard/run-guarded.mjs --label x node --print "payload"',
+    ]) {
+      assert.equal(evaluateCommand(command, opts()).allow, false, `expected the hook to deny: ${command}`);
+    }
   });
 
   // PR #139 review, P1: the wrapper allowlist vouched for the whole command

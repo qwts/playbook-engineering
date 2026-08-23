@@ -2946,12 +2946,33 @@ export function evaluateCommand(command, { cwd = process.cwd(), depth = 0 } = {}
     }
     return false;
   };
-  // The wrapper's own tail after `--` is the wrapped command: classify it.
+  // The wrapper's own tail is the wrapped command, parsed with the wrapper's
+  // real option grammar (run-guarded.mjs parseArgs): known value-taking
+  // options (--label/--rss-mb/--heap-mb/--timeout-s/--wait-s), then the first
+  // non-option token starts the inner command — with or without an explicit
+  // `--` (#293). Node executable-program options BEFORE the script path are
+  // node's own and never inherit the wrapper exemption.
+  const WRAPPER_VALUE_OPTIONS = new Set(['--label', '--rss-mb', '--heap-mb', '--timeout-s', '--wait-s']);
   const wrappedCommandTokens = (executableSegment) => {
     if (!WRAPPER_SEGMENT.test(executableSegment)) return null;
-    const separatorAt = executableSegment.split(/\s+/u).indexOf('--');
-    if (separatorAt < 0) return [];
-    return executableSegment.split(/\s+/u).slice(separatorAt + 1).filter(Boolean);
+    const tokens = executableSegment.split(/\s+/u).filter(Boolean);
+    const scriptAt = tokens.findIndex((token) => /(?:^|\/)run-guarded\.mjs$/u.test(token));
+    if (scriptAt < 0) return [];
+    // Node's own eval/require/loader options ahead of the script are live:
+    // classify them as an inline runtime rather than exempting the segment.
+    if (inlineRuntimeDenied(tokens.slice(0, scriptAt + 1))) return tokens;
+    let index = scriptAt + 1;
+    while (index < tokens.length) {
+      const token = tokens[index];
+      if (token === '--') return tokens.slice(index + 1);
+      if (WRAPPER_VALUE_OPTIONS.has(token)) {
+        index += 2; // option plus its value operand
+        continue;
+      }
+      if (token.startsWith('--')) return []; // unknown long option: nothing classifiable
+      break; // first non-option token begins the inner command
+    }
+    return tokens.slice(index);
   };
   if (splitSegments(effective).some((segment) => {
     const executableSegment = commandAfterPrefixes(segment);
