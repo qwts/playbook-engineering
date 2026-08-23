@@ -12,7 +12,7 @@
         "exclude": []
       },
       "delta": "",
-      "note": "This repository — source of the governance it describes."
+      "note": "This repository \u2014 source of the governance it describes."
     },
     {
       "name": "overlook",
@@ -57,7 +57,7 @@
       "status": "active",
       "sharedCi": false,
       "delta": "",
-      "note": "Pure consumer — inherits every baseline, proving the inheritance model."
+      "note": "Pure consumer \u2014 inherits every baseline, proving the inheritance model."
     },
     {
       "name": "quorum",
@@ -95,7 +95,7 @@
           ]
         }
       },
-      "delta": "Canonical ENG-0151 home of the model registry pair, so the retired registry paths are excluded from sync retraction — deleting them here would delete the originals.",
+      "delta": "Canonical ENG-0151 home of the model registry pair, so the retired registry paths are excluded from sync retraction \u2014 deleting them here would delete the originals.",
       "note": "Standalone source of truth for agent identity runtime code and operational mechanics (ENG-0128)."
     },
     {
@@ -147,10 +147,10 @@
       "name": "diagram-dreamer",
       "visibility": "public",
       "publish": true,
-      "status": "onboarding",
+      "status": "active",
       "sharedCi": false,
       "delta": "Playwright gates per ?state= fixture, axe-core at WCAG 2.1 AA, and a pseudo-localization build.",
-      "note": "Electron Mermaid document renderer; recorded 2026-08-22 after an audit found it was the only qwts repo absent from this manifest. Onboarding: baseline files not yet seeded, and CodeQL runs on default setup pending the ENG-0149 move to advanced setup."
+      "note": "Electron Mermaid document renderer; recorded 2026-08-22 after an audit found it was the only qwts repo absent from this manifest. Promoted 2026-08-23 after the baseline seed, leftover baseline files, CodeQL advanced setup (ENG-0149), and the 13 roster Apps installed."
     }
   ]
 }
