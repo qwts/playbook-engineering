@@ -3,6 +3,7 @@
 // Compares every repo in governance/repos.json against live GitHub:
 //
 //   - baseline files per the repo-baseline-files SOP
+//   - absence of retired harness files the sync no longer manages (#287)
 //   - a default-branch rule requiring at least one approving review
 //     (rulesets or classic branch protection)
 //   - private vulnerability reporting enabled
@@ -27,6 +28,7 @@ import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BASELINE_FILES } from './lib/baseline-files.mjs';
+import { retiredCodexPaths } from './lib/codex-sync.mjs';
 import {
   DISCOVERY_CHECK,
   discoveryDisposition,
@@ -190,6 +192,16 @@ export async function checkRepo(owner, entry, coverage, token, {
     const contents = await api(`/repos/${owner}/${entry.name}/contents/${path}`, token);
     checks[file] = contents !== null;
     if (file === 'AGENTS.md') agentContext = contents;
+  }
+  // The dual of the presence checks: a path the sync retired must be gone
+  // (#287). Present means the retraction PR has not merged — the stale copy is
+  // still live, which for .codex/scripts/setup.sh meant still rewriting PATHs.
+  // Scoped per entry so a manifest exclusion (the retraction opt-out) is not
+  // reported as drift.
+  for (const file of retiredCodexPaths(entry)) {
+    const path = file.split('/').map(encodeURIComponent).join('/');
+    const contents = await api(`/repos/${owner}/${entry.name}/contents/${path}`, token);
+    checks[`retired ${file} removed`] = contents === null;
   }
   const discovery = discoveryDisposition(entry.status, contentSource(agentContext), canonicalDiscoveryBlock);
   checks[DISCOVERY_CHECK] = discovery.conformant;

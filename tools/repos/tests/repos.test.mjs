@@ -111,6 +111,14 @@ test('accepts explicit managed Codex exclusions', () => {
   assert.deepEqual(validateManifest(m), []);
 });
 
+test('accepts a retired path as an exclusion — the retraction opt-out', () => {
+  const m = validManifest();
+  m.repos[1].codexSync = {
+    exclude: ['.codex/scripts/setup.sh'],
+  };
+  assert.deepEqual(validateManifest(m), []);
+});
+
 test('rejects invalid managed Codex exclusions', () => {
   const m = validManifest();
   m.repos[1].codexSync = {

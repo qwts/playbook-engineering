@@ -133,6 +133,17 @@ files while language and syntax validation remains at the governance source.
 Missing markers append the block once; duplicated, partial, or reversed markers
 fail closed.
 
+Synchronization also retracts. A path the inventory stops managing is recorded
+in `RETIRED_HARNESS_FILES`
+([`baseline-files.mjs`](../../tools/repos/lib/baseline-files.mjs)), and
+downstream copies of recorded paths are deleted through the same pull request.
+The record is what separates "no longer managed" from "repo-created": only
+recorded paths are ever deleted, approval validation refuses any other
+deletion, and a manifest exclusion opts a repository out, keeping its copy as
+repo-owned. Entries are durable — a path returns to management only by moving
+back to the governed inventory — and drift reports a still-present retired
+file until the retraction merges.
+
 Drift uses the stable `governance/harness-sync` branch and a `chores-dumb` pull
 request; default branches stay protected. Existing PRs are reconciled even
 when the base is current. The source sets `codexSync.enabled: false` because

@@ -25,6 +25,11 @@
         "reason": "the generated fleet table grows by one row per onboarded repo, so this doc gets monotonically longer for reasons prose tightening cannot offset. The previous 3000 bought roughly ten repos of headroom and was spent exactly there, at localnotes; as that override said it should, the breach was absorbed by a split rather than another raise — the bootstrap, drift, reconcile and codex-sync runbook lanes moved to governed-repos-operations.md, leaving this doc as what it claims to be, the manifest's human-readable view. 1400 is the post-split size plus room for roughly ten more rows. The next breach should be re-examined, not reflexively raised"
       },
       {
+        "path": "docs/reference/governed-repos-operations.md",
+        "budget": 2800,
+        "reason": "the harness-sync lane gained the retraction contract (#287) — the operational half of the durable retired-paths record that lets the sync delete files it stopped managing. 2800 is the post-addition size plus minimal headroom; the doc is the fleet's single runbook, so growth tracks new operational lanes, not loosening prose. The next breach should split the harness-sync lane into its own doc, not raise again"
+      },
+      {
         "path": "docs/reference/agent-bot-identity.md",
         "budget": 1100,
         "reason": "qwts roster, permissions, and the installed CLI boundary are one governance contract; runtime setup and troubleshooting moved to agent-bot-identity under ENG-0128"
