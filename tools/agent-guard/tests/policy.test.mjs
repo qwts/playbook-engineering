@@ -383,6 +383,24 @@ describe('command hook', () => {
     assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label test:dom -- npm run test:dom:inner', opts()).allow, true);
   });
 
+  // #237: the wrapped command's argv is not node's. Cargo's `-p <crate>`
+  // package flag collided with node's `-p` (print mode) eval-flag pattern, so
+  // narrowing a test selection classified as heavier than the full run.
+  // (#237 review) The carve-out covers only the wrapper's own node options:
+  // an inline runtime carried AFTER `--` is still a separate executable
+  // command and keeps every check.
+  test('wrapped command flags are not runtime eval options (#237)', () => {
+    assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label test:e2e -- cargo test -p app -j 2', opts()).allow, true);
+    assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label test:e2e -- cargo test -p app adapter_inventory -j 2', opts()).allow, true);
+    assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label test:e2e -- cargo test --workspace -j 2', opts()).allow, true);
+    // A real inline program — beside or behind the wrapper — still denies.
+    assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label x -- npm run lint; node -e "require(\'child_process\')"', opts()).allow, false);
+    assert.equal(evaluateCommand('node -p "npm run ci"', opts()).allow, false);
+    assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label x -- node -e "require(\'child_process\').spawnSync(\'npm\',[\'run\',\'ci\'])"', opts()).allow, false);
+    assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label x -- node --eval=require("child_process")', opts()).allow, false);
+    assert.equal(evaluateCommand('node tools/agent-guard/run-guarded.mjs --label x -- python -c "import os"', opts()).allow, false);
+  });
+
   // PR #139 review, P1: the wrapper allowlist vouched for the whole command
   // line, so anything sharing it rode along.
   test('a wrapper invocation does not vouch for its neighbours', () => {
@@ -485,6 +503,22 @@ describe('command hook', () => {
     assert.equal(evaluateCommand("gh pr create --body 'blocked npm run ci locally'", opts()).allow, true);
     assert.equal(evaluateCommand('git commit -m "ci"', opts()).allow, true);
     assert.equal(evaluateCommand('gh pr create --body "vitest"', opts()).allow, true);
+  });
+
+  // #237: a separator inside a quoted argument must not open a phantom
+  // segment whose first token looks executable — EXCEPT inside a command
+  // substitution body, where a separator is a real control operator of the
+  // nested command (`echo "$(runner=npm; $runner run ci)"` runs npm run ci).
+  test('quoted separators are masked except inside substitution bodies (#237)', () => {
+    // Inert prose: separators outside substitution bodies are masked.
+    assert.equal(evaluateCommand('gh pr create --body "pushed `450f9b6` and `npm run test:version` passes"', opts()).allow, true);
+    assert.equal(evaluateCommand('echo "a; b"', opts()).allow, true);
+    assert.equal(evaluateCommand("gh api repos/O/R --jq '{sha: .sha[0:12]}'; gh api repos/O/R2 --jq '{status: .status}'", opts()).allow, true);
+    // Substitution bodies execute as shell: their separators stay visible.
+    assert.equal(evaluateCommand('echo "$(runner=npm; $runner run ci)"', opts()).allow, false);
+    // A structural separator outside quotes still splits, and the second
+    // segment is still classified.
+    assert.equal(evaluateCommand('echo "hi"; npm run ci', opts()).allow, false);
   });
 
   test('direct-binary names in non-executable positions remain ordinary text', () => {
