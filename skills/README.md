@@ -9,9 +9,9 @@ directives, shipped with executable scripts, reviewed as code, and owned in
 
 ## Available skills
 
-- [signed-commit](signed-commit/SKILL.md) — push commits as a bot so GitHub
-  marks them **Verified**. Bot worktrees deliberately have commit signing off,
-  so the Git Data API is the only path to a verified bot commit.
+None currently. The signed-commit skill moved to
+[agent-bot-identity](https://github.com/qwts/agent-bot-identity), which owns
+bot commit signing.
 
 ## Installing
 

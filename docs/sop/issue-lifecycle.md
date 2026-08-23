@@ -51,11 +51,13 @@ Issues filed only to record a problem may omit it.
 
 Two rules make it worth having:
 
-- **Retrieve the routing; never recall it.** Run `node tools/models/registry.mjs`
-  and cite its `verified_at`. The registry and that reader are synced
-  byte-identically into every governed repo, so the lookup works wherever the
-  issue is filed — an SOP pointing at a path only one repo has is an instruction
-  its consumers cannot follow. Model names
+- **Retrieve the routing; never recall it.** Run
+  `node ~/Code/agent-bot-identity/tools/models/registry.mjs`
+  and cite its `verified_at`. The registry and its reader live in
+  [agent-bot-identity](https://github.com/qwts/agent-bot-identity), which every
+  governed machine carries (`agent-bot` is installed as a symlink into that
+  checkout), so the lookup works wherever the issue is filed without syncing
+  copies into each repo. Model names
   written from memory are stale the moment a vendor ships, and they fail
   confidently: a superseded name reads exactly like a current one. If the
   registry cannot be read, say so in the issue rather than substituting a
@@ -89,3 +91,6 @@ radius or a failure mode that looks like success is T1.
   section: agent-executed issues carry a tier, routing retrieved from
   `governance/agent-models.json` rather than recalled from memory, and evidence
   that would fail if the change were wrong ([ENG-0151](../decisions/ENG-0151-model-routing.md)).
+- 2026-08-22 — the model registry and reader moved to agent-bot-identity, which
+  owns agent identity and models; the routing lookup now points at that
+  checkout instead of a synced per-repo copy.

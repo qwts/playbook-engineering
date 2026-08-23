@@ -23,6 +23,4 @@ tools/agent-guard/lib/policy.mjs
 tools/agent-guard/lib/protocol.mjs
 tools/agent-guard/lib/system-memory.mjs
 tools/agent-guard/tests/conformance.test.mjs
-governance/agent-models.json
-tools/models/registry.mjs
 # governed:agent-harness-format:end

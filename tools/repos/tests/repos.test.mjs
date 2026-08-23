@@ -139,7 +139,6 @@ test('rejects invalid downstream JSON array-entry ownership', () => {
     exclude: ['.cursor/hooks.json'],
     preserveJsonArrayEntries: {
       'README.md': ['marker'],
-      'governance/agent-models.json': ['marker'],
       '.codex/hooks.json': ['marker', 'marker', ''],
       '.cursor/hooks.json': ['marker'],
       '.claude/settings.json': [],
@@ -147,7 +146,6 @@ test('rejects invalid downstream JSON array-entry ownership', () => {
   };
   const errors = validateManifest(m);
   assert.ok(errors.some((error) => error.includes('unmanaged JSON path')));
-  assert.ok(errors.some((error) => error.includes('non-hook-adapter JSON path')));
   assert.ok(errors.some((error) => error.includes('duplicate marker')));
   assert.ok(errors.some((error) => error.includes('invalid marker')));
   assert.ok(errors.some((error) => error.includes('configures excluded path')));
