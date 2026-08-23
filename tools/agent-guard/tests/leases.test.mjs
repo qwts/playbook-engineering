@@ -31,7 +31,7 @@ import {
   recordLanePeak,
   withAdmissionLock,
 } from '../lib/leases.mjs';
-import { ensureStateDirs, leasesDir, machineToken } from '../lib/protocol.mjs';
+import { ensureStateDirs, leasesDir, machineToken, stateDir } from '../lib/protocol.mjs';
 import {
   applyAutomaticLaneHistoryPolicy,
   guardedInvocation,
@@ -529,45 +529,47 @@ describe('dormant lane peak store (future provenance)', () => {
       'the actual relative cwd remains bound even when the structural environment is unchanged',
     );
 
-    // Every cwd in one Git worktree writes diagnostics at the worktree root,
-    // so one nested run cannot poison the other cwd identities. Only those
-    // two root paths are exempt; the same suffix below a nested cwd is not.
+    // Diagnostics live under the machine state directory keyed by repository
+    // identity (#239), so every cwd of every linked worktree of one clone
+    // shares one journal and nothing is written into the checkout at all.
     assert.equal(repositoryWorktreeRoot(firstNested, { env: peakEnv }), repositoryWorktreeRoot(first, { env: peakEnv }));
     assert.equal(repositoryWorktreeRoot(siblingNested, { env: peakEnv }), repositoryWorktreeRoot(sibling, { env: peakEnv }));
     const nestedDiagnosticPaths = guardDiagnosticPaths(firstNested, { env: peakEnv });
-    const rootDiagnostics = path.join(repositoryWorktreeRoot(first, { env: peakEnv }), '.guard');
-    assert.equal(nestedDiagnosticPaths.guardDir, rootDiagnostics);
+    const rootDiagnostics = guardDiagnosticPaths(first, { env: peakEnv }).guardDir;
+    const journalRoot = path.join(stateDir(peakEnv), 'journal');
+    assert.ok(rootDiagnostics.startsWith(journalRoot), 'the journal lives under the machine state directory');
+    assert.equal(nestedDiagnosticPaths.guardDir, rootDiagnostics, 'every cwd of one clone shares one journal');
     assert.equal(nestedDiagnosticPaths.lastRunPath, path.join(rootDiagnostics, 'last-run.json'));
-    assert.equal(nestedDiagnosticPaths.lastRunDisplayPath, path.join('..', '..', '.guard', 'last-run.json'));
-    mkdirSync(rootDiagnostics);
+    assert.equal(nestedDiagnosticPaths.lastRunDisplayPath, path.join(rootDiagnostics, 'last-run.json'), 'the display path is absolute because the journal is outside the checkout');
+    // The checkout itself stays clean: a `.guard` directory in the worktree
+    // would be caller-owned untracked content, not wrapper diagnostics.
+    mkdirSync(path.join(first, '.guard'));
+    writeFileSync(path.join(first, '.guard', 'last-run.json'), '{}\n');
+    assert.equal(
+      commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(firstNested) }),
+      null,
+      'a .guard directory in the worktree is now ordinary untracked content',
+    );
+    rmSync(path.join(first, '.guard'), { recursive: true, force: true });
+    mkdirSync(rootDiagnostics, { recursive: true });
     writeFileSync(path.join(rootDiagnostics, 'last-run.json'), '{}\n');
     writeFileSync(path.join(rootDiagnostics, 'history.jsonl'), '{}\n');
     assert.equal(
       commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(firstNested) }),
       firstNestedBehavior,
-      'root-owned diagnostics do not make a nested-cwd run cold',
+      'state-dir journals are invisible to worktree behavior identity',
     );
     assert.equal(
       commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
       firstBehavior,
-      'the same root-owned diagnostics remain inert for a root run',
+      'the shared journal remains inert for a root run',
     );
     writeFileSync(path.join(rootDiagnostics, 'caller-owned.json'), '{}\n');
     assert.equal(
       commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(firstNested) }),
-      null,
-      'the root diagnostic exemption does not cover other files in .guard',
+      firstNestedBehavior,
+      'even foreign files in the state-dir journal cannot touch worktree identity',
     );
-    rmSync(path.join(rootDiagnostics, 'caller-owned.json'));
-    const nestedDiagnostics = path.join(firstNested, '.guard');
-    mkdirSync(nestedDiagnostics);
-    writeFileSync(path.join(nestedDiagnostics, 'last-run.json'), '{}\n');
-    assert.equal(
-      commandBehaviorIdentity(firstNested, command, { env: peakEnv, behaviorEnv: environmentFor(firstNested) }),
-      null,
-      'diagnostic suffixes beneath a nested cwd are not broadly exempted',
-    );
-    rmSync(nestedDiagnostics, { recursive: true, force: true });
     rmSync(rootDiagnostics, { recursive: true, force: true });
 
     const nonRepository = path.join(root, 'not-a-repository');
@@ -715,24 +717,18 @@ describe('dormant lane peak store (future provenance)', () => {
     );
     rmSync(untracked, { force: true });
 
-    // The wrapper's own two untracked diagnostics must not make a successful
-    // clean run permanently cold, but no broader .guard exemption exists.
+    // The wrapper no longer writes anything into the worktree (#239), so
+    // there is no exemption: any untracked entry fails closed.
     const diagnostics = path.join(first, '.guard');
     mkdirSync(diagnostics);
     writeFileSync(path.join(diagnostics, 'last-run.json'), '{}\n');
     writeFileSync(path.join(diagnostics, 'history.jsonl'), '{}\n');
     assert.equal(
       commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
-      firstBehavior,
-      'guard-owned untracked diagnostics do not invalidate otherwise clean evidence',
-    );
-    writeFileSync(path.join(diagnostics, 'caller-owned.json'), '{}\n');
-    assert.equal(
-      commandBehaviorIdentity(first, command, { env: peakEnv, behaviorEnv: environmentFor(first) }),
       null,
-      'other untracked guard files still fail closed',
+      'a .guard directory in the worktree makes an otherwise clean run cold',
     );
-    rmSync(path.join(diagnostics, 'caller-owned.json'));
+    rmSync(diagnostics, { recursive: true, force: true });
 
     const originalPackage = `${JSON.stringify({ scripts: { test: 'node light.mjs' } }, null, 2)}\n`;
     const hiddenPackage = `${JSON.stringify({ scripts: { test: 'node hidden-heavy.mjs' } }, null, 2)}\n`;
@@ -1180,7 +1176,7 @@ describe('dormant lane peak store (future provenance)', () => {
     assert.equal(
       identityFor([renamedRuntime, path.join('.guard', 'last-run.json')]),
       null,
-      'an exempt mutable guard diagnostic cannot become unrecognized-runtime payload evidence',
+      'an untracked mutable file cannot become unrecognized-runtime payload evidence',
     );
 
     for (const unsupportedShell of [
