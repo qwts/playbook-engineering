@@ -147,10 +147,10 @@
       "name": "diagram-dreamer",
       "visibility": "public",
       "publish": true,
-      "status": "onboarding",
+      "status": "active",
       "sharedCi": false,
       "delta": "Playwright gates per ?state= fixture, axe-core at WCAG 2.1 AA, and a pseudo-localization build.",
-      "note": "Electron Mermaid document renderer; recorded 2026-08-22 after an audit found it was the only qwts repo absent from this manifest. Onboarding: baseline files not yet seeded, and CodeQL runs on default setup pending the ENG-0149 move to advanced setup."
+      "note": "Electron Mermaid document renderer; recorded 2026-08-22 after an audit found it was the only qwts repo absent from this manifest. Promoted 2026-08-23 after the baseline seed, leftover baseline files, CodeQL advanced setup (ENG-0149), and the 13 roster Apps installed."
     }
   ]
 }
