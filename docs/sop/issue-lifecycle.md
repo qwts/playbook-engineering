@@ -52,12 +52,12 @@ Issues filed only to record a problem may omit it.
 Two rules make it worth having:
 
 - **Retrieve the routing; never recall it.** Run
-  `node ~/Code/agent-bot-identity/tools/models/registry.mjs`
+  `node "$(dirname "$(readlink -f "$(command -v agent-bot)")")/tools/models/registry.mjs"`
   and cite its `verified_at`. The registry and its reader live in
-  [agent-bot-identity](https://github.com/qwts/agent-bot-identity), which every
-  governed machine carries (`agent-bot` is installed as a symlink into that
-  checkout), so the lookup works wherever the issue is filed without syncing
-  copies into each repo. Model names
+  [agent-bot-identity](https://github.com/qwts/agent-bot-identity); the
+  installed `agent-bot` command is a symlink into that checkout, so resolving
+  through the symlink finds the registry wherever the checkout root is —
+  including machines bootstrapped with a non-default `--code-dir`. Model names
   written from memory are stale the moment a vendor ships, and they fail
   confidently: a superseded name reads exactly like a current one. If the
   registry cannot be read, say so in the issue rather than substituting a
