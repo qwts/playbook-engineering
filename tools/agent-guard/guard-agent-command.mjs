@@ -3048,8 +3048,11 @@ function respond(protocol, verdict) {
 export function extractHookPayload(protocol, input) {
   if (protocol === 'cursor') return { command: input.command, cwd: input.cwd };
   if (protocol === 'copilot') {
+    // Copilot CLI names the tool `shell`; the coding agent names it `bash` and
+    // may deliver toolArgs as a JSON-encoded string rather than an object.
+    const args = typeof input.toolArgs === 'string' ? JSON.parse(input.toolArgs) : input.toolArgs;
     return {
-      command: input.toolName === 'shell' ? normalizeCommand(input.toolArgs?.command) : undefined,
+      command: input.toolName === 'shell' || input.toolName === 'bash' ? normalizeCommand(args?.command) : undefined,
       cwd: input.cwd,
     };
   }

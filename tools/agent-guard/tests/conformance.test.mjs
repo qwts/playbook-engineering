@@ -125,9 +125,14 @@ describe('agent-guard conformance (ENG-0138)', () => {
     });
 
     // Copilot: JSON permissionDecision at the top level; silence means allow.
+    // The CLI names the tool `shell` with object toolArgs; the coding agent
+    // names it `bash` and JSON-encodes toolArgs — both must reach the guard.
     const copilotDeny = spawnHook('copilot', { toolName: 'shell', toolArgs: { command: 'npm run ci' }, cwd: root });
     assert.equal(copilotDeny.status, 0);
     assert.equal(JSON.parse(copilotDeny.stdout).permissionDecision, 'deny');
+    const copilotAgentDeny = spawnHook('copilot', { toolName: 'bash', toolArgs: JSON.stringify({ command: 'npm run ci' }), cwd: root });
+    assert.equal(copilotAgentDeny.status, 0);
+    assert.equal(JSON.parse(copilotAgentDeny.stdout).permissionDecision, 'deny');
     const copilotOtherTool = spawnHook('copilot', { toolName: 'str_replace_editor', toolArgs: {}, cwd: root });
     assert.equal(copilotOtherTool.status, 0);
     assert.equal(copilotOtherTool.stdout, '', 'a non-shell tool call is out of scope and must pass silently');
