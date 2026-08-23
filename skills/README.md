@@ -26,9 +26,10 @@ as code, and owned in `.github/CODEOWNERS`.
 
 These two are advertised as installable on a real machine (Mac /
 workstation). They are not for Cursor cloud agents or other cloud VMs.
-A cloud session may already have Cursor-agent App credentials as
-runtime secrets; that does not make these skills runnable there. Clone
-the owner repo and finish setup on a real machine. Do not clone
+A cloud session — including this Cursor VM — may already have
+Cursor-agent App credentials as runtime secrets; that does not make
+these skills runnable there. Workstation clone and setup happen on a
+real Mac, not on the cloud VM that is already running. Do not clone
 `agent-bot-identity` or `managed-machine` onto a Cursor VM, and do not
 run their skills, installers, or CLIs there.
 
