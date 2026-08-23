@@ -61,7 +61,7 @@ Each document includes navigation links, prerequisites, and cross-references to 
 - [Agent execution identity policy](docs/reference/agent-execution-identity.md) — the private transcript-bound identity and audit boundary behind each agent conversation (ENG-0081).
 - [Agentic primitives conformance checklist](docs/reference/agentic-primitives-conformance-checklist.md) — the ENG-0006 §6 checklist per-repo alignment issues link to.
 - [Machine memory guard](docs/reference/agent-memory-guard.md) — the machine-scoped memory budget every agent session on a local machine shares, and what to do when a run is refused (ENG-0138).
-- [Shared agent skills](skills/README.md) — skills centralized here and installed into every agent harness, rather than copied per repo (ENG-0004, ENG-0006).
+- [Shared agent skills](skills/README.md) — fleet skill catalog and empty central home; implementations live in their owner repos (ENG-0004, ENG-0006).
 - [Documentation governance](docs/reference/documentation-governance.md) — the `docs-gov` gate: deterministic checks that keep docs agent-readable, consumable by other repos as a reusable workflow.
 - [CI execution policy](docs/reference/ci-execution-policy.md) — lifecycle scheduling and deduplication without removing agreed validation gates.
 - [Governed CI rollout checklist](docs/reference/governed-ci-rollout.md) — exact-SHA rollout evidence, user-owned fallback, check publishers, credentials, and manual settings.
