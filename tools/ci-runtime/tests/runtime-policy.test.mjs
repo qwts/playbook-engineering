@@ -309,6 +309,21 @@ jobs:
   assert.deepEqual(findings, []);
 });
 
+test('a version comment on the action pin does not hide the envelope', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: qwts/playbook-engineering/.github/actions/bounded-command@4e70c773155c2c804e52a487352627010bea1897 # v1
+        with:
+          timeout-seconds: '300'
+`);
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /bounded steps can exceed the job budget/u);
+});
+
 test('a timeout-minutes input of another action is not a step bound', () => {
   const findings = inspectWorkflow(`name: CI
 jobs:

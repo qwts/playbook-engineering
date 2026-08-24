@@ -154,10 +154,16 @@ function stepFields(step) {
   return { mappings, fields: mappings.filter(({ indent }) => indent === fieldIndent) };
 }
 
+function usesReference(value) {
+  const trimmed = value.trim();
+  const quoted = /^(["'])(.*?)\1/u.exec(trimmed);
+  return quoted ? quoted[2] : trimmed.replace(/\s+#.*$/u, '');
+}
+
 function boundedEnvelope(step) {
   const { mappings, fields } = stepFields(step);
   const uses = fields.find(({ key }) => key === 'uses');
-  if (!uses || !BOUNDED_ACTION.test(uses.value.trim().replace(/^(["'])(.*)\1$/u, '$2'))) return null;
+  if (!uses || !BOUNDED_ACTION.test(usesReference(uses.value))) return null;
   const withField = fields.find(({ key }) => key === 'with');
   const withEnd = mappings.indexOf(withField) < 0
     ? -1
