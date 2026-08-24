@@ -64,6 +64,21 @@ Exceptions are for bootstrap or platform constraints, not convenience.
 Synthetic hung-process tests and workflow fixtures gate changes to the shared
 runner and checker.
 
+## Envelope-versus-job arithmetic
+
+A bounded envelope must fail at its own step, inside documented headroom —
+never by tripping the job wall, which cancels the job and skips
+`!cancelled()`-gated report uploads. The checker therefore sums, for every job
+that calls `bounded-command` or `bounded-dependency-install`, the worst case of
+each envelope — `attempts × (timeout-seconds + termination-grace-seconds)` plus
+`(attempts − 1) × retry-delay-seconds` — together with the literal
+`timeout-minutes` of the job's other steps. That sum plus 60 seconds of
+headroom for checkout, setup, cache custody checks, and save (the
+[ENG-0269](../decisions/ENG-0269-trusted-dependency-reuse.md) enclosure rule)
+must fit inside the job's `timeout-minutes`. Envelope inputs and sibling step
+timeouts must be literal integers; an expression fails closed because the
+arithmetic cannot be verified.
+
 Dependency download reuse is layered around the same bounded cold path by the
 [dependency reuse policy](dependency-reuse-policy.md); a cache hit never removes
 the installer deadline or lockfile verification.

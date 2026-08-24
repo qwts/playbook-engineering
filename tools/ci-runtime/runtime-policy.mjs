@@ -18,6 +18,12 @@ const INSTALLERS = [
   /\bgo\s+install\b/u,
 ];
 const EXCEPTION = /#\s*ci-runtime:\s*exception\s+owner=\S+\s+max=(\d+)([smh])\s+review=\S+\s+reason=\S.+$/u;
+const BOUNDED_ACTION = /\.github\/actions\/bounded-(?:command|dependency-install)(?:@\S+)?$/u;
+// ENG-0269: the job timeout must enclose the complete installer retry and
+// termination budget plus at least one minute for checkout, setup, cache
+// custody checks, save, and the job's own work.
+const ENVELOPE_HEADROOM_SECONDS = 60;
+const ENVELOPE_DEFAULTS = { attempts: 1, 'retry-delay-seconds': 0, 'termination-grace-seconds': 10 };
 
 function workflowFiles(root) {
   const directory = join(root, '.github', 'workflows');
@@ -93,6 +99,142 @@ function directJobFields(job) {
     Number.POSITIVE_INFINITY,
   );
   return mappings.filter((mapping) => mapping.indent === fieldIndent);
+}
+
+function stepBlocks(job) {
+  const stepsIndex = job.lines.findIndex((line) => {
+    const mapping = mappingLine(line);
+    return mapping && mapping.indent > job.indent && mapping.key === 'steps'
+      && emptyMappingValue(mapping.value);
+  });
+  if (stepsIndex < 0) return [];
+  const stepsIndent = mappingLine(job.lines[stepsIndex]).indent;
+  const steps = [];
+  let current;
+  let itemIndent = null;
+  for (let index = stepsIndex + 1; index < job.lines.length; index += 1) {
+    const raw = job.lines[index];
+    if (!raw.trim() || /^\s*#/u.test(raw)) continue;
+    if (/^\s*/u.exec(raw)[0].length <= stepsIndent) break;
+    const item = /^(\s*)-(?:\s|$)/u.exec(raw);
+    if (item && (itemIndent === null || item[1].length === itemIndent)) {
+      itemIndent = item[1].length;
+      if (current) steps.push(current);
+      // Blank the list dash so field indentation stays column-accurate.
+      current = { line: job.line + index, lines: [raw.replace(/^(\s*)-/u, '$1 ')] };
+    } else if (current) {
+      current.lines.push(raw);
+    }
+  }
+  if (current) steps.push(current);
+  return steps;
+}
+
+function stepMappings(step) {
+  return step.lines
+    .map((line, index) => {
+      const mapping = mappingLine(line);
+      return mapping && { ...mapping, line: step.line + index };
+    })
+    .filter(Boolean);
+}
+
+function literalInteger(value) {
+  const match = /^(["']?)(\d+)\1\s*(?:#.*)?$/u.exec(value.trim());
+  return match ? Number(match[2]) : null;
+}
+
+function stepFields(step) {
+  const mappings = stepMappings(step);
+  if (!mappings.length) return { mappings: [], fields: [] };
+  const fieldIndent = mappings.reduce(
+    (minimum, { indent }) => Math.min(minimum, indent),
+    Number.POSITIVE_INFINITY,
+  );
+  return { mappings, fields: mappings.filter(({ indent }) => indent === fieldIndent) };
+}
+
+function boundedEnvelope(step) {
+  const { mappings, fields } = stepFields(step);
+  const uses = fields.find(({ key }) => key === 'uses');
+  if (!uses || !BOUNDED_ACTION.test(uses.value.trim().replace(/^(["'])(.*)\1$/u, '$2'))) return null;
+  const withField = fields.find(({ key }) => key === 'with');
+  const withEnd = mappings.indexOf(withField) < 0
+    ? -1
+    : mappings.findIndex((mapping, index) => index > mappings.indexOf(withField) && mapping.indent <= withField.indent);
+  const withEntries = withField
+    ? mappings.slice(mappings.indexOf(withField) + 1, withEnd < 0 ? mappings.length : withEnd)
+    : [];
+  const inputs = {};
+  for (const key of ['timeout-seconds', 'attempts', 'retry-delay-seconds', 'termination-grace-seconds']) {
+    const entry = withEntries.find((candidate) => candidate.key === key);
+    if (!entry) {
+      inputs[key] = key in ENVELOPE_DEFAULTS ? ENVELOPE_DEFAULTS[key] : null;
+      continue;
+    }
+    inputs[key] = literalInteger(entry.value);
+  }
+  return { line: uses.line, inputs };
+}
+
+function envelopeWorstCaseSeconds({ inputs }) {
+  const attempts = inputs.attempts;
+  return attempts * (inputs['timeout-seconds'] + inputs['termination-grace-seconds'])
+    + (attempts - 1) * inputs['retry-delay-seconds'];
+}
+
+function envelopeFindings(job, jobTimeoutMinutes, file) {
+  const envelopes = [];
+  const invalidEnvelopes = [];
+  const opaqueStepTimeouts = [];
+  let stepBoundSeconds = 0;
+  for (const step of stepBlocks(job)) {
+    const envelope = boundedEnvelope(step);
+    if (envelope) {
+      const invalid = Object.keys(envelope.inputs).filter((key) => envelope.inputs[key] === null);
+      if (invalid.length) {
+        invalidEnvelopes.push({ line: envelope.line, keys: invalid });
+      } else {
+        envelopes.push(envelope);
+      }
+      continue;
+    }
+    const timeout = stepFields(step).fields.find(({ key }) => key === 'timeout-minutes');
+    if (!timeout) continue;
+    const minutes = literalInteger(timeout.value);
+    if (minutes === null) {
+      opaqueStepTimeouts.push(timeout);
+    } else {
+      stepBoundSeconds += minutes * 60;
+    }
+  }
+  if (!envelopes.length && !invalidEnvelopes.length) return [];
+  const findings = invalidEnvelopes.map(({ line, keys }) => ({
+    file,
+    line,
+    message: `runner job ${job.name} bounded envelope needs literal integer ${keys.join(', ')}`,
+  }));
+  findings.push(...opaqueStepTimeouts.map(({ line }) => ({
+    file,
+    line,
+    message: `runner job ${job.name} bounded-step arithmetic needs a literal step timeout-minutes`,
+  })));
+  if (findings.length) return findings;
+  const worstCaseSeconds = envelopes.reduce(
+    (total, envelope) => total + envelopeWorstCaseSeconds(envelope),
+    stepBoundSeconds,
+  );
+  const budgetSeconds = jobTimeoutMinutes * 60;
+  if (worstCaseSeconds + ENVELOPE_HEADROOM_SECONDS > budgetSeconds) {
+    findings.push({
+      file,
+      line: envelopes[0].line,
+      message: `runner job ${job.name} bounded steps can exceed the job budget: `
+        + `worst case ${worstCaseSeconds}s plus ${ENVELOPE_HEADROOM_SECONDS}s headroom `
+        + `> timeout-minutes ${jobTimeoutMinutes} (${budgetSeconds}s)`,
+    });
+  }
+  return findings;
 }
 
 function runSegments(lines) {
@@ -236,7 +378,9 @@ export function inspectWorkflow(text, { file = '<workflow>' } = {}) {
         line: job.line,
         message: `runner job ${job.name} timeout-minutes must be a literal integer between 1 and 360`,
       });
+      continue;
     }
+    findings.push(...envelopeFindings(job, minutes, file));
   }
   for (const segment of runSegments(lines)) {
     const finding = installerFinding(segment);
