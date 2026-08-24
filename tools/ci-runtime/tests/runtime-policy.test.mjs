@@ -182,6 +182,184 @@ jobs:
   }
 });
 
+test('a bounded envelope whose worst case exceeds the remaining job budget is rejected', () => {
+  // The Overlook E2E shape: install caps of 900s x 2 attempts cannot fit the
+  // job budget left after a 30-minute bounded test step in a 45-minute job.
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Install browsers
+        uses: qwts/playbook-engineering/.github/actions/bounded-command@4e70c773155c2c804e52a487352627010bea1897
+        with:
+          task: Install browsers
+          executable: npx
+          arguments-json: '["playwright", "install"]'
+          timeout-seconds: '900'
+          attempts: '2'
+          retry-delay-seconds: '5'
+      - name: Run E2E tests
+        timeout-minutes: 30
+        run: node run-e2e.mjs
+`);
+  assert.equal(findings.length, 1);
+  assert.match(
+    findings[0].message,
+    /runner job e2e bounded steps can exceed the job budget: worst case 3625s plus 60s headroom > timeout-minutes 45 \(2700s\)/u,
+  );
+});
+
+test('a bounded envelope that fits inside the job budget with headroom passes', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  post-merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Seed dependency cache
+        uses: ./.github/actions/bounded-dependency-install
+        with:
+          ecosystem: npm
+          timeout-seconds: '300'
+          attempts: '2'
+          retry-delay-seconds: '5'
+          termination-grace-seconds: '10'
+`);
+  assert.deepEqual(findings, []);
+});
+
+test('envelope worst case includes default attempts and termination grace', () => {
+  const workflow = (minutes) => `name: CI
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${minutes}
+    steps:
+      - uses: ./.github/actions/bounded-command
+        with:
+          timeout-seconds: '300'
+`;
+  // 1 x (300 + 10) + 60 headroom = 370s: over a 6-minute job, inside 7 minutes.
+  assert.equal(inspectWorkflow(workflow(6)).length, 1);
+  assert.deepEqual(inspectWorkflow(workflow(7)), []);
+});
+
+test('an envelope with an expression input fails closed', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: ./.github/actions/bounded-command
+        with:
+          timeout-seconds: \${{ inputs.deadline }}
+          attempts: '2'
+`);
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /bounded envelope needs literal integer timeout-seconds/u);
+});
+
+test('an envelope without timeout-seconds fails closed', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: ./.github/actions/bounded-command
+        with:
+          attempts: '2'
+`);
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /bounded envelope needs literal integer timeout-seconds/u);
+});
+
+test('a non-literal sibling step timeout blocks envelope arithmetic', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: ./.github/actions/bounded-command
+        with:
+          timeout-seconds: '60'
+      - name: Test
+        timeout-minutes: \${{ inputs.test-minutes }}
+        run: npm test
+`);
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /bounded-step arithmetic needs a literal step timeout-minutes/u);
+});
+
+test('step timeouts in jobs without bounded envelopes stay out of scope', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Test
+        timeout-minutes: \${{ inputs.test-minutes }}
+        run: npm test
+`);
+  assert.deepEqual(findings, []);
+});
+
+test('a version comment on the action pin does not hide the envelope', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: qwts/playbook-engineering/.github/actions/bounded-command@4e70c773155c2c804e52a487352627010bea1897 # v1
+        with:
+          timeout-seconds: '300'
+`);
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /bounded steps can exceed the job budget/u);
+});
+
+test('findings point at the envelope line even after blank and comment lines', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Install
+
+        # blank and comment lines must not shift the reported line
+        uses: ./.github/actions/bounded-command
+        with:
+          timeout-seconds: '300'
+`);
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /bounded steps can exceed the job budget/u);
+  assert.equal(findings[0].line, 10);
+});
+
+test('a timeout-minutes input of another action is not a step bound', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 11
+    steps:
+      - uses: ./.github/actions/bounded-command
+        with:
+          timeout-seconds: '300'
+      - uses: some/other-action@v1
+        with:
+          timeout-minutes: '600'
+`);
+  assert.deepEqual(findings, []);
+});
+
 test('--root requires a following path', () => {
   assert.throws(() => parseRootArgument(['--root']), /--root requires a path/u);
   assert.equal(parseRootArgument([], { cwd: '/workspace' }), '/workspace');
