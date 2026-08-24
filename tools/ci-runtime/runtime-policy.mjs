@@ -114,7 +114,11 @@ function stepBlocks(job) {
   let itemIndent = null;
   for (let index = stepsIndex + 1; index < job.lines.length; index += 1) {
     const raw = job.lines[index];
-    if (!raw.trim() || /^\s*#/u.test(raw)) continue;
+    if (!raw.trim() || /^\s*#/u.test(raw)) {
+      // Keep the line so step.line + offset stays the absolute line number.
+      current?.lines.push(raw);
+      continue;
+    }
     if (/^\s*/u.exec(raw)[0].length <= stepsIndent) break;
     const item = /^(\s*)-(?:\s|$)/u.exec(raw);
     if (item && (itemIndent === null || item[1].length === itemIndent)) {

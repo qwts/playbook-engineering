@@ -324,6 +324,25 @@ jobs:
   assert.match(findings[0].message, /bounded steps can exceed the job budget/u);
 });
 
+test('findings point at the envelope line even after blank and comment lines', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Install
+
+        # blank and comment lines must not shift the reported line
+        uses: ./.github/actions/bounded-command
+        with:
+          timeout-seconds: '300'
+`);
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /bounded steps can exceed the job budget/u);
+  assert.equal(findings[0].line, 10);
+});
+
 test('a timeout-minutes input of another action is not a step bound', () => {
   const findings = inspectWorkflow(`name: CI
 jobs:
