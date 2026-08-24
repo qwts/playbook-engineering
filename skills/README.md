@@ -11,7 +11,7 @@ here by link — never copied into this tree.
 
 ## Available skills
 
-- [agent-bot](https://github.com/qwts/agent-bot-identity/tree/main/skills/agent-bot)
+- [agent-bot](https://github.com/qwts/agent-bot-identity/tree/28b5ee1be2f12dcf548d96309d21c4a1c8ad2b9d/skills/agent-bot)
   — owned by
   [qwts/agent-bot-identity](https://github.com/qwts/agent-bot-identity).
   Per-harness GitHub App identities for coding agents: bootstrap and
@@ -19,7 +19,7 @@ here by link — never copied into this tree.
   GitHub-verified bot commits, transcript-bound Agent IDs, and Agent Spaces.
   Absorbed the old signed-commit skill (`signed-commit.mjs`). Install per its
   `SKILL.md`.
-- [managed-machine](https://github.com/qwts/managed-machine/blob/main/skills/SKILL.md)
+- [managed-machine](https://github.com/qwts/managed-machine/blob/v0.3.19/skills/SKILL.md)
   v0.3.19 — owned by
   [qwts/managed-machine](https://github.com/qwts/managed-machine). Bootstrap,
   update, and manage a Mac via the `managed-machine` Homebrew formula: fresh
