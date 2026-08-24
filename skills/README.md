@@ -1,18 +1,33 @@
 # Shared agent skills
 
-Skills every agent in the fleet can use, centralized here per
+The fleet's skills home, per
 [ENG-0004](../docs/decisions/ENG-0004-centralize-shared-cicd.md) — no per-repo
-copies. They are agent primitives under
+copies. Skills are agent primitives under
 [ENG-0006](../docs/decisions/ENG-0006-agentic-primitives-governance.md): read as
 directives, shipped with executable scripts, reviewed as code, and owned in
-`.github/CODEOWNERS`.
+`.github/CODEOWNERS`. A skill listed here either lives in this repo under
+`skills/<name>/` or lives in the repo that owns its domain and is cataloged
+here by link — never copied into this tree.
 
 ## Available skills
 
-None currently. The signed-commit skill moved to
-[agent-bot-identity](https://github.com/qwts/agent-bot-identity), which owns
-bot commit signing (`signed-commit.mjs`). A machine that installed it from
-here has a dangling symlink; remove it:
+- [agent-bot](https://github.com/qwts/agent-bot-identity/tree/main/skills/agent-bot)
+  — owned by
+  [qwts/agent-bot-identity](https://github.com/qwts/agent-bot-identity).
+  Per-harness GitHub App identities for coding agents: bootstrap and
+  installation, bot credential minting, authorized secure-store reads,
+  GitHub-verified bot commits, transcript-bound Agent IDs, and Agent Spaces.
+  Absorbed the old signed-commit skill (`signed-commit.mjs`). Install per its
+  `SKILL.md`.
+- [managed-machine](https://github.com/qwts/managed-machine/blob/main/skills/SKILL.md)
+  v0.3.19 — owned by
+  [qwts/managed-machine](https://github.com/qwts/managed-machine). Bootstrap,
+  update, and manage a Mac via the `managed-machine` Homebrew formula: fresh
+  setup, version reporting, setup scripts, brew ownership fixes, fleet SSH
+  keys, gitleaks hooks, and agent-CLI installs. Install per its `SKILL.md`.
+
+The signed-commit skill previously lived here. A machine that installed it
+from this repo has a dangling symlink; remove it:
 
 ```bash
 rm -f ~/.claude/skills/signed-commit
@@ -20,9 +35,12 @@ rm -f ~/.claude/skills/signed-commit
 
 ## Installing
 
-Each skill's `SKILL.md` carries its own install line. They follow one shape —
-symlink the skill directory into the harness so a `git pull` here updates every
-machine, rather than copying and drifting:
+Externally owned skills install per the instructions in their own repo's
+`SKILL.md`, linked above.
+
+Skills that live in this repo follow one shape — each skill's `SKILL.md`
+carries its own install line, symlinking the skill directory into the harness
+so a `git pull` here updates every machine, rather than copying and drifting:
 
 ```bash
 PLAYBOOK_ROOT="$(git rev-parse --show-toplevel)"
