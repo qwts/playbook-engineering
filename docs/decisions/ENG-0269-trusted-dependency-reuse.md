@@ -1,6 +1,6 @@
 # ENG-0269: Reuse immutable dependency downloads on standard hosted runners
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-08-20
 **Issue:** qwts/playbook-engineering#269
 
