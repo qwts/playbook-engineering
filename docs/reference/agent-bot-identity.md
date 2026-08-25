@@ -35,7 +35,7 @@ Current active identities:
 - Codex: `qwts-codex-agent`, `qwts-codex-luna-agent`,
   `qwts-codex-sol-agent`, and `qwts-codex-terra-agent`.
 - Other harnesses: `qwts-copilot-agent`, `qwts-cursor-agent`,
-  `qwts-devin-agent`, and `qwts-vscode-agent`.
+  `qwts-devin-agent`, `qwts-muse-agent`, and `qwts-vscode-agent`.
 
 Adding an App requires one roster row with its exact slug, harness, and active
 status. Removing access means retiring the row, revoking or narrowing the App,

@@ -9,6 +9,7 @@
     "copilot": "qwts-copilot-agent",
     "cursor": "qwts-cursor-agent",
     "devin": "qwts-devin-agent",
+    "muse": "qwts-muse-agent",
     "vscode": "qwts-vscode-agent"
   },
   "identities": [
@@ -70,6 +71,11 @@
     {
       "slug": "qwts-devin-agent",
       "harness": "devin",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-muse-agent",
+      "harness": "muse",
       "status": "active"
     },
     {

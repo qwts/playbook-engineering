@@ -24,6 +24,7 @@ export const PROFILE_HARNESS_BY_ROSTER = Object.freeze({
   copilot: 'copilot',
   cursor: 'cursor',
   devin: 'devin',
+  muse: 'muse',
   vscode: 'vscode',
 });
 
