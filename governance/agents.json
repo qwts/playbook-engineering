@@ -74,6 +74,12 @@
       "note": "Keyed devin, not windsurf: the app ships as Devin and the key names the territory."
     },
     {
+      "slug": "qwts-muse-agent",
+      "harness": "muse",
+      "status": "active",
+      "note": "Meta Muse. Territory is ~/.muse/worktrees, matching the app's ~/.muse config home (App ID 4539515)."
+    },
+    {
       "slug": "qwts-vscode-agent",
       "harness": "vscode",
       "status": "active",
