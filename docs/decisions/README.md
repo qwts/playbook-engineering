@@ -90,6 +90,7 @@ principles; it does not waive the lower priorities.
 | [ENG-0267](ENG-0267-bounded-ci-runtime.md) | Bound CI jobs and external setup tasks centrally | Proposed |
 | [ENG-0269](ENG-0269-trusted-dependency-reuse.md) | Reuse immutable dependency downloads on standard hosted runners | Accepted |
 | [ENG-0279](ENG-0279-immutable-releases-and-repo-lockfiles.md) | Playbook updates ship as immutable releases; repos align by lockfile | Proposed |
+| [ENG-0313](ENG-0313-ci-fan-out-backpressure.md) | Install lanes carry fan-out backpressure, and evidence lanes never queue behind them | Proposed |
 
 ## Related
 

@@ -217,6 +217,9 @@ jobs:
   post-merge:
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    concurrency:
+      group: \${{ github.event_name == 'pull_request' && 'ci-install' || format('ci-install-{0}', github.run_id) }}
+      cancel-in-progress: false
     steps:
       - name: Seed dependency cache
         uses: ./.github/actions/bounded-dependency-install
@@ -358,6 +361,114 @@ jobs:
           timeout-minutes: '600'
 `);
   assert.deepEqual(findings, []);
+});
+
+const installJob = (concurrency) => `name: CI
+jobs:
+  full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+${concurrency}    steps:
+      - name: Install locked dependencies
+        uses: ./.github/actions/bounded-dependency-install
+        with:
+          ecosystem: npm
+          timeout-seconds: '300'
+          attempts: '2'
+          retry-delay-seconds: '5'
+`;
+
+const BACKPRESSURE = `    concurrency:
+      group: \${{ github.event_name == 'pull_request' && 'ci-install-full' || format('ci-install-full-{0}', github.run_id) }}
+      cancel-in-progress: false
+`;
+
+test('an install lane without a backpressure group is rejected', () => {
+  const findings = inspectWorkflow(installJob(''));
+  assert.deepEqual(findings.map(({ message }) => message), [
+    'runner job full installs dependencies without a backpressure concurrency group',
+  ]);
+});
+
+test('the reviewed backpressure shape passes', () => {
+  assert.deepEqual(inspectWorkflow(installJob(BACKPRESSURE)), []);
+});
+
+test('a constant backpressure group would supersede evidence lanes', () => {
+  const findings = inspectWorkflow(installJob(`    concurrency:
+      group: ci-install-full
+      cancel-in-progress: false
+`));
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /unique per run \(github\.run_id\)/u);
+  // The finding anchors at the group expression, not at the job or the step.
+  assert.equal(findings[0].line, 7);
+});
+
+test('backpressure must not cancel a running install', () => {
+  const findings = inspectWorkflow(installJob(`    concurrency:
+      group: \${{ format('ci-install-full-{0}', github.run_id) }}
+      cancel-in-progress: true
+`));
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /literal cancel-in-progress: false/u);
+});
+
+test('an expression cancel-in-progress fails closed on an install lane', () => {
+  const findings = inspectWorkflow(installJob(`    concurrency:
+      group: \${{ format('ci-install-full-{0}', github.run_id) }}
+      cancel-in-progress: \${{ github.event_name != 'push' }}
+`));
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /literal cancel-in-progress: false/u);
+});
+
+test('the concurrency string shorthand cannot express the install contract', () => {
+  const findings = inspectWorkflow(installJob(`    concurrency: ci-install-full
+`));
+  assert.deepEqual(findings.map(({ message }) => message), [
+    'runner job full backpressure needs an explicit concurrency group and cancel-in-progress',
+  ]);
+});
+
+test('a folded backpressure group is read whole', () => {
+  const findings = inspectWorkflow(installJob(`    concurrency:
+      group: >-
+        \${{ github.event_name == 'pull_request' && 'ci-install-full'
+        || format('ci-install-full-{0}', github.run_id) }}
+      cancel-in-progress: false
+`));
+  assert.deepEqual(findings, []);
+});
+
+test('backpressure is required of the install action, not of every bounded job', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: ./.github/actions/bounded-command
+        with:
+          timeout-seconds: '300'
+`);
+  assert.deepEqual(findings, []);
+});
+
+test('an unbounded install lane reports both the missing timeout and the missing group', () => {
+  const findings = inspectWorkflow(`name: CI
+jobs:
+  full:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/bounded-dependency-install@0000000000000000000000000000000000000000 # v1
+        with:
+          timeout-seconds: '300'
+`);
+  assert.deepEqual(findings.map(({ message }) => message), [
+    'runner job full installs dependencies without a backpressure concurrency group',
+    'runner job full has no timeout-minutes',
+  ]);
 });
 
 test('--root requires a following path', () => {

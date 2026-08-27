@@ -19,6 +19,7 @@ const INSTALLERS = [
 ];
 const EXCEPTION = /#\s*ci-runtime:\s*exception\s+owner=\S+\s+max=(\d+)([smh])\s+review=\S+\s+reason=\S.+$/u;
 const BOUNDED_ACTION = /\.github\/actions\/bounded-(?:command|dependency-install)(?:@\S+)?$/u;
+const INSTALL_ACTION = /\.github\/actions\/bounded-dependency-install(?:@\S+)?$/u;
 // ENG-0269: the job timeout must enclose the complete installer retry and
 // termination budget plus at least one minute for checkout, setup, cache
 // custody checks, save, and the job's own work.
@@ -247,6 +248,98 @@ function envelopeFindings(job, jobTimeoutMinutes, file) {
   return findings;
 }
 
+function jobMappings(job) {
+  return job.lines
+    .map((line, offset) => {
+      const mapping = mappingLine(line);
+      return mapping && { ...mapping, offset, line: job.line + offset };
+    })
+    .filter((mapping) => mapping && mapping.indent > job.indent);
+}
+
+// A group written as a folded or literal block scalar continues on the more
+// indented lines below it. Read the expression whole before checking it.
+function blockValue(job, mapping) {
+  const inline = mapping.value.trim();
+  if (!/^[>|][-+]?\s*$/u.test(inline)) return inline;
+  const collected = [];
+  for (let index = mapping.offset + 1; index < job.lines.length; index += 1) {
+    const raw = job.lines[index];
+    if (!raw.trim()) continue;
+    if (/^\s*/u.exec(raw)[0].length <= mapping.indent) break;
+    collected.push(raw.trim());
+  }
+  return collected.join(' ').trim();
+}
+
+function jobConcurrency(job) {
+  const mappings = jobMappings(job);
+  const fieldIndent = mappings.reduce(
+    (minimum, { indent }) => Math.min(minimum, indent),
+    Number.POSITIVE_INFINITY,
+  );
+  const field = mappings.find(({ indent, key }) => indent === fieldIndent && key === 'concurrency');
+  if (!field) return null;
+  if (!emptyMappingValue(field.value)) return { line: field.line, shorthand: true };
+  const start = mappings.indexOf(field);
+  const end = mappings.findIndex((mapping, index) => index > start && mapping.indent <= fieldIndent);
+  const entries = mappings.slice(start + 1, end < 0 ? mappings.length : end);
+  return {
+    line: field.line,
+    shorthand: false,
+    group: entries.find(({ key }) => key === 'group'),
+    cancel: entries.find(({ key }) => key === 'cancel-in-progress'),
+  };
+}
+
+function literalFalse(value) {
+  return /^(["']?)false\1\s*(?:#.*)?$/u.test(value.trim());
+}
+
+// ENG-0313: a job that reaches a package origin declares the fan-out group that
+// holds one identical install sequence in flight, never cancels a running one,
+// and never queues an exact-SHA evidence run behind pull-request traffic.
+function backpressureFindings(job, file) {
+  const installs = stepBlocks(job).some((step) => {
+    const uses = stepFields(step).fields.find(({ key }) => key === 'uses');
+    return uses && INSTALL_ACTION.test(usesReference(uses.value));
+  });
+  if (!installs) return [];
+  const concurrency = jobConcurrency(job);
+  if (!concurrency) {
+    return [{
+      file,
+      line: job.line,
+      message: `runner job ${job.name} installs dependencies without a backpressure concurrency group`,
+    }];
+  }
+  if (concurrency.shorthand || !concurrency.group) {
+    return [{
+      file,
+      line: concurrency.line,
+      message: `runner job ${job.name} backpressure needs an explicit concurrency group and cancel-in-progress`,
+    }];
+  }
+  const findings = [];
+  if (!blockValue(job, concurrency.group).includes('github.run_id')) {
+    findings.push({
+      file,
+      line: concurrency.group.line,
+      message: `runner job ${job.name} backpressure group must keep runs outside pull_request unique `
+        + 'per run (github.run_id) so evidence lanes are never superseded',
+    });
+  }
+  if (!concurrency.cancel || !literalFalse(concurrency.cancel.value)) {
+    findings.push({
+      file,
+      line: (concurrency.cancel ?? concurrency.group).line,
+      message: `runner job ${job.name} backpressure needs literal cancel-in-progress: false so a `
+        + 'running install is queued behind, never cancelled',
+    });
+  }
+  return findings;
+}
+
 function runSegments(lines) {
   const segments = [];
   for (let index = 0; index < lines.length; index += 1) {
@@ -375,6 +468,7 @@ export function inspectWorkflow(text, { file = '<workflow>' } = {}) {
   for (const job of jobBlocks(lines)) {
     const fields = directJobFields(job);
     if (!fields.some(({ key }) => key === 'runs-on')) continue;
+    findings.push(...backpressureFindings(job, file));
     const timeout = fields.find(({ key }) => key === 'timeout-minutes');
     if (!timeout) {
       findings.push({ file, line: job.line, message: `runner job ${job.name} has no timeout-minutes` });

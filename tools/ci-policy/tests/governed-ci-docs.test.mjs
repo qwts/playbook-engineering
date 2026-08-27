@@ -151,6 +151,27 @@ test('repository settings and concurrency rollout evidence stay explicit', () =>
   }
 });
 
+test('install lanes carry backpressure and evidence lanes stay unique per run', () => {
+  const workflow = read('.github/workflows/ci.yml');
+  const runtime = read('docs/reference/ci-runtime-policy.md');
+  const record = read('docs/decisions/ENG-0313-ci-fan-out-backpressure.md');
+
+  for (const [job, next] of [['full', 'docs-gov'], ['post-merge', 'gate']]) {
+    const block = workflow.match(new RegExp(`^  ${job}:\\n[\\s\\S]*?(?=^  ${next}:$)`, 'mu'))?.[0];
+    assert.ok(block, `${job} job is missing`);
+    assert.match(block, /uses: \.\/\.github\/actions\/bounded-dependency-install/u);
+    const group = block.match(/^ {6}group: (.+)$/mu)?.[1];
+    assert.ok(group, `${job} declares no backpressure group`);
+    assert.match(group, /github\.event_name == 'pull_request'/u);
+    assert.match(group, /github\.run_id/u, 'evidence runs must take a unique per-run group');
+    assert.match(block, /^ {6}cancel-in-progress: false$/mu);
+  }
+
+  assert.match(runtime, /merge-one-and-wait/u);
+  assert.match(runtime, /ENG-0313-ci-fan-out-backpressure\.md/u);
+  assert.match(record, /^\*\*Issue:\*\* qwts\/playbook-engineering#313$/mu);
+});
+
 test('dependency remediation preserves traced analysis and packaging exceptions', () => {
   const conventions = read('docs/reference/agent-conventions.md');
   const release = read('docs/sop/release-and-versioning.md');

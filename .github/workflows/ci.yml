@@ -94,6 +94,14 @@ jobs:
       (needs.policy.outputs.run_post_merge == 'true' && needs.merge-evidence.outputs.validated != 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # ENG-0313 fan-out backpressure. Pull-request installs share one repo-wide
+    # lane, so a `main` push that retargets every open PR queues its complete
+    # suites instead of racing them into the package origins. Push, merge-group,
+    # and dispatch runs carry exact-SHA evidence and take a unique per-run group
+    # so they are never superseded by pull-request traffic.
+    concurrency:
+      group: ${{ github.event_name == 'pull_request' && 'ci-install-full' || format('ci-install-full-{0}', github.run_id) }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -165,6 +173,12 @@ jobs:
     if: needs.policy.outputs.run_post_merge == 'true' && needs.merge-evidence.outputs.validated == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    # This lane runs only on a default-branch push and is the trusted cache
+    # writer, so it takes the per-run group: seeding evidence is never dropped
+    # because pull-request installs are busy.
+    concurrency:
+      group: ${{ github.event_name == 'pull_request' && 'ci-install-post-merge' || format('ci-install-post-merge-{0}', github.run_id) }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
