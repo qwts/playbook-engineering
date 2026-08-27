@@ -296,12 +296,36 @@ function literalFalse(value) {
   return /^(["']?)false\1\s*(?:#.*)?$/u.test(value.trim());
 }
 
-// The value GitHub evaluates: a quoted scalar is its contents, a plain scalar
-// ends at its comment. Characters after either boundary are not the group.
+// A quoted YAML scalar is its decoded contents: '' is one quote inside a
+// single-quoted scalar, so leaving it doubled would later read as two empty
+// expression literals. A double-quoted scalar's backslash escapes can also
+// produce a quote, and decoding them fully is more YAML than this checker
+// should own — those, an unterminated scalar, and trailing junk return null,
+// which fails closed.
+function quotedScalar(text) {
+  const quote = text[0];
+  let value = '';
+  for (let index = 1; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === quote) {
+      if (quote === "'" && text[index + 1] === "'") {
+        value += "'";
+        index += 1;
+        continue;
+      }
+      return /^\s*(?:#.*)?$/u.test(text.slice(index + 1)) ? value : null;
+    }
+    if (quote === '"' && character === '\\') return null;
+    value += character;
+  }
+  return null;
+}
+
+// The value GitHub evaluates: a decoded quoted scalar, or a plain scalar up to
+// its comment. Characters after either boundary are not the group.
 function scalarText(value) {
   const trimmed = value.trim();
-  const quoted = /^(["'])([\s\S]*?)\1\s*(?:#.*)?$/u.exec(trimmed);
-  if (quoted) return quoted[2];
+  if (trimmed[0] === "'" || trimmed[0] === '"') return quotedScalar(trimmed);
   let expression = 0;
   for (let index = 0; index < trimmed.length; index += 1) {
     if (trimmed.startsWith('${{', index)) {
@@ -324,7 +348,9 @@ function scalarText(value) {
 // is inside one. An unbalanced quote leaves the expression unparseable, so it
 // cannot supply the escape.
 function perRunEscape(value) {
-  const expressions = scalarText(value).match(/\$\{\{[\s\S]*?\}\}/gu) ?? [];
+  const text = scalarText(value);
+  if (text === null) return false;
+  const expressions = text.match(/\$\{\{[\s\S]*?\}\}/gu) ?? [];
   return expressions.some((expression) => {
     const masked = expression.replace(/'(?:[^']|'')*'/gu, ' ');
     return !masked.includes("'") && /(?:^|[^\w.])github\.run_id(?![\w.])/u.test(masked);
