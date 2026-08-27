@@ -463,6 +463,46 @@ test('an unbalanced expression quote cannot be verified', () => {
   assert.match(findings[0].message, /unique per run \(github\.run_id\)/u);
 });
 
+test('YAML quote escaping is decoded before expression literals are masked', () => {
+  const findings = inspectWorkflow(installJob(`    concurrency:
+      group: '\${{ ''literal/github.run_id'' }}'
+      cancel-in-progress: false
+`));
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /unique per run \(github\.run_id\)/u);
+});
+
+test('a legitimately escaped single-quoted scalar keeps its escape', () => {
+  const findings = inspectWorkflow(installJob(`    concurrency:
+      group: '\${{ format(''ci-install-full-{0}'', github.run_id) }}'
+      cancel-in-progress: false
+`));
+  assert.deepEqual(findings, []);
+});
+
+test('an unterminated or trailing-junk quoted scalar cannot be verified', () => {
+  for (const group of [
+    `'\${{ format('ci-install-full-{0}', github.run_id) }}`,
+    `'\${{ github.run_id }}' extra`,
+  ]) {
+    const findings = inspectWorkflow(installJob(`    concurrency:
+      group: ${group}
+      cancel-in-progress: false
+`));
+    assert.equal(findings.length, 1, group);
+    assert.match(findings[0].message, /unique per run \(github\.run_id\)/u);
+  }
+});
+
+test('a double-quoted scalar with backslash escapes fails closed', () => {
+  const findings = inspectWorkflow(installJob(`    concurrency:
+      group: "\${{ format('ci-\\\\{0}', github.run_id) }}"
+      cancel-in-progress: false
+`));
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /unique per run \(github\.run_id\)/u);
+});
+
 test('a quoted expression carries the escape', () => {
   const findings = inspectWorkflow(installJob(`    concurrency:
       group: "\${{ format('ci-install-full-{0}', github.run_id) }}"
