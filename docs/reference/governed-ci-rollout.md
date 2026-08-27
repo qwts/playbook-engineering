@@ -45,6 +45,9 @@ result in [`release-lifecycles.json`](../../governance/release-lifecycles.json):
   complete-suite fallback. PR-head success, tree equivalence, and an earlier
   `main` success do not count.
 - PR concurrency remains PR-scoped with `cancel-in-progress: true`.
+- Every job that installs dependencies additionally carries the ENG-0313
+  backpressure group: one shared lane for `pull_request`, a per-run group for
+  evidence events, and `cancel-in-progress: false`.
 - Stable `CI` and `E2E gate` jobs report conditional-lane verdicts without
   removing any independent gate.
 - Advanced CodeQL runs through governed CI for every configured language and

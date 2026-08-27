@@ -79,6 +79,30 @@ must fit inside the job's `timeout-minutes`. Envelope inputs and sibling step
 timeouts must be literal integers; an expression fails closed because the
 arithmetic cannot be verified.
 
+## Fan-out backpressure
+
+A deadline bounds one stalled install; it does not stop a `main` push from
+starting O(open PRs) of them at once. Every job that runs
+`bounded-dependency-install` therefore declares job-level `concurrency`
+([ENG-0313](../decisions/ENG-0313-ci-fan-out-backpressure.md)):
+
+```yaml
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && 'ci-install-full' || format('ci-install-full-{0}', github.run_id) }}
+  cancel-in-progress: false
+```
+
+Pull-request lanes share one repository-wide group per lane, so at most one
+identical install sequence is in flight — merge-one-and-wait. Runs carrying
+exact-SHA evidence (`push`, `merge_group`, `workflow_dispatch`) take the
+per-run group and are never superseded by pull-request traffic. The checker
+rejects a missing group, a `cancel-in-progress` that is not literally `false`,
+and a group with no `github.run_id` escape; it verifies that the escape exists,
+not that its condition is right, so the expression is still reviewed. Group
+names are repository deltas. GitHub keeps one pending run per group, so a
+superseded pull-request lane goes red and re-runs on its next head — never
+counted as validated.
+
 Dependency download reuse is layered around the same bounded cold path by the
 [dependency reuse policy](dependency-reuse-policy.md); a cache hit never removes
 the installer deadline or lockfile verification.
