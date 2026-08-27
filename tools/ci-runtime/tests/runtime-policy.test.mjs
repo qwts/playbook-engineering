@@ -405,6 +405,41 @@ test('a constant backpressure group would supersede evidence lanes', () => {
   assert.equal(findings[0].line, 7);
 });
 
+test('a comment cannot supply the per-run escape', () => {
+  const findings = inspectWorkflow(installJob(`    concurrency:
+      group: ci-install-full # \${{ github.run_id }}
+      cancel-in-progress: false
+`));
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /unique per run \(github\.run_id\)/u);
+});
+
+test('a quoted constant naming run_id is still a constant group', () => {
+  const findings = inspectWorkflow(installJob(`    concurrency:
+      group: 'ci-install-full-github.run_id'
+      cancel-in-progress: false
+`));
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /unique per run \(github\.run_id\)/u);
+});
+
+test('a string literal inside the expression is not an evaluated escape', () => {
+  const findings = inspectWorkflow(installJob(`    concurrency:
+      group: \${{ format('ci-install-full-{0}', 'github.run_id') }}
+      cancel-in-progress: false
+`));
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /unique per run \(github\.run_id\)/u);
+});
+
+test('a quoted expression carries the escape', () => {
+  const findings = inspectWorkflow(installJob(`    concurrency:
+      group: "\${{ format('ci-install-full-{0}', github.run_id) }}"
+      cancel-in-progress: false
+`));
+  assert.deepEqual(findings, []);
+});
+
 test('backpressure must not cancel a running install', () => {
   const findings = inspectWorkflow(installJob(`    concurrency:
       group: \${{ format('ci-install-full-{0}', github.run_id) }}
