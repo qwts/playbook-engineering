@@ -318,10 +318,17 @@ function scalarText(value) {
 }
 
 // The escape has to be a context reference GitHub expands, not the characters
-// of one sitting in a comment, a constant, or a quoted string literal.
+// of one sitting in a comment, a constant, or a string literal. Expression
+// literals are single-quoted with '' for an embedded quote; mask them before
+// the search, because the neighbouring character does not say whether the text
+// is inside one. An unbalanced quote leaves the expression unparseable, so it
+// cannot supply the escape.
 function perRunEscape(value) {
   const expressions = scalarText(value).match(/\$\{\{[\s\S]*?\}\}/gu) ?? [];
-  return expressions.some((expression) => /(?:^|[^'"\w.])github\.run_id(?![\w.])/u.test(expression));
+  return expressions.some((expression) => {
+    const masked = expression.replace(/'(?:[^']|'')*'/gu, ' ');
+    return !masked.includes("'") && /(?:^|[^\w.])github\.run_id(?![\w.])/u.test(masked);
+  });
 }
 
 // ENG-0313: a job that reaches a package origin declares the fan-out group that
