@@ -97,8 +97,10 @@ identical install sequence is in flight — merge-one-and-wait. Runs carrying
 exact-SHA evidence (`push`, `merge_group`, `workflow_dispatch`) take the
 per-run group and are never superseded by pull-request traffic. The checker
 rejects a missing group, a `cancel-in-progress` that is not literally `false`,
-and a group with no `github.run_id` escape; it verifies that the escape exists,
-not that its condition is right, so the expression is still reviewed. Group
+and a group whose `github.run_id` escape is not inside an evaluated `${{ }}`
+expression — a comment, a constant, or a quoted string literal naming it is not
+an escape. It verifies that the escape exists, not that its condition is right,
+so the expression is still reviewed. Group
 names are repository deltas. GitHub keeps one pending run per group, so a
 superseded pull-request lane goes red and re-runs on its next head — never
 counted as validated.

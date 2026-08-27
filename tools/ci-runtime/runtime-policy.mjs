@@ -296,6 +296,34 @@ function literalFalse(value) {
   return /^(["']?)false\1\s*(?:#.*)?$/u.test(value.trim());
 }
 
+// The value GitHub evaluates: a quoted scalar is its contents, a plain scalar
+// ends at its comment. Characters after either boundary are not the group.
+function scalarText(value) {
+  const trimmed = value.trim();
+  const quoted = /^(["'])([\s\S]*?)\1\s*(?:#.*)?$/u.exec(trimmed);
+  if (quoted) return quoted[2];
+  let expression = 0;
+  for (let index = 0; index < trimmed.length; index += 1) {
+    if (trimmed.startsWith('${{', index)) {
+      expression += 1;
+      index += 2;
+    } else if (expression && trimmed.startsWith('}}', index)) {
+      expression -= 1;
+      index += 1;
+    } else if (trimmed[index] === '#' && !expression && (index === 0 || /\s/u.test(trimmed[index - 1]))) {
+      return trimmed.slice(0, index);
+    }
+  }
+  return trimmed;
+}
+
+// The escape has to be a context reference GitHub expands, not the characters
+// of one sitting in a comment, a constant, or a quoted string literal.
+function perRunEscape(value) {
+  const expressions = scalarText(value).match(/\$\{\{[\s\S]*?\}\}/gu) ?? [];
+  return expressions.some((expression) => /(?:^|[^'"\w.])github\.run_id(?![\w.])/u.test(expression));
+}
+
 // ENG-0313: a job that reaches a package origin declares the fan-out group that
 // holds one identical install sequence in flight, never cancels a running one,
 // and never queues an exact-SHA evidence run behind pull-request traffic.
@@ -321,7 +349,7 @@ function backpressureFindings(job, file) {
     }];
   }
   const findings = [];
-  if (!blockValue(job, concurrency.group).includes('github.run_id')) {
+  if (!perRunEscape(blockValue(job, concurrency.group))) {
     findings.push({
       file,
       line: concurrency.group.line,
