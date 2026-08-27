@@ -432,6 +432,37 @@ test('a string literal inside the expression is not an evaluated escape', () => 
   assert.match(findings[0].message, /unique per run \(github\.run_id\)/u);
 });
 
+test('a literal whose neighbour is not a quote is still a literal', () => {
+  for (const group of [
+    `\${{ 'ci-install-full-github.run_id' }}`,
+    `\${{ format('ci-install-full-{0}', 'literal/github.run_id') }}`,
+  ]) {
+    const findings = inspectWorkflow(installJob(`    concurrency:
+      group: ${group}
+      cancel-in-progress: false
+`));
+    assert.equal(findings.length, 1, group);
+    assert.match(findings[0].message, /unique per run \(github\.run_id\)/u);
+  }
+});
+
+test('an embedded quote inside a literal does not hide the escape', () => {
+  const findings = inspectWorkflow(installJob(`    concurrency:
+      group: \${{ format('it''s-full-{0}', github.run_id) }}
+      cancel-in-progress: false
+`));
+  assert.deepEqual(findings, []);
+});
+
+test('an unbalanced expression quote cannot be verified', () => {
+  const findings = inspectWorkflow(installJob(`    concurrency:
+      group: \${{ format('ci-install-full-{0}, github.run_id) }}
+      cancel-in-progress: false
+`));
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /unique per run \(github\.run_id\)/u);
+});
+
 test('a quoted expression carries the escape', () => {
   const findings = inspectWorkflow(installJob(`    concurrency:
       group: "\${{ format('ci-install-full-{0}', github.run_id) }}"
