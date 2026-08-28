@@ -127,6 +127,20 @@
       "sourceInputPolicy": "not-applicable",
       "generatedProjection": null,
       "harnessProjection": null
+    },
+    {
+      "repository": "qwts/jwt-decoder",
+      "metadataSystem": "none",
+      "sourceInputPolicy": "not-applicable",
+      "generatedProjection": null,
+      "harnessProjection": null
+    },
+    {
+      "repository": "qwts/moonsweeper",
+      "metadataSystem": "none",
+      "sourceInputPolicy": "not-applicable",
+      "generatedProjection": null,
+      "harnessProjection": null
     }
   ]
 }

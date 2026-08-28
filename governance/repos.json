@@ -151,6 +151,24 @@
       "sharedCi": false,
       "delta": "Playwright gates per ?state= fixture, axe-core at WCAG 2.1 AA, and a pseudo-localization build.",
       "note": "Electron Mermaid document renderer; recorded 2026-08-22 after an audit found it was the only qwts repo absent from this manifest. Promoted 2026-08-23 after the baseline seed, leftover baseline files, CodeQL advanced setup (ENG-0149), and the 13 roster Apps installed."
+    },
+    {
+      "name": "jwt-decoder",
+      "visibility": "public",
+      "publish": true,
+      "status": "onboarding",
+      "sharedCi": false,
+      "delta": "",
+      "note": "Public Chromium JWT inspector; recorded 2026-08-27 after an audit found it absent from this manifest. Onboarding: baseline files not yet seeded, and CodeQL is not yet an own-workflow (ENG-0149)."
+    },
+    {
+      "name": "moonsweeper",
+      "visibility": "public",
+      "publish": true,
+      "status": "onboarding",
+      "sharedCi": false,
+      "delta": "",
+      "note": "Public minesweeper Chromium extension; recorded 2026-08-27 after an audit found it absent from this manifest. Onboarding: baseline files not yet seeded, and CodeQL is not yet an own-workflow (ENG-0149)."
     }
   ]
 }
