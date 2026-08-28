@@ -267,7 +267,7 @@ test('only the reviewed projection identity classifies as generated release outp
 const harnessSource = 'e7c2c4992f8472dfced79afc258f4ad18bf226ad';
 const managedHarnessFiles = [
   { filename: '.codex/config.toml' },
-  { filename: 'tools/agent-guard/run-guarded.mjs' },
+  { filename: '.claude/settings.json' },
 ];
 
 const harnessPullRequest = (overrides = {}) => releasePullRequest({

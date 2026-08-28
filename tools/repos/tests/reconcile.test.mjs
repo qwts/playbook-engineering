@@ -191,14 +191,14 @@ test('every governed harness file is both drift-checked and seeded from the root
 });
 
 test('a missing managed ignore is seeded from the effective manifest projection', () => {
-  const excluded = 'tools/agent-guard/run-guarded.mjs';
+  const excluded = '.cursor/hooks.json';
   const content = baselineSeedContent(
     ROOT,
     { source: '.prettierignore', target: '.prettierignore' },
     { name: 'fixture', codexSync: { exclude: [excluded] } },
   );
   assert.match(content, /^# governed:agent-harness-format:start$/mu);
-  assert.match(content, /^tools\/agent-guard\/lib\/leases\.mjs$/mu);
+  assert.match(content, /^\.claude\/settings\.json$/mu);
   assert.doesNotMatch(content, new RegExp(`^${excluded.replaceAll('.', '\\.')}$`, 'mu'));
   assert.match(content, /^# governed:agent-harness-format:end$/mu);
 });

@@ -564,13 +564,19 @@ test('the retired inventory is disjoint from every currently managed path', () =
 test('retirement stays a durable record of every path the sync stopped managing', () => {
   // The stranded copies from #284 and #286 — and hosted-ci.mjs, managed for a
   // window between two agent-guard fixes — must never silently leave the list;
-  // dropping an entry would orphan downstream copies again.
+  // dropping an entry would orphan downstream copies again. The #331 guard
+  // retraction rides the same mechanism: while ENG-0138 stays Proposed, these
+  // entries are what deletes the consumer copies the sync should not have
+  // shipped.
   for (const path of [
     '.codex/scripts/setup.sh',
     '.codex/scripts/gh.zsh',
     'governance/agent-models.json',
     'tools/models/registry.mjs',
     'tools/agent-guard/lib/hosted-ci.mjs',
+    'tools/agent-guard/guard-agent-command.mjs',
+    'tools/agent-guard/run-guarded.mjs',
+    'tools/agent-guard/tests/conformance.test.mjs',
   ]) {
     assert.ok(RETIRED_HARNESS_FILES.includes(path), `${path} left the retired inventory`);
   }

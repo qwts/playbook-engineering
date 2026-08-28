@@ -1,12 +1,12 @@
-// Conformance: this repo is still actually protected.
+// Conformance: the guard implementation is intact, and the retraction holds.
 //
-// Ships WITH the guard into every governed repo and must be wired into that
-// repo's own test command. It is a contract test, not a style check, and it
-// exists because the failure it checks for has already happened once: commit
-// `e1d86f6a` ("governance: sync .codex from playbook-engineering") replaced
-// `.claude/settings.json` wholesale in qwts/overlook and silently dropped the
-// process-guard hook, leaving AGENTS.md and the docs describing an enforcement
-// point that no longer existed. A wholesale rewrite now fails here first.
+// The guard shipped fleet-wide while its decision (ENG-0138) was still
+// Proposed; #331 retracted it. Only accepted decisions ship, so this file no
+// longer travels with the harness sync — it lives here, in the repo that owns
+// the implementation. The harness wiring assertions are now inverted: they
+// fail if a guard hook entry quietly returns to a synced adapter, because
+// that would re-ship the guard downstream on the next sync while the decision
+// record still says Proposed.
 //
 // Every assertion is cheap and offline. Nothing here starts a suite, spawns a
 // worker, or allocates memory — a conformance test for a memory guard that
@@ -54,7 +54,7 @@ describe('agent-guard conformance (ENG-0138)', () => {
       'tools/agent-guard/lib/protocol.mjs',
       'tools/agent-guard/lib/system-memory.mjs',
     ]) {
-      assert.ok(existsSync(path.join(root, file)), `${file} must exist — the guard is a governed file, not an optional one`);
+      assert.ok(existsSync(path.join(root, file)), `${file} must exist — the retraction leaves the implementation in this repo`);
     }
     const hook = readFileSync(path.join(root, 'tools/agent-guard/guard-agent-command.mjs'), 'utf8');
     assert.match(hook, /userMessage: `Blocked by the machine memory guard \(see \$\{GUARD_GUIDE\}\)\.`/u);
@@ -73,46 +73,24 @@ describe('agent-guard conformance (ENG-0138)', () => {
     assert.doesNotMatch(runner, /\brecordLanePeak\b/u, 'a successful polled run must not seed automatic history');
   });
 
-  test('Claude Code registers the guard on Bash', () => {
-    const settings = json('.claude/settings.json');
-    const bash = (settings.hooks?.PreToolUse ?? []).find((entry) => entry.matcher === 'Bash');
-    assert.ok(bash, '.claude/settings.json must register a PreToolUse hook matching Bash');
-    assert.ok(
-      hookCommands([bash]).some((command) => command.includes('guard-agent-command.mjs') && command.includes('--protocol=claude')),
-      'the Bash PreToolUse hook must invoke tools/agent-guard/guard-agent-command.mjs --protocol=claude',
-    );
-  });
-
-  test('Cursor registers the same guard on its own protocol', () => {
-    const hooks = json('.cursor/hooks.json');
-    assert.ok(
-      (hooks.hooks?.beforeShellExecution ?? []).some((hook) => (hook.command ?? '').includes('guard-agent-command.mjs') && (hook.command ?? '').includes('--protocol=cursor')),
-      '.cursor/hooks.json must invoke the guard with --protocol=cursor',
-    );
-  });
-
-  test('Codex registers it too — a guard only one harness honours is not a guard', () => {
-    const hooks = json('.codex/hooks.json');
-    assert.ok(
-      hookCommands(hooks.hooks?.PreToolUse).some((command) => command.includes('guard-agent-command.mjs') && command.includes('--protocol=codex')),
-      '.codex/hooks.json must invoke the guard with --protocol=codex',
-    );
-  });
-
-  test('Copilot registers the guard in .github/hooks (#290)', () => {
-    const hooks = json('.github/hooks/agent-guard.json');
-    assert.ok(
-      (hooks.hooks?.preToolUse ?? []).some((hook) => [hook.bash, hook.powershell].every((command) => (command ?? '').includes('guard-agent-command.mjs') && (command ?? '').includes('--protocol=copilot'))),
-      '.github/hooks/agent-guard.json must invoke the guard with --protocol=copilot on preToolUse, for bash and powershell hosts alike',
-    );
-  });
-
-  test('Windsurf (Devin desktop) registers it on pre_run_command (#290)', () => {
-    const hooks = json('.windsurf/hooks.json');
-    assert.ok(
-      (hooks.hooks?.pre_run_command ?? []).some((hook) => [hook.command, hook.powershell].every((command) => (command ?? '').includes('guard-agent-command.mjs') && (command ?? '').includes('--protocol=windsurf'))),
-      '.windsurf/hooks.json must invoke the guard with --protocol=windsurf on pre_run_command, for both shell hosts',
-    );
+  test('no synced adapter registers the guard while ENG-0138 is Proposed (#331)', () => {
+    // One assertion per harness adapter the sync still manages, plus the two
+    // adapters whose only entry was the guard. An entry reappearing in any of
+    // them would re-ship the guard fleet-wide on the next sync, which is
+    // exactly what the retraction exists to prevent.
+    const adapters = [
+      ['.claude/settings.json', (hooks) => hookCommands(hooks.hooks?.PreToolUse)],
+      ['.codex/hooks.json', (hooks) => hookCommands(hooks.hooks?.PreToolUse)],
+      ['.cursor/hooks.json', (hooks) => (hooks.hooks?.beforeShellExecution ?? []).map((hook) => hook.command ?? '')],
+      ['.github/hooks/agent-guard.json', (hooks) => (hooks.hooks?.preToolUse ?? []).flatMap((hook) => [hook.bash ?? '', hook.powershell ?? ''])],
+      ['.windsurf/hooks.json', (hooks) => (hooks.hooks?.pre_run_command ?? []).flatMap((hook) => [hook.command ?? '', hook.powershell ?? ''])],
+    ];
+    for (const [relative, commandsOf] of adapters) {
+      assert.ok(
+        commandsOf(json(relative)).every((command) => !command.includes('guard-agent-command.mjs')),
+        `${relative} must not invoke guard-agent-command.mjs — the guard is retracted while ENG-0138 is Proposed (#331)`,
+      );
+    }
   });
 
   test('the copilot and windsurf dialects deny through their own contracts', () => {
