@@ -156,19 +156,19 @@
       "name": "jwt-decoder",
       "visibility": "public",
       "publish": true,
-      "status": "onboarding",
+      "status": "active",
       "sharedCi": false,
       "delta": "",
-      "note": "Public Chromium JWT inspector; recorded 2026-08-27 after an audit found it absent from this manifest. Onboarding: baseline files not yet seeded, and CodeQL is not yet an own-workflow (ENG-0149)."
+      "note": "Public Chromium JWT inspector; recorded 2026-08-27 after an audit found it absent from this manifest. Promoted 2026-08-27 after the baseline seed, MIT README/LICENSE, own-workflow CodeQL (ENG-0149), default-setup disable, and the memory-guard strip."
     },
     {
       "name": "moonsweeper",
       "visibility": "public",
       "publish": true,
-      "status": "onboarding",
+      "status": "active",
       "sharedCi": false,
       "delta": "",
-      "note": "Public minesweeper Chromium extension; recorded 2026-08-27 after an audit found it absent from this manifest. Onboarding: baseline files not yet seeded, and CodeQL is not yet an own-workflow (ENG-0149)."
+      "note": "Public minesweeper Chromium extension; recorded 2026-08-27 after an audit found it absent from this manifest. Promoted 2026-08-27 after the baseline seed, ISC LICENSE, own-workflow CodeQL (ENG-0149), default-setup disable, and the memory-guard strip."
     }
   ]
 }
