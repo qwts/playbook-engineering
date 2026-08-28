@@ -35,27 +35,6 @@ export const GOVERNED_HOOK_ADAPTER_FILES = [
   ...GOVERNED_WINDSURF_FILES,
 ];
 
-// The machine memory guard (ENG-0138). Shipped as governed files rather than
-// left to each repo to copy, because two hand-maintained copies is what the
-// record is fixing: overlook and image-trail each carried their own drifted
-// fork of the old guard. Every copy here is byte-identical and sha-verified by
-// the sync, so the repos coordinate through one per-machine lease directory
-// with one agreed protocol — a copy that drifted would silently mis-budget.
-export const GOVERNED_AGENT_GUARD_FILES = [
-  'tools/agent-guard/arbiter.mjs',
-  'tools/agent-guard/guard-agent-command.mjs',
-  'tools/agent-guard/run-guarded.mjs',
-  'tools/agent-guard/lib/budget.mjs',
-  'tools/agent-guard/lib/leases.mjs',
-  'tools/agent-guard/lib/policy.mjs',
-  'tools/agent-guard/lib/protocol.mjs',
-  'tools/agent-guard/lib/system-memory.mjs',
-  // Ships with the tool so a repo cannot end up with the guard but no proof it
-  // is still wired in — the failure mode ENG-0138 inherits from the sync that
-  // once replaced .claude/settings.json wholesale and dropped the guard hook.
-  'tools/agent-guard/tests/conformance.test.mjs',
-];
-
 // What the fleet sync keeps current downstream: both harness layers, so a
 // change here reaches every governed repo instead of only the next repo to be
 // onboarded. The manifest field that scopes it stays `codexSync` — renaming it
@@ -68,7 +47,6 @@ export const GOVERNED_AGENT_GUARD_FILES = [
 export const GOVERNED_FORMAT_EXEMPT_FILES = [
   ...GOVERNED_CODEX_FILES,
   ...GOVERNED_HOOK_ADAPTER_FILES,
-  ...GOVERNED_AGENT_GUARD_FILES,
 ];
 
 export const GOVERNED_HARNESS_FILES = [
@@ -111,6 +89,18 @@ export const RETIRED_HARNESS_FILES = [
   // Managed briefly between "require OIDC for hosted CI bypass" and "remove
   // replayable CI exemption"; any sync in that window shipped it downstream.
   'tools/agent-guard/lib/hosted-ci.mjs',
+  // #331: the machine memory guard shipped while its decision (ENG-0138) was
+  // still Proposed. Only accepted decisions ship — the implementation stays in
+  // this repo, and the sync retracts every consumer copy it distributed.
+  'tools/agent-guard/arbiter.mjs',
+  'tools/agent-guard/guard-agent-command.mjs',
+  'tools/agent-guard/run-guarded.mjs',
+  'tools/agent-guard/lib/budget.mjs',
+  'tools/agent-guard/lib/leases.mjs',
+  'tools/agent-guard/lib/policy.mjs',
+  'tools/agent-guard/lib/protocol.mjs',
+  'tools/agent-guard/lib/system-memory.mjs',
+  'tools/agent-guard/tests/conformance.test.mjs',
   // #284: the model routing registry moved to agent-bot-identity.
   'governance/agent-models.json',
   'tools/models/registry.mjs',

@@ -5,8 +5,9 @@ tool on them. This guard is what makes that budget real: it derives limits from
 the machine, checks live availability and swap before a run starts, and
 coordinates through per-machine leases so concurrent agent sessions can see each
 other. Decision record: [ENG-0138](../decisions/ENG-0138-machine-scoped-agent-memory-budget.md).
-The tooling lives in [`tools/agent-guard/`](../../tools/agent-guard/run-guarded.mjs)
-and reaches governed repos through the fleet harness sync.
+The tooling lives in [`tools/agent-guard/`](../../tools/agent-guard/run-guarded.mjs).
+ENG-0138 is still Proposed, and only accepted decisions ship: the guard is not
+distributed by the harness sync and no harness adapter registers it (#331).
 
 **The wrapper has no CI exemption.** Environment markers, runner-looking paths,
 and GitHub OIDC job credentials are all transferable to another process, so
@@ -144,29 +145,16 @@ exit non-zero.
 | `AGENT_GUARD_STATE_DIR` | Lease directory. **Tests only** — pointing a session elsewhere gives it a private budget nothing can see, which is the per-worktree bug again |
 | `AGENT_GUARDED` | Set by the guard for its own children, carrying the id of the lease it holds, so nested guarded scripts pass through. Honoured only when it names a live lease bound to the caller's own process group — a copied or hand-supplied value from an unrelated process is ignored and the run is guarded normally. Blocked for agents |
 
-## Adopting it in a repo
+## Deployment status
 
-The files arrive by harness sync, including the hook adapters that wire the
-guard into each harness: `.claude/settings.json` (Claude Code),
-`.codex/hooks.json` (Codex), `.cursor/hooks.json` (Cursor),
-`.github/hooks/agent-guard.json` (Copilot CLI and coding agent), and
-`.windsurf/hooks.json` (Windsurf / Devin desktop Cascade). Known variance:
-Devin Local, Cascade's successor, reads a different hooks format and is not
-yet wired — a session there runs unguarded until an adapter exists (#290).
-A consuming repo then:
-
-1. Points its guarded npm scripts at `tools/agent-guard/run-guarded.mjs` and
-   deletes any local fork of the old guard.
-2. Points hosted workflows at the underlying CI scripts rather than the guarded
-   local aliases. No CI marker, runner path, or job credential changes wrapper
-   policy.
-3. Removes heavy lanes from `permissions.allow` in `.claude/settings.json` —
-   pre-approving them is how they became routine.
-4. Adds `tools/agent-guard/tests/conformance.test.mjs` to its test command. This
-   is not optional: it is what fails a future sync that drops the hook wiring,
-   which has already happened once.
-5. Rewrites its `AGENTS.md` validation section to say push-and-let-CI-verify
-   rather than run-the-suites-locally.
+The guard shipped fleet-wide through the harness sync while ENG-0138 was still
+Proposed, and #331 retracted it: the files moved to the retired-path inventory,
+so the next sync deletes the consumer copies, and the harness adapters
+(`.claude/settings.json`, `.codex/hooks.json`, `.cursor/hooks.json`,
+`.github/hooks/agent-guard.json`, `.windsurf/hooks.json`) no longer register
+the hook anywhere. The implementation and its conformance test stay in this
+repository; if ENG-0138 is ever accepted, distribution is a new decision to
+take then, not a default to restore.
 
 ## Limitations
 
