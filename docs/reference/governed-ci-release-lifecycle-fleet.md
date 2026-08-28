@@ -34,6 +34,8 @@ generated-projection identity of each. Coverage is a contract test.
 | `localnotes` | None | Not applicable; onboarding, carries no CI yet. |
 | `universal-agentic-workflow` | None | Not applicable; private during M0 cleanup and onboarding. |
 | `diagram-dreamer` | None | Not applicable; onboarding, no release metadata system. |
+| `jwt-decoder` | None | Not applicable; onboarding, no release metadata system. |
+| `moonsweeper` | None | Not applicable; onboarding, no release metadata system. |
 
 ## Repair handoff for a Changesets repository
 
@@ -79,7 +81,7 @@ Repository-specific notes:
 
 `playbook-engineering`, `quorum`, `agent-bot-identity`, `codex-rules-editor`,
 `playbook-dashboard`, `agentic-code-analysis`, `localnotes`,
-`universal-agentic-workflow`, and `diagram-dreamer` carry `metadataSystem: "none"` and no generated
+`universal-agentic-workflow`, `diagram-dreamer`, `jwt-decoder`, and `moonsweeper` carry `metadataSystem: "none"` and no generated
 projection. They are the negative case: a migration must not add Changesets, a
 release-file check, or a bot exception to them, and their existing lifecycle,
 actor, fork, exact-SHA, CodeQL, and deployment gates are unchanged.
