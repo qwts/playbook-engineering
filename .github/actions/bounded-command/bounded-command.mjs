@@ -1,12 +1,29 @@
 #!/usr/bin/env node
 
 import process from 'node:process';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
-import { isAbsolute, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const TIMEOUT_EXIT_CODE = 124;
+
+export function normalizeLaunch({
+  executable,
+  args,
+  platform = process.platform,
+  nodeExecutable = process.execPath,
+  npmCliPath = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  pathExists = existsSync,
+}) {
+  if (platform !== 'win32' || !['npm', 'npm.cmd'].includes(executable.toLowerCase())) {
+    return { executable, args };
+  }
+  if (!pathExists(npmCliPath)) {
+    throw new Error(`active Node installation does not contain npm CLI at ${npmCliPath}`);
+  }
+  return { executable: nodeExecutable, args: [npmCliPath, ...args] };
+}
 
 const delay = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds));
 
@@ -232,11 +249,12 @@ async function main() {
   const requestedCwd = process.env.BOUNDED_WORKING_DIRECTORY ?? '.';
   const cwd = isAbsolute(requestedCwd) ? requestedCwd : resolve(workspace, requestedCwd);
   const args = argumentsInput(process.env.BOUNDED_ARGUMENTS_JSON ?? '[]');
+  const launch = normalizeLaunch({ executable, args });
 
   const result = await executeBounded({
     task,
-    executable,
-    args,
+    executable: launch.executable,
+    args: launch.args,
     cwd,
     timeoutMs: timeoutSeconds * 1_000,
     attempts,

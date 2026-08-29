@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import {
   TIMEOUT_EXIT_CODE,
   executeBounded,
+  normalizeLaunch,
 } from '../../../.github/actions/bounded-command/bounded-command.mjs';
 
 const fixture = new URL('./fixtures/stubborn-tree.mjs', import.meta.url).pathname;
@@ -76,6 +77,49 @@ test('programmatic callers cannot configure zero attempts', async () => {
       stdio: 'ignore',
     }),
     /attempts must be an integer between 1 and 10/u,
+  );
+});
+
+test('Windows npm command shims run through the active Node npm CLI without a shell', () => {
+  const nodeExecutable = 'C:\\hostedtoolcache\\node.exe';
+  const npmCliPath = 'C:\\hostedtoolcache\\node_modules\\npm\\bin\\npm-cli.js';
+  for (const executable of ['npm', 'npm.cmd', 'NPM.CMD']) {
+    assert.deepEqual(
+      normalizeLaunch({
+        executable,
+        args: ['ci', '--ignore-scripts'],
+        platform: 'win32',
+        nodeExecutable,
+        npmCliPath,
+        pathExists: () => true,
+      }),
+      { executable: nodeExecutable, args: [npmCliPath, 'ci', '--ignore-scripts'] },
+    );
+  }
+});
+
+test('launch normalization leaves POSIX npm and non-npm Windows executables unchanged', () => {
+  assert.deepEqual(normalizeLaunch({ executable: 'npm', args: ['ci'], platform: 'linux' }), {
+    executable: 'npm',
+    args: ['ci'],
+  });
+  assert.deepEqual(normalizeLaunch({ executable: 'tool.exe', args: ['literal&argument'], platform: 'win32' }), {
+    executable: 'tool.exe',
+    args: ['literal&argument'],
+  });
+});
+
+test('Windows npm normalization fails closed when the active npm CLI is absent', () => {
+  assert.throws(
+    () =>
+      normalizeLaunch({
+        executable: 'npm.cmd',
+        args: ['ci'],
+        platform: 'win32',
+        npmCliPath: 'C:\\missing\\npm-cli.js',
+        pathExists: () => false,
+      }),
+    /active Node installation does not contain npm CLI/u,
   );
 });
 

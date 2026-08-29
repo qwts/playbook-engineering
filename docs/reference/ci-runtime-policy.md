@@ -23,6 +23,9 @@ dependency and tool setup uses the shared `bounded-command` action from
 `playbook-engineering`, pinned by immutable commit SHA in consumers. It:
 
 - launches an explicit executable and JSON arguments without a shell;
+- maps Windows `npm`/`npm.cmd` launchers to the active Node distribution's
+  `npm-cli.js`, because command scripts require `cmd.exe`, while preserving the
+  shell-free literal-argument boundary;
 - applies a per-attempt deadline, finite attempt count, and finite retry delay;
 - captures and terminates the process tree, including POSIX descendants that
   detach into another process group or session; and

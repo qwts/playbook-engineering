@@ -154,6 +154,28 @@ jobs:
       use-local-tooling: true
       fail-on-error: true
 
+  bounded-command-windows:
+    name: Bounded command / Windows npm
+    needs: policy
+    if: needs.policy.outputs.run_full == 'true' || needs.policy.outputs.run_post_merge == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Launch npm command shim through the bounded runner
+        uses: ./.github/actions/bounded-command
+        with:
+          task: Verify Windows npm command shim
+          executable: npm.cmd
+          arguments-json: '["--version"]'
+          timeout-seconds: '30'
+
   codeql:
     needs: [policy, merge-evidence, preflight-evidence]
     if: >-
@@ -209,7 +231,7 @@ jobs:
 
   gate:
     name: CI
-    needs: [policy, merge-evidence, preflight-evidence, full, docs-gov, dependency-inventory, codeql, post-merge]
+    needs: [policy, merge-evidence, preflight-evidence, full, docs-gov, dependency-inventory, bounded-command-windows, codeql, post-merge]
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -221,6 +243,7 @@ jobs:
           FULL: ${{ needs.full.result }}
           DOCS_GOV: ${{ needs.docs-gov.result }}
           INVENTORY: ${{ needs.dependency-inventory.result }}
+          BOUNDED_WINDOWS: ${{ needs.bounded-command-windows.result }}
           CODEQL: ${{ needs.codeql.result }}
           PREFLIGHT: ${{ needs.preflight-evidence.result }}
           PREFLIGHT_VALIDATED: ${{ needs.preflight-evidence.outputs.validated }}
@@ -228,6 +251,7 @@ jobs:
           POST_MERGE: ${{ needs.post-merge.result }}
         run: |
           test "$POLICY" = success
+          test "$BOUNDED_WINDOWS" = success
           case "$MODE" in
             full)
               if [ "$PREFLIGHT_VALIDATED" = true ]; then
