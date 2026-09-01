@@ -34,7 +34,14 @@
         "exclude": [],
         "preserveJsonArrayEntries": {
           ".claude/settings.json": [
-            "scripts/guard-session-context.mjs"
+            "scripts/guard-session-context.mjs",
+            "scripts/guard-agent-command.mjs"
+          ],
+          ".codex/hooks.json": [
+            "scripts/guard-agent-command.mjs"
+          ],
+          ".cursor/hooks.json": [
+            "scripts/guard-agent-command.mjs"
           ]
         }
       },
