@@ -404,7 +404,7 @@ test('Image Trail composes independent SessionStart owners through canonical and
   const entry = manifest.repos.find((repo) => repo.name === fixture.repository);
   const markers = entry?.codexSync?.preserveJsonArrayEntries?.[fixture.path];
 
-  assert.deepEqual(markers, [fixture.marker]);
+  assert.ok(markers?.includes(fixture.marker));
 
   const source = (identity, schema) => canonical(fixture.path, `${JSON.stringify({
     $schema: schema,
@@ -471,6 +471,72 @@ test('Image Trail composes independent SessionStart owners through canonical and
     1,
   );
   assert.equal(second.content.toString('utf8'), third.content.toString('utf8'));
+});
+
+test('Image Trail keeps its process guard in every managed command adapter', async () => {
+  const fixture = JSON.parse(readFileSync(
+    new URL('./fixtures/image-trail-process-guard-hooks.json', import.meta.url),
+    'utf8',
+  ));
+  const manifest = JSON.parse(readFileSync(
+    new URL('../../../governance/repos.json', import.meta.url),
+    'utf8',
+  ));
+  const entry = manifest.repos.find((repo) => repo.name === fixture.repository);
+  const canonicalFiles = new Map();
+  const targetTree = new Map();
+  const targetContents = new Map();
+
+  for (const adapter of fixture.adapters) {
+    const source = canonical(adapter.path, readFileSync(adapter.path, 'utf8'));
+    const target = JSON.parse(source.content.toString('utf8'));
+    target.hooks[adapter.event] = [
+      adapter.entry,
+      adapter.entry,
+      ...target.hooks[adapter.event],
+    ];
+    const targetContent = Buffer.from(`${JSON.stringify(target, null, 2)}\n`);
+    canonicalFiles.set(adapter.path, source);
+    targetContents.set(adapter.path, targetContent);
+    targetTree.set(adapter.path, {
+      path: adapter.path,
+      type: 'blob',
+      sha: gitBlobSha(targetContent),
+      mode: '100644',
+    });
+  }
+
+  const paths = fixture.adapters.map((adapter) => adapter.path);
+  const files = await materializeManagedFiles(
+    canonicalFiles,
+    targetTree,
+    paths,
+    async (target) => targetContents.get(target.path),
+    entry?.codexSync?.preserveJsonArrayEntries,
+  );
+
+  for (const adapter of fixture.adapters) {
+    const markers = entry?.codexSync?.preserveJsonArrayEntries?.[adapter.path];
+    const source = canonicalFiles.get(adapter.path);
+    const managed = JSON.parse(source.content.toString('utf8')).hooks[adapter.event];
+    const output = files.get(adapter.path);
+    const merged = JSON.parse(output.content.toString('utf8'));
+    const hooks = merged.hooks[adapter.event];
+    const processGuards = hooks.filter((hook) => JSON.stringify(hook).includes(fixture.marker));
+    const governedHooks = hooks.filter((hook) => !JSON.stringify(hook).includes(fixture.marker));
+
+    assert.ok(markers?.includes(fixture.marker), `${adapter.path} does not declare the process guard`);
+    assert.equal(processGuards.length, 1, `${adapter.path} must keep one process guard`);
+    assert.deepEqual(processGuards[0], adapter.entry, `${adapter.path} changed the local guard`);
+    assert.deepEqual(governedHooks, managed, `${adapter.path} changed the governed hooks`);
+    assert.equal(
+      mergeManagedFile(source, output.content, {
+        preserveArrayEntriesContaining: markers,
+      }).content.toString('utf8'),
+      output.content.toString('utf8'),
+      `${adapter.path} is not idempotent`,
+    );
+  }
 });
 
 test('Claude composition keeps repo configuration while replacing governed hooks', () => {
