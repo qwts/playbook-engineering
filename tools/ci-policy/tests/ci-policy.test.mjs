@@ -62,7 +62,7 @@ test('the human, named automation, and active roster Apps are authorized', () =>
     'chores-dumb[bot]',
     'dependabot[bot]',
     'qwts-codex-agent[bot]',
-    'qwts-codex-sol-agent[bot]',
+    'qwts-goose-agent[bot]',
   ]) {
     assert.equal(isAllowedActor(actor, allowedActors), true, actor);
   }

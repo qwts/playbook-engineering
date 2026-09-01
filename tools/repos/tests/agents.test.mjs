@@ -24,7 +24,7 @@ test('drift verifies exactly the active roster — no hardcoded list', () => {
   const checkedIn = loadAgents(join(ROOT, 'governance', 'agents.json'));
   assert.deepEqual(apps(ROOT), activeAgentSlugs(checkedIn));
   assert.ok(
-    apps(ROOT).includes('qwts-claude-fable-agent'),
+    apps(ROOT).includes('qwts-aider-agent'),
     'an agent added to the roster is checked without touching drift',
   );
 });

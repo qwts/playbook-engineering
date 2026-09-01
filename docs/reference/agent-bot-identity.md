@@ -10,9 +10,14 @@ troubleshooting ([ENG-0128](../decisions/ENG-0128-agent-bot-runtime-ownership.md
 
 ## Organization identity model
 
-- Every independently attributable agent that authors work has its own App.
-- Harness detection selects a default App; a worktree pin may refine it to a
-  model-level App ([ENG-0079](../decisions/ENG-0079-per-agent-identity.md)).
+- Every independently attributable agent has its own App; the active roster
+  is **harness-level** — one App per harness, no active model-level
+  identities ([ENG-0339](../decisions/ENG-0339-os-account-determines-persona.md)).
+- Resolution selects the harness's default App, the macOS account name being
+  the fallback detection input. A worktree pin
+  ([ENG-0079](../decisions/ENG-0079-per-agent-identity.md)) remains the
+  explicit override but must name an active App: reactivating a retired
+  slug means restoring its row, App, and installations — not pinning it.
 - Agents use short-lived installation tokens. Humans never author through an
   agent App, and agent Apps never approve pull requests.
 - Agent work happens in linked bot-territory worktrees. Primary checkouts stay
@@ -27,15 +32,26 @@ source of truth. Drift validates every active App against every active and
 onboarding governed repository; retired identities keep their rows but leave
 the active coverage set.
 
-Current active identities:
+Current active identities — one per harness
+([ENG-0339](../decisions/ENG-0339-os-account-determines-persona.md): the
+harness-level slug is also the macOS agent account name):
 
-- Claude Code: `qwts-claude-agent`, `qwts-claude-fable-agent`,
-  `qwts-claude-haiku-agent`, `qwts-claude-opus-agent`, and
-  `qwts-claude-sonnet-agent`.
-- Codex: `qwts-codex-agent`, `qwts-codex-luna-agent`,
-  `qwts-codex-sol-agent`, and `qwts-codex-terra-agent`.
-- Other harnesses: `qwts-copilot-agent`, `qwts-cursor-agent`,
-  `qwts-devin-agent`, `qwts-muse-agent`, and `qwts-vscode-agent`.
+- Established: `qwts-claude-agent` (Claude Code), `qwts-codex-agent` (Codex),
+  `qwts-copilot-agent`, `qwts-cursor-agent`, `qwts-devin-agent`, and
+  `qwts-muse-agent`.
+- Fleet expansion (2026-09-01; Apps created and installed fleet-wide):
+  `qwts-antigravity-agent`,
+  `qwts-cline-agent`, `qwts-deepseek-agent`, `qwts-droid-agent`
+  (factory-droid), `qwts-goose-agent`, `qwts-hermes-agent`,
+  `qwts-kiro-agent`, `qwts-opencode-agent`, `qwts-pi-agent`,
+  `qwts-qwen-agent` (qwen-code), `qwts-warp-agent`, `qwts-zcode-agent`,
+  `qwts-amp-agent`, and `qwts-aider-agent`.
+
+Retired 2026-09-01 with the move to harness-level identity (rows kept —
+offboarding, not deletion): `qwts-claude-fable-agent`,
+`qwts-claude-haiku-agent`, `qwts-claude-opus-agent`,
+`qwts-claude-sonnet-agent`, `qwts-codex-luna-agent`, `qwts-codex-sol-agent`,
+`qwts-codex-terra-agent`, and `qwts-vscode-agent`.
 
 Adding an App requires one roster row with its exact slug, harness, and active
 status. Removing access means retiring the row, revoking or narrowing the App,
