@@ -10,17 +10,14 @@ troubleshooting ([ENG-0128](../decisions/ENG-0128-agent-bot-runtime-ownership.md
 
 ## Organization identity model
 
-- Every independently attributable agent that authors work has its own App,
-  and the active roster is **harness-level**: one App per harness, no active
-  model-level identities
-  ([ENG-0339](../decisions/ENG-0339-os-account-determines-persona.md)).
-- Resolution selects the harness's default App — the macOS account name is
-  the fallback detection input under ENG-0339, with environment detection
-  behind it. A worktree pin ([ENG-0079](../decisions/ENG-0079-per-agent-identity.md))
-  remains the explicit override, but it may only name an **active** roster
-  App; the retired model-level slugs are not valid pin targets. Reactivating
-  finer-grained identity means restoring a roster row to active (with its App
-  and installations), not just pinning a retired slug.
+- Every independently attributable agent has its own App; the active roster
+  is **harness-level** — one App per harness, no active model-level
+  identities ([ENG-0339](../decisions/ENG-0339-os-account-determines-persona.md)).
+- Resolution selects the harness's default App, the macOS account name being
+  the fallback detection input. A worktree pin
+  ([ENG-0079](../decisions/ENG-0079-per-agent-identity.md)) remains the
+  explicit override but must name an active App: reactivating a retired
+  slug means restoring its row, App, and installations — not pinning it.
 - Agents use short-lived installation tokens. Humans never author through an
   agent App, and agent Apps never approve pull requests.
 - Agent work happens in linked bot-territory worktrees. Primary checkouts stay
@@ -42,8 +39,8 @@ harness-level slug is also the macOS agent account name):
 - Established: `qwts-claude-agent` (Claude Code), `qwts-codex-agent` (Codex),
   `qwts-copilot-agent`, `qwts-cursor-agent`, `qwts-devin-agent`, and
   `qwts-muse-agent`.
-- Fleet expansion (2026-09-01; Apps pending creation and installation, so
-  drift reports them until that completes): `qwts-antigravity-agent`,
+- Fleet expansion (2026-09-01; Apps created and installed fleet-wide):
+  `qwts-antigravity-agent`,
   `qwts-cline-agent`, `qwts-deepseek-agent`, `qwts-droid-agent`
   (factory-droid), `qwts-goose-agent`, `qwts-hermes-agent`,
   `qwts-kiro-agent`, `qwts-opencode-agent`, `qwts-pi-agent`,
