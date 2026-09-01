@@ -10,9 +10,17 @@ troubleshooting ([ENG-0128](../decisions/ENG-0128-agent-bot-runtime-ownership.md
 
 ## Organization identity model
 
-- Every independently attributable agent that authors work has its own App.
-- Harness detection selects a default App; a worktree pin may refine it to a
-  model-level App ([ENG-0079](../decisions/ENG-0079-per-agent-identity.md)).
+- Every independently attributable agent that authors work has its own App,
+  and the active roster is **harness-level**: one App per harness, no active
+  model-level identities
+  ([ENG-0339](../decisions/ENG-0339-os-account-determines-persona.md)).
+- Resolution selects the harness's default App — the macOS account name is
+  the fallback detection input under ENG-0339, with environment detection
+  behind it. A worktree pin ([ENG-0079](../decisions/ENG-0079-per-agent-identity.md))
+  remains the explicit override, but it may only name an **active** roster
+  App; the retired model-level slugs are not valid pin targets. Reactivating
+  finer-grained identity means restoring a roster row to active (with its App
+  and installations), not just pinning a retired slug.
 - Agents use short-lived installation tokens. Humans never author through an
   agent App, and agent Apps never approve pull requests.
 - Agent work happens in linked bot-territory worktrees. Primary checkouts stay
