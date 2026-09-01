@@ -1,0 +1,39 @@
+{
+  "repository": "image-trail",
+  "marker": "scripts/guard-agent-command.mjs",
+  "adapters": [
+    {
+      "path": ".claude/settings.json",
+      "event": "PreToolUse",
+      "entry": {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/guard-agent-command.mjs --protocol=claude"
+          }
+        ]
+      }
+    },
+    {
+      "path": ".codex/hooks.json",
+      "event": "PreToolUse",
+      "entry": {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/scripts/guard-agent-command.mjs\" --protocol=codex"
+          }
+        ]
+      }
+    },
+    {
+      "path": ".cursor/hooks.json",
+      "event": "beforeShellExecution",
+      "entry": {
+        "command": "node scripts/guard-agent-command.mjs --protocol=cursor"
+      }
+    }
+  ]
+}
