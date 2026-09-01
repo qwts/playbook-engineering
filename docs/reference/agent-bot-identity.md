@@ -27,8 +27,8 @@ source of truth. Drift validates every active App against every active and
 onboarding governed repository; retired identities keep their rows but leave
 the active coverage set.
 
-Current active identities — one per harness (ENG-0339, in review as
-[#340](https://github.com/qwts/playbook-engineering/pull/340): the
+Current active identities — one per harness
+([ENG-0339](../decisions/ENG-0339-os-account-determines-persona.md): the
 harness-level slug is also the macOS agent account name):
 
 - Established: `qwts-claude-agent` (Claude Code), `qwts-codex-agent` (Codex),
