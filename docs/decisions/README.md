@@ -91,6 +91,7 @@ principles; it does not waive the lower priorities.
 | [ENG-0269](ENG-0269-trusted-dependency-reuse.md) | Reuse immutable dependency downloads on standard hosted runners | Accepted |
 | [ENG-0279](ENG-0279-immutable-releases-and-repo-lockfiles.md) | Playbook updates ship as immutable releases; repos align by lockfile | Proposed |
 | [ENG-0313](ENG-0313-ci-fan-out-backpressure.md) | Install lanes carry fan-out backpressure, and evidence lanes never queue behind them | Proposed |
+| [ENG-0339](ENG-0339-os-account-determines-persona.md) | The macOS account determines the persona | Proposed |
 
 ## Related
 
