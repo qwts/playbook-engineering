@@ -26,6 +26,20 @@ export const PROFILE_HARNESS_BY_ROSTER = Object.freeze({
   devin: 'devin',
   muse: 'muse',
   vscode: 'vscode',
+  antigravity: 'antigravity',
+  cline: 'cline',
+  deepseek: 'deepseek',
+  'factory-droid': 'droid',
+  goose: 'goose',
+  hermes: 'hermes',
+  kiro: 'kiro',
+  opencode: 'opencode',
+  pi: 'pi',
+  'qwen-code': 'qwen',
+  warp: 'warp',
+  zcode: 'zcode',
+  amp: 'amp',
+  aider: 'aider',
 });
 
 export function defaultSlugFor(account, profileHarness) {

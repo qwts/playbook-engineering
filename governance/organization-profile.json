@@ -4,15 +4,43 @@
   "account_owner": "qwts",
   "minimum_runtime_interface_version": 1,
   "defaults": {
+    "aider": "qwts-aider-agent",
+    "amp": "qwts-amp-agent",
+    "antigravity": "qwts-antigravity-agent",
     "claude": "qwts-claude-agent",
+    "cline": "qwts-cline-agent",
     "codex": "qwts-codex-agent",
     "copilot": "qwts-copilot-agent",
     "cursor": "qwts-cursor-agent",
+    "deepseek": "qwts-deepseek-agent",
     "devin": "qwts-devin-agent",
+    "droid": "qwts-droid-agent",
+    "goose": "qwts-goose-agent",
+    "hermes": "qwts-hermes-agent",
+    "kiro": "qwts-kiro-agent",
     "muse": "qwts-muse-agent",
-    "vscode": "qwts-vscode-agent"
+    "opencode": "qwts-opencode-agent",
+    "pi": "qwts-pi-agent",
+    "qwen": "qwts-qwen-agent",
+    "warp": "qwts-warp-agent",
+    "zcode": "qwts-zcode-agent"
   },
   "identities": [
+    {
+      "slug": "qwts-aider-agent",
+      "harness": "aider",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-amp-agent",
+      "harness": "amp",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-antigravity-agent",
+      "harness": "antigravity",
+      "status": "active"
+    },
     {
       "slug": "qwts-claude-agent",
       "harness": "claude",
@@ -21,21 +49,26 @@
     {
       "slug": "qwts-claude-fable-agent",
       "harness": "claude",
-      "status": "active"
+      "status": "retired"
     },
     {
       "slug": "qwts-claude-haiku-agent",
       "harness": "claude",
-      "status": "active"
+      "status": "retired"
     },
     {
       "slug": "qwts-claude-opus-agent",
       "harness": "claude",
-      "status": "active"
+      "status": "retired"
     },
     {
       "slug": "qwts-claude-sonnet-agent",
       "harness": "claude",
+      "status": "retired"
+    },
+    {
+      "slug": "qwts-cline-agent",
+      "harness": "cline",
       "status": "active"
     },
     {
@@ -46,17 +79,17 @@
     {
       "slug": "qwts-codex-luna-agent",
       "harness": "codex",
-      "status": "active"
+      "status": "retired"
     },
     {
       "slug": "qwts-codex-sol-agent",
       "harness": "codex",
-      "status": "active"
+      "status": "retired"
     },
     {
       "slug": "qwts-codex-terra-agent",
       "harness": "codex",
-      "status": "active"
+      "status": "retired"
     },
     {
       "slug": "qwts-copilot-agent",
@@ -69,8 +102,33 @@
       "status": "active"
     },
     {
+      "slug": "qwts-deepseek-agent",
+      "harness": "deepseek",
+      "status": "active"
+    },
+    {
       "slug": "qwts-devin-agent",
       "harness": "devin",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-droid-agent",
+      "harness": "droid",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-goose-agent",
+      "harness": "goose",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-hermes-agent",
+      "harness": "hermes",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-kiro-agent",
+      "harness": "kiro",
       "status": "active"
     },
     {
@@ -79,8 +137,33 @@
       "status": "active"
     },
     {
+      "slug": "qwts-opencode-agent",
+      "harness": "opencode",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-pi-agent",
+      "harness": "pi",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-qwen-agent",
+      "harness": "qwen",
+      "status": "active"
+    },
+    {
       "slug": "qwts-vscode-agent",
       "harness": "vscode",
+      "status": "retired"
+    },
+    {
+      "slug": "qwts-warp-agent",
+      "harness": "warp",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-zcode-agent",
+      "harness": "zcode",
       "status": "active"
     }
   ]
