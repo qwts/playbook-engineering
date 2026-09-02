@@ -16,6 +16,7 @@
     "devin": "qwts-devin-agent",
     "droid": "qwts-droid-agent",
     "goose": "qwts-goose-agent",
+    "grok": "qwts-grok-agent",
     "hermes": "qwts-hermes-agent",
     "kiro": "qwts-kiro-agent",
     "muse": "qwts-muse-agent",
@@ -119,6 +120,11 @@
     {
       "slug": "qwts-goose-agent",
       "harness": "goose",
+      "status": "active"
+    },
+    {
+      "slug": "qwts-grok-agent",
+      "harness": "grok",
       "status": "active"
     },
     {

@@ -68,6 +68,12 @@
       "note": "goose local, model-independent agent harness."
     },
     {
+      "slug": "qwts-grok-agent",
+      "harness": "grok",
+      "status": "active",
+      "note": "Grok Build (xAI) agent harness."
+    },
+    {
       "slug": "qwts-hermes-agent",
       "harness": "hermes",
       "status": "active",

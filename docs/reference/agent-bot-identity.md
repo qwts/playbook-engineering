@@ -46,6 +46,7 @@ harness-level slug is also the macOS agent account name):
   `qwts-kiro-agent`, `qwts-opencode-agent`, `qwts-pi-agent`,
   `qwts-qwen-agent` (qwen-code), `qwts-warp-agent`, `qwts-zcode-agent`,
   `qwts-amp-agent`, and `qwts-aider-agent`.
+- Added 2026-09-02: `qwts-grok-agent` (Grok Build, xAI).
 
 Retired 2026-09-01 with the move to harness-level identity (rows kept —
 offboarding, not deletion): `qwts-claude-fable-agent`,
