@@ -31,6 +31,7 @@ export const PROFILE_HARNESS_BY_ROSTER = Object.freeze({
   deepseek: 'deepseek',
   'factory-droid': 'droid',
   goose: 'goose',
+  grok: 'grok',
   hermes: 'hermes',
   kiro: 'kiro',
   opencode: 'opencode',

@@ -13,12 +13,12 @@ troubleshooting ([ENG-0128](../decisions/ENG-0128-agent-bot-runtime-ownership.md
 - Every independently attributable agent has its own App; the active roster
   is **harness-level** — one App per harness, no active model-level
   identities ([ENG-0339](../decisions/ENG-0339-os-account-determines-persona.md)).
-- Resolution selects the harness's default App, the macOS account name being
-  the fallback detection input. A worktree pin
+- Resolution picks the harness's default App, with macOS account name as the
+  fallback detection input. A worktree pin
   ([ENG-0079](../decisions/ENG-0079-per-agent-identity.md)) remains the
   explicit override but must name an active App: reactivating a retired
-  slug means restoring its row, App, and installations — not pinning it.
-- Agents use short-lived installation tokens. Humans never author through an
+  slug means restoring its row, App, and installations, not pinning it.
+- Agents use short-lived installation tokens; humans never author through an
   agent App, and agent Apps never approve pull requests.
 - Agent work happens in linked bot-territory worktrees. Primary checkouts stay
   human territory ([ENG-0045](../decisions/ENG-0045-agent-environments-are-bot-territory.md)).
@@ -27,10 +27,10 @@ troubleshooting ([ENG-0128](../decisions/ENG-0128-agent-bot-runtime-ownership.md
 
 ## Roster
 
-[`governance/agents.json`](../../governance/agents.json) is the organization
-source of truth. Drift validates every active App against every active and
-onboarding governed repository; retired identities keep their rows but leave
-the active coverage set.
+[`governance/agents.json`](../../governance/agents.json) is the source of
+truth. Drift validates every active App against every active and onboarding
+governed repository; retired identities keep their rows but leave the active
+set.
 
 Current active identities — one per harness
 ([ENG-0339](../decisions/ENG-0339-os-account-determines-persona.md): the
@@ -46,6 +46,7 @@ harness-level slug is also the macOS agent account name):
   `qwts-kiro-agent`, `qwts-opencode-agent`, `qwts-pi-agent`,
   `qwts-qwen-agent` (qwen-code), `qwts-warp-agent`, `qwts-zcode-agent`,
   `qwts-amp-agent`, and `qwts-aider-agent`.
+- Added 2026-09-02: `qwts-grok-agent` (Grok Build).
 
 Retired 2026-09-01 with the move to harness-level identity (rows kept —
 offboarding, not deletion): `qwts-claude-fable-agent`,
@@ -66,7 +67,7 @@ Each App is owned by `qwts`, installed only on selected repositories, and has:
 - Issues: read and write.
 - Metadata: read.
 
-No App receives approval authority, account-wide installation, user-to-server
+No App receives approval authority, org-wide installation, user-to-server
 OAuth, or unrelated permissions. Every active App must be installed on every
 active and onboarding repository in `governance/repos.json`; a narrower scope
 is drift, not a per-agent exception.
@@ -86,5 +87,5 @@ agent-bot doctor
 
 The mint command's stdout is a credential and must be parsed without logging.
 Missing executables, nonzero exits, malformed JSON, and missing tokens fail
-closed. Installation and CLI details remain in the pinned standalone
+closed. Installation and CLI details are in the pinned standalone
 [README](https://github.com/qwts/agent-bot-identity/blob/9ff7ce00b6a6945c7f249cf7a6ebf37cf58e86ee/README.md).
