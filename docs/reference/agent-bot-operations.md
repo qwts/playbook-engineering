@@ -29,8 +29,8 @@ when the actor cannot be determined. Safety in that class does not require
 journey. Runtime hook behavior is
 [agent-bot-identity#124](https://github.com/qwts/agent-bot-identity/issues/124).
 
-On a durable host, from an `agent-bot-identity` source checkout (primary
-checkout stays human territory):
+On a durable host, from an `agent-bot-identity` source checkout (in the
+owner's account, so it is human territory):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/qwts/playbook-engineering/main/governance/organization-profile.json \

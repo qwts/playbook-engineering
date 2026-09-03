@@ -14,7 +14,7 @@ inherit by default, vary by explicit delta.
 | `.github/CODEOWNERS` | Minimum: `* @qwts` plus explicit `/.github/` ownership. |
 | Feature issue template | The shared [feature-lifecycle](feature-lifecycle.md) form ([ENG-0007](../decisions/ENG-0007-feature-lifecycle-convention.md)); repos may add fields, not drop sections. |
 | `.codex/` | Shared project environment, command rules, and setup/cleanup scripts from this repository; existing repo-specific files are preserved as explicit deltas. |
-| `.claude/settings.json` | Shared Claude Code harness config from this repository — the `WorktreeCreate` hook and the uninstalled identity adapters ([ENG-0128](../decisions/ENG-0128-agent-bot-runtime-ownership.md)). Machine-local overrides belong in the gitignored `.claude/settings.local.json`, never here. |
+| `.claude/settings.json` | Shared Claude Code harness config from this repository — the account-gated `WorktreeCreate` hook (pins only inside a `qwts-*-agent` account, [ENG-0339](../decisions/ENG-0339-os-account-determines-persona.md)) and the uninstalled identity adapters ([ENG-0128](../decisions/ENG-0128-agent-bot-runtime-ownership.md)). Machine-local overrides belong in the gitignored `.claude/settings.local.json`, never here. |
 | `.prettierignore` | Repository-owned rules plus the marked governance block. Synchronization refreshes only that block, which exempts the byte-managed harness inventory from consumer formatters while preserving every local rule outside it. The source repository's `lint:synced` gate owns language and syntax validation for those files. |
 
 ## Required when applicable

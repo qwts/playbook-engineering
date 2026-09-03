@@ -48,6 +48,13 @@ unattended, rather than sessions launched by hand from the owner's desktop.
    worktree in a territory directory no longer resolves to the harness App by
    detection.
 
+   Worktrees in the owner's account are ordinary human worktrees: the
+   governed `WorktreeCreate` hook exits without pinning unless the account
+   short name matches `qwts-*-agent`, and no guard restricts where a delegate
+   commits. Identity there is stated, never inferred: the owner says per task
+   whether the harness is the bot (`--app`, `GH_AGENT_APP`, or a deliberate
+   pin) or the delegate, the default.
+
    Delegate work is human work end to end. It mints no execution identity,
    carries no `Agent-Identity` trailer or other agent marker, and follows the
    human's own workflow — so the existing guard that rejects agent-marked
@@ -65,10 +72,11 @@ unattended, rather than sessions launched by hand from the owner's desktop.
    (`~/.claude/worktrees`, `~/.muse/worktrees`, …) remain each harness's
    working layout inside its own account, but they no longer carry the
    bot-versus-human decision.
-5. **The `agent-bot` runtime contract is unchanged.** No CLI, hook, credential
+5. **The `agent-bot` runtime contract is unchanged.** No CLI, credential
    helper, or registry interface changes (ownership per
-   [ENG-0128](ENG-0128-agent-bot-runtime-ownership.md)). The runtime change is
-   one addition to harness detection: the account short name is itself a
+   [ENG-0128](ENG-0128-agent-bot-runtime-ownership.md)); the `WorktreeCreate`
+   account gate is governed harness config, not runtime. The runtime change
+   is one addition to harness detection: the account short name is itself a
    detection input, and because agent account names *are* roster slugs it
    resolves in an agent account to exactly what environment detection resolves
    today. In the owner's account that input yields "human", which is the sole
@@ -127,10 +135,12 @@ so registering an agent remains the single act that makes it checked.
 
 ## Consequences
 
-- **Amends ENG-0045 and ENG-0079, and refines the human-versus-bot boundary.**
-  Territory moves up a level: the account, not the directory, is bot
-  territory. ENG-0045's directory rules survive as layout conventions inside
-  each account; ENG-0079's pin resolution is unchanged. ENG-0016's
+- **Supersedes ENG-0045, amends ENG-0079, and refines the human-versus-bot
+  boundary.** Territory moves up a level: the account, not the directory, is
+  bot territory. ENG-0045's directory rule and worktree enforcement are
+  struck: inside an agent account every checkout is bot work, and worktree
+  directories are layout only; its decisions 4 and 5 stand under ENG-0038
+  and ENG-0128. ENG-0079's pin resolution is unchanged. ENG-0016's
   App-per-actor model and the never-as-the-human PR rule stand — what this
   record adds is that a harness producing plain, unmarked human work in the
   owner's account is delegate use, not an identity incident; agent-marked
@@ -141,7 +151,9 @@ so registering an agent remains the single act that makes it checked.
   identity wherever they live. An unpinned territory worktree in the owner's
   account flips from detection-derived bot attribution to human attribution;
   such worktrees should be pinned, or moved into their harness account, as
-  they are next touched. No flag-day migration is required.
+  they are next touched. No flag-day migration is required. Bot work from
+  the owner's account is thereby always an explicit act: worktree creation
+  there mints nothing, and a harness not told to be the bot is the delegate.
 - **N accounts to provision and keep healthy.** Each needs its harness
   installed, `agent-bot` installed, and its App key provisioned into its own
   home — multiplying setup that used to happen once. Convention makes the

@@ -1,8 +1,21 @@
 # ENG-0045: Agent coding environments are bot territory — the worktree's directory dictates the App
 
-**Status:** Proposed
+**Status:** Superseded by ENG-0339
 **Date:** 2026-07-23
 **Issue:** qwts/playbook-engineering#45
+
+> **Superseded 2026-09-03 by
+> [ENG-0339](ENG-0339-os-account-determines-persona.md).** The macOS account
+> running a harness, not the worktree's directory, is bot territory. Decision 1
+> ("the directory dictates the App"), decision 3's directory-based human
+> default, and decision 6's worktree enforcement — the guard that told an
+> agent it may only commit within `.<tool>/worktrees/<repo>` — are struck; that
+> enforcement is no longer needed. Decision 2 survives with "territory"
+> meaning the account. Decision 4 (the approval backstop) and decision 5 (the
+> commit-pinned runtime source of truth) stand and are carried by
+> [ENG-0038](ENG-0038-governance-reconciler.md) and
+> [ENG-0128](ENG-0128-agent-bot-runtime-ownership.md). The text below is kept
+> unchanged as the reasoning trail.
 
 ## Context
 

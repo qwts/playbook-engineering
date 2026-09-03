@@ -20,8 +20,8 @@ troubleshooting ([ENG-0128](../decisions/ENG-0128-agent-bot-runtime-ownership.md
   slug means restoring its row, App, and installations, not pinning it.
 - Agents use short-lived installation tokens; humans never author through an
   agent App, and agent Apps never approve pull requests.
-- Agent work happens in linked bot-territory worktrees. Primary checkouts stay
-  human territory ([ENG-0045](../decisions/ENG-0045-agent-environments-are-bot-territory.md)).
+- Bot territory is the harness's macOS account, not a directory; worktrees
+  are layout only, with no enforcement (ENG-0339 supersedes ENG-0045).
 - Conversation-level Agent IDs add audit provenance without granting authority
   ([ENG-0081](../decisions/ENG-0081-transcript-bound-agent-execution-identities.md)).
 
