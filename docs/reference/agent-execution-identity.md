@@ -28,8 +28,10 @@ runtime mechanics belong to
 The shared Codex setup runs `agent-bot setup-worktree` and verifies that the
 linked worktree has a matching App pin, bot author, credential helper, Agent ID,
 and execution-identity hooks. Claude's governed `WorktreeCreate` hook invokes
-`agent-bot claude-worktree-create`. Both may use `AGENT_BOT_BIN` to select an
-explicit installed executable.
+`agent-bot claude-worktree-create` only inside a `qwts-*-agent` account; in
+the owner's account it exits without pinning
+([ENG-0339](../decisions/ENG-0339-os-account-determines-persona.md)). Both
+may use `AGENT_BOT_BIN` to select an explicit installed executable.
 
 Current runtime commands include:
 
